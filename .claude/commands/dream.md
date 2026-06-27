@@ -59,12 +59,13 @@ $ARGUMENTS
    their own page, missing cross-references, and an `index.md` that drifted from
    the topic pages.
 2. Health-check the **skills index** (`.claude/skills-index.md`): every command in
-   `.claude/commands/*.md` has a `description` and a row in the index; the index
-   has no rows for commands that no longer exist; near-duplicate commands are
-   flagged for merging.
-3. Report findings. Fix only additive/clerical issues (broken links, a missing
-   index row, a missing `description`); anything that removes or rewrites a fact,
-   deletes a command, or changes its behavior needs confirmation.
+   `.claude/commands/*.md` has a `description` and a row in the index; **flag**
+   (report, don't auto-remove) any index rows for commands that no longer exist and
+   any near-duplicate commands.
+3. Auto-fix only additive/clerical issues (broken links, a missing index row, a
+   missing `description`). Everything else — removing a dead index row, deleting a
+   command, merging duplicates, or removing/rewriting a fact — is **reported only**
+   and needs confirmation before you act.
 4. Append one entry to `log.md`: `## [YYYY-MM-DD] lint | <summary>`.
 
 ## Hard rules
