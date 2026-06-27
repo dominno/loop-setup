@@ -1,14 +1,24 @@
 # Project Instructions for Claude Code
 
-## Durable project memory
-Curated, durable learnings are kept in a separate file and imported here so they
-load every session:
+## Durable project memory (LLM wiki)
+Durable project knowledge is a small **knowledge wiki** under `.claude/memory/`
+(Karpathy "LLM wiki" pattern). Only the lightweight catalog is imported here, so it
+loads every session while detailed pages stay out of context until needed:
 
-@.claude/memory.md
+@.claude/memory/index.md
+
+At the start of a non-trivial task, consult that index and **open only the topic
+page(s)** under `.claude/memory/topics/` relevant to the task (the "query"
+operation). Do not load the whole wiki. This keeps per-session context flat as
+memory grows.
 
 ## Self-learning loop (`/dream`)
-At the end of a non-trivial task, run `/dream` to consolidate any durable learnings
-into `.claude/memory.md` (and propose `CLAUDE.md` rule changes when warranted).
+At the end of a non-trivial task, run `/dream` to maintain the wiki:
+- **ingest** — file new durable learnings into the right topic page, add a row to
+  `.claude/memory/index.md` if a page is created, and append to
+  `.claude/memory/log.md`;
+- **lint** — health-check for contradictions, stale claims, and orphan pages.
+
 `/dream` is a custom command in this repo (`.claude/commands/dream.md`), not a
 built-in Claude Code feature — it implements memory consolidation on top of Claude
 Code's real memory system. Rules: only durable, verifiable facts; never secrets or

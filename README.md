@@ -13,7 +13,10 @@ The workflow starts with critique, not coding — and ends with proof, not confi
 CLAUDE.md                         Project rules + multi-agent workflow + doc-scanner workflow
 .claude/
   loop.md                         Recurring multi-agent watchdog loop (used by /loop)
-  memory.md                       Durable learnings, imported by CLAUDE.md (maintained by /dream)
+  memory/                         Knowledge wiki (Karpathy LLM-wiki pattern), maintained by /dream
+    index.md                      Small catalog imported by CLAUDE.md (always loaded)
+    log.md                        Append-only history of wiki operations
+    topics/                       One page per subject, read on demand
   settings.local.json             Allowed commands for the workflow
   commands/
     multi-agent-dev.md            Full critic-led development pass
@@ -79,21 +82,35 @@ Product delivery audit:
 /story-gap-analysis MVP readiness
 ```
 
-## Self-learning (`/dream`)
+## Self-learning (`/dream`) — an LLM wiki
 
-The project "self-learns" by consolidating durable knowledge into memory so future
-sessions start smarter. This uses Claude Code's **real** memory system:
-
-- `.claude/memory.md` holds curated, durable learnings (stack, conventions,
-  gotchas). It is imported into `CLAUDE.md` via `@.claude/memory.md`, so it loads
-  every session.
-- `/dream` (a **custom** command — see `.claude/commands/dream.md`) reviews the
-  session, extracts only durable, verifiable learnings, and appends them to
-  `.claude/memory.md` (proposing `CLAUDE.md` rule changes when warranted).
-- The built-in `/memory` command lets you view and edit loaded memory files.
+The project "self-learns" by consolidating durable knowledge into a small
+**knowledge wiki**, so future sessions start smarter without bloating context.
+This follows Andrej Karpathy's [LLM wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)
+and uses Claude Code's **real** memory system (`@import` + `/memory`):
 
 ```txt
-/dream            # run at the end of a task to capture what was learned
+.claude/memory/
+  index.md        small catalog: each topic = one-line summary + link (always loaded)
+  log.md          append-only history of ingest / lint operations
+  topics/         one page per subject — read ON DEMAND, not all at once
+    tooling.md  build-and-verify.md  testing.md  client-react.md
+    code-organization.md  remote-env.md  workflow.md
+```
+
+- **Why a wiki, not one file:** `CLAUDE.md` imports only `index.md`, so per-session
+  context stays flat as knowledge grows. Claude opens just the topic page(s)
+  relevant to the task (the *query* operation) instead of loading everything.
+- **`/dream`** (a **custom** command — see `.claude/commands/dream.md`) is the
+  wiki maintainer: *ingest* files new durable learnings into the right topic page
+  and appends to `log.md`; *lint* health-checks for contradictions, stale claims,
+  and orphan pages. Run it at the end of a non-trivial task.
+- The built-in **`/memory`** command lets you view and edit loaded memory files.
+
+```txt
+/dream            # ingest what was learned this task into the wiki
+/dream lint       # health-check the wiki (contradictions, stale, orphans)
+/dream query how do we test localStorage?   # answer from the wiki, with citations
 /memory-audit     # periodically prune stale or duplicated memory
 ```
 

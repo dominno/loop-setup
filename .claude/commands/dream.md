@@ -1,53 +1,68 @@
 ---
-description: Self-learning pass — consolidate durable learnings from this session into project memory
-argument-hint: [optional focus, e.g. "testing" or "this task"]
-allowed-tools: Read, Edit, Grep, Glob, Bash(git diff:*), Bash(git log:*)
+description: Self-learning pass — ingest durable learnings into the project knowledge wiki and lint it
+argument-hint: [ingest | query <question> | lint] (default: ingest this session)
+allowed-tools: Read, Edit, Write, Grep, Glob, Bash(git diff:*), Bash(git log:*)
 ---
 
-Run a **self-learning ("dream") pass**. Review what was actually learned in this
-session and consolidate only durable knowledge into project memory.
+Run a **self-learning ("dream") pass** over the project knowledge wiki at
+`.claude/memory/` (Karpathy "LLM wiki" pattern). Maintain it; do not dump
+everything into one file.
 
 > Note: `/dream` is a custom command in this repo, not a built-in Claude Code
-> feature. It implements the memory-consolidation concept using Claude Code's real
-> memory system (`.claude/memory.md`, imported by `CLAUDE.md`, plus `/memory`).
+> feature. It implements memory consolidation on top of Claude Code's real memory
+> system (`.claude/memory/index.md` is imported by `CLAUDE.md`; `/memory` views it).
 
-Focus (optional):
+Mode (optional):
 $ARGUMENTS
 
-## Procedure
+## Wiki layout
+- `.claude/memory/index.md` — small catalog, imported every session. Summaries +
+  links only, no facts. **Keep it small.**
+- `.claude/memory/topics/*.md` — one page per subject; the actual facts live here.
+- `.claude/memory/log.md` — append-only operation history.
 
-1. Review the session: the current task, what changed (use `git diff` / `git log`
-   for evidence), what surprised us, and any mistake we corrected.
-2. Read the existing durable memory in `.claude/memory.md` so you do not duplicate
-   entries.
+## Operations
+
+### ingest (default)
+1. Review the session: the task, what changed (`git diff` / `git log` for
+   evidence), what surprised us, any mistake we corrected.
+2. Read `.claude/memory/index.md`, then read the topic pages a candidate would
+   touch, so you do not duplicate existing facts.
 3. Extract **candidate learnings**. A learning qualifies only if ALL are true:
-   - It is durable (stays true across future tasks, not branch- or PR-specific).
-   - It is verifiable (a command, a convention, a concrete gotcha — not a vibe).
-   - It is not already captured in `.claude/memory.md` or `CLAUDE.md`.
-4. Classify each candidate:
-   - **Append to `.claude/memory.md`** — durable facts: stack, conventions,
-     gotchas, environment constraints.
-   - **Propose for `CLAUDE.md`** — rules that should govern every session
-     (do/don't policies, completion gates). Propose the edit; apply it.
-   - **Discard** — temporary bugs, one-off incidents, anything already known.
-5. Apply the updates:
-   - **Append** new durable facts to the matching section of `.claude/memory.md`.
-     Keep each entry to one verifiable sentence; keep the file short.
-   - Editing or removing an existing entry requires explicit user confirmation —
-     ask before doing it. Appending does not.
-6. Report a short summary: learnings added, learnings proposed for `CLAUDE.md`,
-   and candidates discarded (with the reason).
+   - durable (true across future tasks, not branch- or PR-specific);
+   - verifiable (a command, convention, or concrete gotcha — not a vibe);
+   - not already captured in a topic page.
+4. File each learning into the **single most relevant topic page** as one
+   verifiable bullet. If it fits no existing page, create a new
+   `topics/<slug>.md`, add cross-links, and add one row to `index.md`.
+5. If a learning is really a session-governing rule (a do/don't policy or a
+   completion gate), propose it for `CLAUDE.md` and apply the edit.
+6. Append one entry to `log.md`: `## [YYYY-MM-DD] ingest | <summary>`.
+
+### query <question>
+1. Read `index.md`, open only the relevant topic page(s), answer with citations
+   (which page each fact came from). Optionally file the answer back as a page.
+
+### lint
+1. Health-check the wiki: contradictions between pages, stale claims newer work
+   has superseded, orphan pages with no inbound links, concepts mentioned without
+   their own page, missing cross-references, and an `index.md` that drifted from
+   the topic pages.
+2. Report findings. Fix only additive/clerical issues (broken links, a missing
+   index row); anything that removes or rewrites a fact needs confirmation.
+3. Append one entry to `log.md`: `## [YYYY-MM-DD] lint | <summary>`.
 
 ## Hard rules
-
-- Never write secrets, tokens, passwords, API keys, or personal data to memory.
+- Never write secrets, tokens, passwords, API keys, or personal data to the wiki.
 - Never record temporary or branch-specific bugs, or one-time errors already fixed.
-- Prefer appending; never silently rewrite or delete existing memory.
+- Prefer appending; editing or removing an existing fact needs explicit user
+  confirmation. Adding a topic or an index row does not.
+- Keep `index.md` to summaries + links; facts belong in topic pages.
 - Do not change product code. This command only curates memory and instructions.
-- If nothing durable was learned, say so and write nothing.
+- If nothing durable was learned, say so and write nothing (but you may still log a
+  `lint` pass if asked).
 
 ## Good vs. bad memory
-
 Good: "Project uses pnpm." · "E2E specs live in `e2e/`, unit tests in `src/`." ·
 "Next 16 removed `next lint`; `pnpm lint` runs `eslint .`."
 
