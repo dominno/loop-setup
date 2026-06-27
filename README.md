@@ -7,6 +7,11 @@ as a single coding agent that just edits files.
 
 The workflow starts with critique, not coding — and ends with proof, not confidence.
 
+> **Adopting this in your own project?** See the
+> **[Adoption Guide](docs/adoption-guide.md)** — what to copy, how to wire the
+> verification commands, and how to adapt the memory wiki and story map (covers
+> both a fresh start and dropping the workflow into an existing codebase).
+
 ## What's in this setup
 
 ```txt
@@ -30,6 +35,7 @@ CLAUDE.md                         Project rules + multi-agent workflow + doc-sca
     sync-story-status.md          Re-sync story statuses with code and tests
     story-gap-analysis.md         Gap analysis: docs vs code vs E2E
 docs/
+  adoption-guide.md               How to adopt this template in a real project
   prd.md                          Product requirements (source of record for stories)
   product-docs-index.md           Source documents scanned
   user-stories.md                 Living backlog of user stories
