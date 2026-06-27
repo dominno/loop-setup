@@ -66,7 +66,15 @@ $ARGUMENTS
    missing `description`). Everything else — removing a dead index row, deleting a
    command, merging duplicates, or removing/rewriting a fact — is **reported only**
    and needs confirmation before you act.
-4. Append one entry to `log.md`: `## [YYYY-MM-DD] lint | <summary>`.
+4. **Rotate the log if needed.** If `log.md` exceeds **500 lines**, move the older
+   entries (keep roughly the most recent ~200 lines as the working window) into
+   yearly archives `.claude/memory/log/<YYYY>.md` — create the file if absent, or
+   append in chronological order if it exists. Group moved entries by the year in
+   their `[YYYY-MM-DD]` header. This is a **lossless move** (nothing is deleted), so
+   lint may do it without separate confirmation; preserve every entry verbatim. If
+   `log.md` is ≤ 500 lines, do nothing.
+5. Append one entry to `log.md`: `## [YYYY-MM-DD] lint | <summary>` (note any
+   rotation as `## [YYYY-MM-DD] rotate | moved <n> entries to log/<YYYY>.md`).
 
 ## Hard rules
 - Never write secrets, tokens, passwords, API keys, or personal data to the wiki.
