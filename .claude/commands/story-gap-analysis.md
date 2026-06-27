@@ -1,3 +1,8 @@
+---
+description: Read-only analysis of gaps between docs, implemented code, and E2E tests; recommends the next implementation order. Use when assessing MVP readiness or deciding what to build/test next.
+argument-hint: [scope, e.g. "MVP readiness"]
+---
+
 Analyze the gap between product documentation, implemented code, and E2E tests.
 
 Scope:

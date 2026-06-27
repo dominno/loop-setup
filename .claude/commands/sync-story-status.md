@@ -1,3 +1,8 @@
+---
+description: Re-sync existing user-story statuses with current code and tests and record evidence (adds no new requirements). Use after implementing/testing stories to refresh statuses.
+argument-hint: [scope, e.g. "current branch"]
+---
+
 Synchronize user story status with current implementation and tests.
 
 Scope:

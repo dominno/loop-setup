@@ -6,5 +6,16 @@
   `.claude/commands/dream.md`.
 - `docs/prd.md` is the source of record for user stories; `docs/` holds the
   evidence-based story/status maps kept in sync by the doc-scanner commands.
+- Custom commands live in `.claude/commands/` (each with a `description` for
+  routing); the grouped "when to use" catalog is `.claude/skills-index.md`. A
+  catalog file must NOT live in `.claude/commands/` — anything there auto-registers
+  as its own `/command`.
+- A command's `description` also lets Claude **auto-invoke** it. Add
+  `disable-model-invocation: true` to heavy/code-changing commands that should be
+  manual-only.
+- Team-wide permissions belong in committed `.claude/settings.json`;
+  `.claude/settings.local.json` is conventionally personal (often git-ignored).
+  Auto-allowing `git commit`/`git add` lets the agent commit without a prompt — opt
+  in deliberately.
 
 Related: [build-and-verify](./build-and-verify.md) · [testing](./testing.md)

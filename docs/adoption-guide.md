@@ -78,10 +78,15 @@ something real to run against until your own flows exist.
    re-seed with `/dream`).
 5. **Start the story map empty** — clear the US-001/US-002 example content from
    `docs/*.md`, keep the formats, then run `/scan-project-docs` against your docs.
-6. **Adjust `.claude/settings.local.json`** to the commands your tools actually use.
+6. **Adjust `.claude/settings.local.json`** — see “Permissions” below: allow only
+   your real commands, and decide whether to keep the `git add`/`git commit`
+   auto-allow.
 7. **Already have a wiki in `docs/`?** Read “Reconciling with an existing `docs/`
    wiki” before you start the story map (step 5) — you’ll likely namespace the
    story map and bridge the two memory systems.
+8. **Already have your own slash commands or notes?** See “Integrating existing
+   skills and old learnings” — give each command a `description` + a
+   `.claude/skills-index.md` row, and triage notes into the wiki.
 
 ---
 
@@ -101,6 +106,12 @@ are the contract. Point each at whatever your project really runs:
 | `pnpm build` | your production build |
 | `pnpm verify` | the full chain, run in CI and before “done” |
 
+> ⚠️ **Trim `verify` to the steps you actually have.** `pnpm verify` is a hard
+> `&&` chain of five scripts. If your project has no `typecheck` or no `test:e2e`,
+> the chain fails immediately and the whole "definition of done" gate is unusable.
+> Define `verify` from only the scripts that exist, e.g. a minimal:
+> `"verify": "npm run lint && npm test"`. Add steps back as you add the tooling.
+
 Notes:
 - **Different package manager?** Update the “Package manager” rule in `CLAUDE.md`
   (this template uses pnpm and forbids switching; change it to match your repo).
@@ -109,6 +120,29 @@ Notes:
   `http://localhost:3000` URL throughout if your port differs.
 - **No E2E yet?** Keep the QA/E2E critic — it will tell you what to add. Add a real
   E2E tool when you have a user flow to cover.
+- **Monorepo / app in a subdirectory?** `.claude/` and `CLAUDE.md` usually sit at
+  the repo root, but the commands and memory reference `src/`, `e2e/`, and
+  `localhost:3000`. Update those paths/ports to your package’s layout, run commands
+  from the right workspace, and consider a per-package `CLAUDE.md` for big monorepos.
+
+---
+
+## Permissions (`settings.local.json`)
+
+The template ships `.claude/settings.local.json` with an allow-list for the
+verification commands **and `git add` / `git commit`**. Two things to decide before
+copying it:
+
+- **Shared vs. personal.** `*.local.json` is conventionally personal and often
+  git-ignored — but this template *tracks* it. If your repo’s `.gitignore` excludes
+  `.claude/settings.local.json`, the permissions you copy won’t be shared with the
+  team. Put team-wide permissions in **`.claude/settings.json`** (committed) and keep
+  `settings.local.json` for personal overrides.
+- **Git auto-allow is opt-in, not a default to inherit.** The allow-list lets the
+  agent run `git add`/`git commit` **without a prompt**. That suited this template’s
+  workflow; it may not suit yours. Remove those two entries if you want to approve
+  commits yourself, and only allow the commands your tooling actually uses (swap the
+  `pnpm …` entries for your real ones).
 
 ---
 
@@ -120,12 +154,23 @@ The wiki (`.claude/memory/`) follows the Karpathy “LLM wiki” pattern: only
 template’s stack (Next.js 16 / React 19 / Playwright 1.56) and won’t all apply to
 you.
 
+> ⚠️ **Clear the seeded facts FIRST — before your first real task.** The
+> wiki ships with this template’s stack facts (e.g. "Next 16 removed `next lint`",
+> the Playwright pin). They load every session as *authoritative memory*. If you
+> skip this on, say, a Python or Vite repo, Claude will quietly act on false facts
+> with no error — the worst kind of failure. Treat clearing them as step 0.
+
 1. Skim `.claude/memory/topics/*` and delete facts that don’t match your stack
    (e.g. the `next lint` and route-announcer notes if you’re not on Next.js).
 2. Keep the format: `index.md` = catalog (summary + link per topic), facts live in
    `topics/*.md`, history in `log.md`.
 3. After your first real task, run **`/dream`** to ingest your own durable
    learnings, and **`/dream lint`** periodically to catch stale/orphan pages.
+4. **Mind the import path.** `CLAUDE.md` pulls the wiki in with a *relative* import
+   (`@.claude/memory/index.md`). If you merge our content into a `CLAUDE.md` at a
+   different depth, or move the wiki, fix that path or it silently won’t load.
+   Claude Code also shows a one-time approval dialog the first time it sees the
+   import — that’s expected.
 4. `/dream query <question>` answers from the wiki with citations.
 
 > `/dream` is a **custom** command in this repo, not a built-in Claude Code
@@ -286,6 +331,74 @@ only the relevant page; for a “how we build/test” question it reads a
 
 ---
 
+## Integrating existing skills and old learnings
+
+If your project already has its own slash commands/skills or accumulated notes,
+fold them into the two catalogs instead of leaving them disconnected.
+
+### Existing slash commands / skills
+
+Your commands in `.claude/commands/` coexist with the template’s. To make them
+first-class:
+
+1. **Check for name collisions BEFORE copying.** Copying `.claude/commands/*` over
+   a repo that already has a `qa-pass.md`, `critic-round.md`, `dream.md`, etc. will
+   silently overwrite one with the other. Also remember user-level
+   `~/.claude/commands/` can shadow/clash with project ones. Diff the two command
+   sets first; rename or merge conflicts deliberately, don’t clobber.
+2. **Add a `description`** (and `argument-hint` if it takes input) to each — this
+   is what Claude routes on. Without it, selection falls back to the filename.
+3. **Decide what may auto-fire.** A `description` doesn’t just help *you* choose —
+   Claude can **auto-invoke** the command from a matching request. That’s fine for
+   read-only commands, but a heavy or code-changing one (`/multi-agent-dev`,
+   `/qa-pass`, `/fix-localhost`) firing unprompted is surprising. Add
+   `disable-model-invocation: true` to any command that should be **manual-only**
+   (you still type `/name`); leave it off for ones Claude may pick on its own.
+4. **Add a row to `.claude/skills-index.md`** under the right group, with a
+   one-line “when to use”.
+5. **Resolve overlaps.** If your command duplicates a template one (e.g. your
+   `/qa` vs `/qa-pass`), keep one, merge the best of both, and remove the other
+   (deleting a command is a confirmed step in the `/dream` flow).
+6. **Run `/dream lint`** — it flags commands missing a `description` or an index
+   row, and near-duplicates.
+7. **Catalog files don’t belong in `.claude/commands/`** — anything there
+   auto-registers as its own `/command`. The skills catalog lives at
+   `.claude/skills-index.md` for that reason.
+
+### Old / scattered learnings (notes, READMEs, an old `CLAUDE.md`)
+
+Don’t bulk-paste them into the wiki. Triage each item by destination:
+
+| The note is… | Goes to… |
+|---|---|
+| a durable engineering fact (command, convention, gotcha) | `.claude/memory/topics/*` — one verifiable bullet |
+| a session-governing rule (do/don’t, completion gate) | `CLAUDE.md` |
+| product / domain knowledge | your domain wiki (see “Reconciling…”) or `docs/` |
+| a temporary / branch-specific bug or one-off | discard — don’t memorize it |
+
+- Use **`/dream ingest`** to help extract durable learnings from a notes file, but
+  review each line before committing — `/dream` is told to drop secrets, temporary
+  bugs, and vibes, but you are the last check. **Never let a token, password, or
+  key land in the wiki** (it’s committed and shared).
+- Add one `index.md` row per new topic page, then run **`/dream lint`**.
+- If you had a single-file memory (as this template once did), split it into topic
+  pages — see how this repo migrated in `.claude/memory/log.md`.
+
+### Migration checklist
+
+```txt
+[ ] Checked for command NAME collisions before copying (no silent clobber)
+[ ] Existing commands kept; each given a description (+ argument-hint)
+[ ] Heavy/code-changing commands set disable-model-invocation: true (manual-only)
+[ ] Each existing command added to .claude/skills-index.md, grouped
+[ ] Duplicate commands merged (one canonical per job)
+[ ] Old notes triaged: facts → memory topics, rules → CLAUDE.md,
+    domain → wiki, junk → dropped; no secrets memorized
+[ ] /dream lint clean: no missing descriptions, orphan pages, or dead index rows
+```
+
+---
+
 ## Local machine vs. Claude Code on the web
 
 The starter is tuned for **Claude Code on the web**, where Chromium is
@@ -325,11 +438,16 @@ issues; record nice-to-haves; avoid unrelated refactors.
 [ ] Copied .claude/commands/, .claude/loop.md, .claude/memory/, settings.local.json
 [ ] Copied docs/ story-map scaffolds (content cleared, formats kept)
 [ ] CLAUDE.md "Main commands" point at my real scripts
+[ ] verify trimmed to the scripts I actually have (no missing-script failure)
 [ ] Package-manager + localhost URL/port updated to match my project
-[ ] settings.local.json allows my real commands
-[ ] Memory wiki: removed stack facts that don't apply; will re-seed via /dream
+[ ] Monorepo: src/ , e2e/ , and port paths adjusted to my package layout
+[ ] settings.local.json allows only my real commands; git auto-allow kept or removed deliberately
+[ ] CLAUDE.md memory @import path resolves from where my CLAUDE.md lives
+[ ] Memory wiki: removed stack facts that don't apply (BEFORE first task); will re-seed via /dream
 [ ] If a docs/ wiki already exists: namespaced the story map + picked ONE canonical
     memory home (see "Reconciling with an existing docs/ wiki")
+[ ] Checked command name collisions; existing commands given descriptions + skills-index rows;
+    heavy commands set disable-model-invocation; old notes triaged (no secrets)
 [ ] Playwright/browser setup chosen (local install vs. web pre-provisioned)
 [ ] Ran my own `verify` chain green once
 [ ] Ran /scan-project-docs against my real docs

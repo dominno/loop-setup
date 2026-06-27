@@ -1,3 +1,7 @@
+---
+description: Audit project memory/instructions for stale, duplicated, or misleading entries and recommend changes (never deletes without confirmation). Use periodically or when memory feels stale or contradictory.
+---
+
 Audit Claude Code project memory and instructions.
 
 Procedure:

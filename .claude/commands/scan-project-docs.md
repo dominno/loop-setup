@@ -1,3 +1,8 @@
+---
+description: Scan product docs and build/update the evidence-based story map in docs/ (user stories, implementation status, E2E coverage). Use for the first product-delivery audit or after docs change significantly.
+argument-hint: [scope, e.g. "full project"]
+---
+
 Scan the project documentation and create/update user stories, implementation status, and E2E coverage maps.
 
 Scope:

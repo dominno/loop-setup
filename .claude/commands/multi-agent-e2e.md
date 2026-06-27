@@ -1,3 +1,8 @@
+---
+description: Design and run Playwright E2E tests for a user flow via a critic workflow (happy + failure/edge paths). Use when a flow needs new or expanded E2E coverage.
+argument-hint: [target flow, e.g. "onboarding"]
+---
+
 Design and run E2E tests using a multi-agent critic workflow.
 
 Target flow:

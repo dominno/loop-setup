@@ -18,19 +18,20 @@ The workflow starts with critique, not coding — and ends with proof, not confi
 CLAUDE.md                         Project rules + multi-agent workflow + doc-scanner workflow
 .claude/
   loop.md                         Recurring multi-agent watchdog loop (used by /loop)
+  skills-index.md                 Grouped "when to use which command" catalog (kept in sync by /dream)
   memory/                         Knowledge wiki (Karpathy LLM-wiki pattern), maintained by /dream
     index.md                      Small catalog imported by CLAUDE.md (always loaded)
     log.md                        Append-only history of wiki operations
     topics/                       One page per subject, read on demand
   settings.local.json             Allowed commands for the workflow
-  commands/
+  commands/                       Each command has a description used for routing
     multi-agent-dev.md            Full critic-led development pass
     critic-round.md               Review-only multi-agent critic round
     multi-agent-e2e.md            Critic-driven E2E test design + run
     qa-pass.md                    Pre-ship QA checklist
     fix-localhost.md              Drive localhost back to a working state
     memory-audit.md               Audit project memory vs CLAUDE.md
-    dream.md                      Self-learning pass: consolidate durable learnings into memory
+    dream.md                      Self-learning pass: ingest learnings, lint, propose skills
     scan-project-docs.md          Build the user-story / status / coverage map from docs
     sync-story-status.md          Re-sync story statuses with code and tests
     story-gap-analysis.md         Gap analysis: docs vs code vs E2E
