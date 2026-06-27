@@ -1,3 +1,7 @@
+---
+description: Diagnose (root cause first) and fix the app until localhost loads cleanly with no blocking console/network errors. Use when the dev server or localhost is broken or throwing on load.
+---
+
 Fix the local web app until localhost works correctly.
 
 Success criteria:

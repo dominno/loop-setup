@@ -1,3 +1,8 @@
+---
+description: Read-only multi-agent critic review of the current localhost app state — returns a severity-classified findings matrix, makes no code changes. Use when you want an assessment without implementing.
+argument-hint: [focus, e.g. "checkout flow on localhost"]
+---
+
 Run a multi-agent critic review of the current local web app state.
 
 Focus:

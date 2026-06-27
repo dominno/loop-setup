@@ -82,6 +82,9 @@ something real to run against until your own flows exist.
 7. **Already have a wiki in `docs/`?** Read “Reconciling with an existing `docs/`
    wiki” before you start the story map (step 5) — you’ll likely namespace the
    story map and bridge the two memory systems.
+8. **Already have your own slash commands or notes?** See “Integrating existing
+   skills and old learnings” — give each command a `description` + a
+   `.claude/skills-index.md` row, and triage notes into the wiki.
 
 ---
 
@@ -286,6 +289,59 @@ only the relevant page; for a “how we build/test” question it reads a
 
 ---
 
+## Integrating existing skills and old learnings
+
+If your project already has its own slash commands/skills or accumulated notes,
+fold them into the two catalogs instead of leaving them disconnected.
+
+### Existing slash commands / skills
+
+Your commands in `.claude/commands/` coexist with the template’s. To make them
+first-class:
+
+1. **Add a `description`** (and `argument-hint` if it takes input) to each — this
+   is what Claude routes on. Without it, selection falls back to the filename.
+2. **Add a row to `.claude/skills-index.md`** under the right group, with a
+   one-line “when to use”.
+3. **Resolve overlaps.** If your command duplicates a template one (e.g. your
+   `/qa` vs `/qa-pass`), keep one, merge the best of both, and remove the other
+   (deleting a command is a confirmed step in the `/dream` flow).
+4. **Run `/dream lint`** — it flags commands missing a `description` or an index
+   row, and near-duplicates.
+5. **Catalog files don’t belong in `.claude/commands/`** — anything there
+   auto-registers as its own `/command`. The skills catalog lives at
+   `.claude/skills-index.md` for that reason.
+
+### Old / scattered learnings (notes, READMEs, an old `CLAUDE.md`)
+
+Don’t bulk-paste them into the wiki. Triage each item by destination:
+
+| The note is… | Goes to… |
+|---|---|
+| a durable engineering fact (command, convention, gotcha) | `.claude/memory/topics/*` — one verifiable bullet |
+| a session-governing rule (do/don’t, completion gate) | `CLAUDE.md` |
+| product / domain knowledge | your domain wiki (see “Reconciling…”) or `docs/` |
+| a temporary / branch-specific bug or one-off | discard — don’t memorize it |
+
+- Use **`/dream ingest`** to help extract durable learnings from a notes file, but
+  review each — it intentionally drops secrets, temporary bugs, and vibes.
+- Add one `index.md` row per new topic page, then run **`/dream lint`**.
+- If you had a single-file memory (as this template once did), split it into topic
+  pages — see how this repo migrated in `.claude/memory/log.md`.
+
+### Migration checklist
+
+```txt
+[ ] Existing commands kept; each given a description (+ argument-hint)
+[ ] Each existing command added to .claude/skills-index.md, grouped
+[ ] Duplicate commands merged (one canonical per job)
+[ ] Old notes triaged: facts → memory topics, rules → CLAUDE.md,
+    domain → wiki, junk → dropped
+[ ] /dream lint clean: no missing descriptions, orphan pages, or dead index rows
+```
+
+---
+
 ## Local machine vs. Claude Code on the web
 
 The starter is tuned for **Claude Code on the web**, where Chromium is
@@ -330,6 +386,8 @@ issues; record nice-to-haves; avoid unrelated refactors.
 [ ] Memory wiki: removed stack facts that don't apply; will re-seed via /dream
 [ ] If a docs/ wiki already exists: namespaced the story map + picked ONE canonical
     memory home (see "Reconciling with an existing docs/ wiki")
+[ ] Existing commands given descriptions + skills-index rows; old notes triaged
+    into the wiki (see "Integrating existing skills and old learnings")
 [ ] Playwright/browser setup chosen (local install vs. web pre-provisioned)
 [ ] Ran my own `verify` chain green once
 [ ] Ran /scan-project-docs against my real docs

@@ -1,3 +1,8 @@
+---
+description: Full multi-agent critic-led development loop for a non-trivial feature, bug fix, or UI change; ends with browser + test evidence. The default for substantive work.
+argument-hint: [task, e.g. "build the login page"]
+---
+
 Run a full multi-agent development loop for this local web app.
 
 User task:

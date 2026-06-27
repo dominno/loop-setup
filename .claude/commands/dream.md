@@ -37,7 +37,17 @@ $ARGUMENTS
    `topics/<slug>.md`, add cross-links, and add one row to `index.md`.
 5. If a learning is really a session-governing rule (a do/don't policy or a
    completion gate), propose it for `CLAUDE.md` and apply the edit.
-6. Append one entry to `log.md`: `## [YYYY-MM-DD] ingest | <summary>`.
+6. **Skills check.** Decide whether the learning is a *fact* or a *recurring
+   procedure*:
+   - A **fact** (gotcha, convention, command) → a topic page, as above.
+   - A **recurring procedure** we've now done a few times (same multi-step
+     workflow) → it may deserve its own skill. Do **not** auto-create it. Instead
+     **propose** a new `.claude/commands/<name>.md`: show the proposed `description`
+     frontmatter, `argument-hint`, and body, and create it only on confirmation.
+     When a skill is added or changed, update `.claude/skills-index.md` (add/adjust
+     its row and the "Pick by intent" line). Adding an index row is additive — no
+     confirmation needed; the skill file itself needs confirmation.
+7. Append one entry to `log.md`: `## [YYYY-MM-DD] ingest | <summary>`.
 
 ### query <question>
 1. Read `index.md`, open only the relevant topic page(s), answer with citations
@@ -48,15 +58,22 @@ $ARGUMENTS
    has superseded, orphan pages with no inbound links, concepts mentioned without
    their own page, missing cross-references, and an `index.md` that drifted from
    the topic pages.
-2. Report findings. Fix only additive/clerical issues (broken links, a missing
-   index row); anything that removes or rewrites a fact needs confirmation.
-3. Append one entry to `log.md`: `## [YYYY-MM-DD] lint | <summary>`.
+2. Health-check the **skills index** (`.claude/skills-index.md`): every command in
+   `.claude/commands/*.md` has a `description` and a row in the index; the index
+   has no rows for commands that no longer exist; near-duplicate commands are
+   flagged for merging.
+3. Report findings. Fix only additive/clerical issues (broken links, a missing
+   index row, a missing `description`); anything that removes or rewrites a fact,
+   deletes a command, or changes its behavior needs confirmation.
+4. Append one entry to `log.md`: `## [YYYY-MM-DD] lint | <summary>`.
 
 ## Hard rules
 - Never write secrets, tokens, passwords, API keys, or personal data to the wiki.
 - Never record temporary or branch-specific bugs, or one-time errors already fixed.
 - Prefer appending; editing or removing an existing fact needs explicit user
   confirmation. Adding a topic or an index row does not.
+- Never auto-create, rewrite, or delete a command/skill. Propose it and act only on
+  confirmation. Updating `.claude/skills-index.md` rows additively is fine.
 - Keep `index.md` to summaries + links; facts belong in topic pages.
 - Do not change product code. This command only curates memory and instructions.
 - If nothing durable was learned, say so and write nothing (but you may still log a

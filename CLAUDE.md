@@ -25,6 +25,12 @@ Code's real memory system. Rules: only durable, verifiable facts; never secrets 
 temporary/branch-specific bugs; prefer appending; confirm before removing entries.
 Use the built-in `/memory` command to view or edit loaded memory files.
 
+## Commands (skills) index
+The custom slash commands live in `.claude/commands/` and each carries a
+`description` used for routing. For the grouped "when to use which command" guide,
+see `.claude/skills-index.md` (a plain catalog, kept in sync by `/dream`). Consult
+it when unsure which command fits the task.
+
 ## Project type
 This is a local web application developed and tested on localhost.
 

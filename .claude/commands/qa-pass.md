@@ -1,3 +1,8 @@
+---
+description: Complete pre-ship QA pass — typecheck, lint, unit, build, E2E, browser check, a11y basics, and a post-implementation critic round. Run before committing/shipping a change set.
+argument-hint: [scope, e.g. "changed auth flow"]
+---
+
 Perform a complete QA pass before shipping.
 
 Scope:
