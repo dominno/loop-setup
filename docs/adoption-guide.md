@@ -202,7 +202,7 @@ Choose the strategy that matches how mature your existing wiki is:
   domain knowledge, read on demand. `CLAUDE.md` keeps importing only
   `.claude/memory/index.md`, so context stays small. `/dream` files operational
   learnings into `.claude/memory/` and domain learnings into your wiki (following
-  its conventions).
+  its conventions). **Step-by-step walkthrough below.**
 
 - **B. Adopt your wiki as Claude’s memory.** If your wiki already follows the
   index + pages + log shape, make it the single store: change the import in
@@ -220,6 +220,69 @@ Choose the strategy that matches how mature your existing wiki is:
 Whichever you pick, the rule is: **one canonical home per concern, and never two
 competing memory wikis.** Run `/dream lint` afterward to catch contradictions and
 orphan pages introduced by the merge.
+
+### Bridge, step by step (strategy A in detail)
+
+The bridge keeps both wikis but gives each one job and a one-way link from the
+small imported memory to the large product/domain wiki. Nothing big gets imported;
+the product wiki is **read on demand**.
+
+Assume your existing wiki’s entry point is `docs/wiki/index.md` (adjust paths to
+yours).
+
+**1. Add a bridge entry to `.claude/memory/index.md`.** Use a plain markdown link,
+**not** an `@import` — `@` would pull the whole product wiki into every session.
+From `.claude/memory/`, the repo root is two levels up:
+
+```md
+## Bridged knowledge bases (read on demand — NOT imported)
+| Knowledge base | Use it for | Entry point |
+|---|---|---|
+| Product / domain wiki | features, architecture, domain rules, research | [../../docs/wiki/index.md](../../docs/wiki/index.md) |
+```
+
+**2. Add a thin map page `.claude/memory/topics/domain-wiki.md`** so the agent knows
+the other wiki exists, how it’s organized, and when to open it:
+
+```md
+# Domain / product wiki (bridge)
+
+Canonical knowledge base for **product and domain** facts is the existing wiki at
+`docs/wiki/` (entry: `docs/wiki/index.md`). It is NOT imported — open it on demand.
+
+- Use it for: features, requirements, architecture, domain/business rules, research.
+- Structure: <describe briefly — e.g. an index.md catalog + one page per feature>.
+- Navigate via its `index.md`; follow its own conventions when adding pages.
+
+Related: [workflow](./workflow.md)
+```
+
+Add a row for this page in the `index.md` Topics table too, so it’s in the catalog.
+
+**3. Write down the routing rule** (in `domain-wiki.md` and, optionally, as a one
+line note in `.claude/commands/dream.md`) so new learnings land in the right store:
+
+| A new learning about… | Goes to… |
+|---|---|
+| commands, lint/test gotchas, env, file layout, “how we work” | `.claude/memory/topics/*` |
+| a feature’s behavior, business/domain rules, architecture | the product/domain wiki |
+| a product story and its build/test status | the `docs/` delivery story map |
+
+**4. (Optional) Cross-link back** from the product wiki’s index to
+`.claude/memory/index.md`, so humans and agents starting in `docs/wiki/` discover
+the engineering memory too.
+
+**5. Confirm the import stays small.** `CLAUDE.md` still imports only
+`@.claude/memory/index.md`. The product wiki is reached by following links, never
+loaded wholesale. Verify with `/memory` that only the small index is loaded.
+
+**6. Run `/dream lint`** to check the new bridge page is linked (not an orphan) and
+that nothing contradicts existing topics.
+
+After this, a session works like: `CLAUDE.md` → imports the small memory index →
+for a domain question the agent follows the bridge link into `docs/wiki/` and reads
+only the relevant page; for a “how we build/test” question it reads a
+`.claude/memory/topics/*` page. Two maps, one entry point, no duplicated context.
 
 ---
 
