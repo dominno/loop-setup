@@ -4,7 +4,8 @@ Maps each user story to Playwright/browser coverage.
 
 | Story ID | User flow | E2E test file | Happy path | Failure path | Edge cases | Last verified | Gap |
 |---|---|---|---|---|---|---|---|
-| _none yet_ | — | — | — | — | — | — | — |
+| US-001 | Greeting form | `e2e/critical-flows.spec.ts` | Yes | Yes (empty name) | Partial (recovery covered; 40-char boundary only in unit tests) | 2026-06-27 | Add E2E for the max-length boundary |
+| US-001 | App smoke / health | `e2e/smoke.spec.ts` | Yes | — | — | 2026-06-27 | None |
 
 ## Rules
 

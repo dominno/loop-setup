@@ -84,25 +84,62 @@ Product delivery audit:
 | Important | Meaningfully affects quality, UX, maintainability, or reliability | Fix if in scope |
 | Nice-to-have | Improvement, polish, or future enhancement | Record only unless approved |
 
-## Adapting to your app
+## Starter app
 
-This setup assumes a `pnpm` + `localhost:3000` web app. When you add the actual
-application, define these scripts in `package.json` so Claude never has to guess the
-verification commands:
+A minimal **Next.js 16 (App Router) + TypeScript** app is included so every command
+in `CLAUDE.md` runs end-to-end out of the box:
+
+```txt
+src/
+  app/
+    layout.tsx            Root layout + global styles
+    page.tsx              Home page (hero + greeting form)
+    globals.css           Dark, cohesive theme
+    api/health/route.ts   Liveness endpoint (used by smoke test)
+  components/
+    GreetingForm.tsx      Client form with accessible error wiring
+  lib/
+    greeting.ts           Pure validation/greeting rule (unit-tested)
+    greeting.test.ts      Vitest unit tests
+e2e/
+  smoke.spec.ts           Home renders + /api/health responds
+  critical-flows.spec.ts  Greeting happy path, validation failure, recovery
+```
+
+The one feature (`US-001`, greet a visitor by name) is tracked through the audit
+docs in `docs/` as a worked example.
+
+### Setup
+
+```bash
+pnpm install        # Chromium is pre-provisioned in this environment
+pnpm verify         # typecheck + lint + unit + build + E2E
+pnpm dev            # http://localhost:3000
+```
+
+Toolchain: Next 16, React 19, TypeScript 6, ESLint 9 (flat config via
+`eslint-config-next`), Vitest 4, Playwright 1.56.
+
+### package.json scripts
 
 ```json
 {
   "scripts": {
     "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
     "typecheck": "tsc --noEmit",
-    "lint": "next lint",
+    "lint": "eslint .",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "build": "next build",
     "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e"
   }
 }
 ```
 
-Adjust the commands in `CLAUDE.md` and `package.json` to match your real stack.
-The rule that matters: **Claude must know the exact verification commands and must not guess.**
+> Next 16 removed `next lint`, so `pnpm lint` runs ESLint directly against the
+> flat config in `eslint.config.mjs`.
+
+Swap this starter for your real stack as the project grows — the rule that matters
+is: **Claude must know the exact verification commands and must not guess.** Keep
+`CLAUDE.md` and `package.json` in sync.
