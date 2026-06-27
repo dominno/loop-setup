@@ -79,9 +79,9 @@ something real to run against until your own flows exist.
 5. **Start the story map empty** — clear the US-001/US-002 example content from
    `docs/*.md`, keep the formats, then run `/scan-project-docs` against your docs.
 6. **Adjust `.claude/settings.local.json`** to the commands your tools actually use.
-7. **Already have a wiki in `docs/`?** See “Reconciling with an existing `docs/`
-   wiki” before step 5 — you’ll likely namespace the story map and bridge the two
-   memory systems.
+7. **Already have a wiki in `docs/`?** Read “Reconciling with an existing `docs/`
+   wiki” before you start the story map (step 5) — you’ll likely namespace the
+   story map and bridge the two memory systems.
 
 ---
 
@@ -215,7 +215,7 @@ Choose the strategy that matches how mature your existing wiki is:
 
 - **C. Keep ours, fold yours in.** If the “wiki” is really just loose docs, migrate
   the few durable engineering facts into `.claude/memory/topics/*`, and treat
-  `docs/` purely as product/domain docs that the scanner reads. 
+  `docs/` purely as product/domain docs that the scanner reads.
 
 Whichever you pick, the rule is: **one canonical home per concern, and never two
 competing memory wikis.** Run `/dream lint` afterward to catch contradictions and
@@ -223,7 +223,7 @@ orphan pages introduced by the merge.
 
 ### Bridge, step by step (strategy A in detail)
 
-The bridge keeps both wikis but gives each one job and a one-way link from the
+The bridge keeps both wikis but gives each a single job and a one-way link from the
 small imported memory to the large product/domain wiki. Nothing big gets imported;
 the product wiki is **read on demand**.
 
@@ -251,7 +251,7 @@ Canonical knowledge base for **product and domain** facts is the existing wiki a
 `docs/wiki/` (entry: `docs/wiki/index.md`). It is NOT imported — open it on demand.
 
 - Use it for: features, requirements, architecture, domain/business rules, research.
-- Structure: <describe briefly — e.g. an index.md catalog + one page per feature>.
+- Structure: (describe briefly — e.g. an index.md catalog + one page per feature).
 - Navigate via its `index.md`; follow its own conventions when adding pages.
 
 Related: [workflow](./workflow.md)
