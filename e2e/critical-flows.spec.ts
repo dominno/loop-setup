@@ -24,6 +24,37 @@ test.describe("greeting flow", () => {
     await expect(page.getByTestId("greeting")).toHaveCount(0);
   });
 
+  test("boundary: a name longer than the max length is rejected", async ({
+    page,
+  }) => {
+    await page.goto("/");
+
+    // 41 characters — one over the 40-character limit.
+    await page.getByLabel("Your name").fill("a".repeat(41));
+    await page.getByRole("button", { name: "Say hello" }).click();
+
+    await expect(page.locator("#name-error")).toHaveText(
+      "Name must be 40 characters or fewer.",
+    );
+    await expect(page.getByTestId("greeting")).toHaveCount(0);
+  });
+
+  test("boundary: a name at exactly the max length is accepted", async ({
+    page,
+  }) => {
+    await page.goto("/");
+
+    // 40 characters — exactly at the limit.
+    const name = "a".repeat(40);
+    await page.getByLabel("Your name").fill(name);
+    await page.getByRole("button", { name: "Say hello" }).click();
+
+    await expect(page.getByTestId("greeting")).toHaveText(
+      `Hello, ${name}! Welcome aboard.`,
+    );
+    await expect(page.locator("#name-error")).toHaveCount(0);
+  });
+
   test("recovery: fixing the input replaces the error with a greeting", async ({
     page,
   }) => {

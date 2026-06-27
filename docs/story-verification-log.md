@@ -12,6 +12,7 @@ required evidence trail before any story can be marked `Done`.
 | 2026-06-27 | US-001 | Build | `pnpm build` | Pass | Next 16 production build, routes `/`, `/api/health` |
 | 2026-06-27 | US-001 | E2E | `pnpm test:e2e` | Pass | 5/5 (smoke + happy/failure/recovery) on Chromium |
 | 2026-06-27 | US-001 | E2E (regression caught) | `pnpm test:e2e` (initial run) | Found + fixed | `getByRole('alert')` collided with Next route-announcer; tightened selector to `#name-error` |
+| 2026-06-27 | US-001 | E2E (boundary edge cases added) | `pnpm test:e2e` | Pass | 7/7 — added 41-char rejection and 40-char acceptance; closes the max-length E2E gap |
 
 ## What counts as evidence
 

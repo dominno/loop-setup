@@ -28,7 +28,7 @@ greeting, so that the app feels responsive and I get immediate feedback.
 
 **Test evidence:**
 - Unit/component tests: Present — `src/lib/greeting.test.ts` (7 cases, all passing)
-- E2E tests: Present — `e2e/critical-flows.spec.ts` (happy, failure, recovery), `e2e/smoke.spec.ts`
+- E2E tests: Present — `e2e/critical-flows.spec.ts` (happy, failure, recovery, max-length boundary ×2), `e2e/smoke.spec.ts`
 - Browser verified: Automated only (Playwright/Chromium); manual MCP verification not yet run
 - Evidence: see `docs/story-verification-log.md`
 
