@@ -171,7 +171,7 @@ you.
    different depth, or move the wiki, fix that path or it silently won’t load.
    Claude Code also shows a one-time approval dialog the first time it sees the
    import — that’s expected.
-4. `/dream query <question>` answers from the wiki with citations.
+5. `/dream query <question>` answers from the wiki with citations.
 
 > `/dream` is a **custom** command in this repo, not a built-in Claude Code
 > feature. It builds on Claude Code’s real memory system (`@import` + `/memory`).
