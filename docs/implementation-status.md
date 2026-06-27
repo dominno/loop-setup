@@ -5,7 +5,8 @@ Statuses are evidence-based and must not be marked `Done` from source inspection
 
 | Story ID | Story | Source doc | Implementation | Unit tests | E2E tests | Browser verified | Final status | Evidence | Next action |
 |---|---|---|---|---|---|---|---|---|---|
-| US-001 | Greet a visitor by name | `README.md` | Present: `src/lib/greeting.ts`, `src/components/GreetingForm.tsx`, `src/app/page.tsx` | Present: `src/lib/greeting.test.ts` (7 passing) | Present: `e2e/critical-flows.spec.ts`, `e2e/smoke.spec.ts` (5 passing) | Automated only | E2E tested | `pnpm verify` green on 2026-06-27 | Manual MCP browser verification + critic round, then mark Done |
+| US-001 | Greet a visitor by name | `docs/prd.md#51` | Present: `src/lib/greeting.ts`, `src/components/GreetingForm.tsx`, `src/app/page.tsx` | Present: `src/lib/greeting.test.ts` (7 passing) | Present: `e2e/critical-flows.spec.ts`, `e2e/smoke.spec.ts` (7 passing) | Automated only | E2E tested | `pnpm verify` green on 2026-06-27 | Manual MCP browser verification + critic round, then mark Done |
+| US-002 | Remember me on return | `docs/prd.md#52` | None found | Missing | Missing | No | Not started | Code search for persistence returned no matches (2026-06-27) | Implement localStorage persistence + clear control; add unit + E2E tests |
 
 ## Status model
 

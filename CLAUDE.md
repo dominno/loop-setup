@@ -1,5 +1,20 @@
 # Project Instructions for Claude Code
 
+## Durable project memory
+Curated, durable learnings are kept in a separate file and imported here so they
+load every session:
+
+@.claude/memory.md
+
+## Self-learning loop (`/dream`)
+At the end of a non-trivial task, run `/dream` to consolidate any durable learnings
+into `.claude/memory.md` (and propose `CLAUDE.md` rule changes when warranted).
+`/dream` is a custom command in this repo (`.claude/commands/dream.md`), not a
+built-in Claude Code feature — it implements memory consolidation on top of Claude
+Code's real memory system. Rules: only durable, verifiable facts; never secrets or
+temporary/branch-specific bugs; prefer appending; confirm before removing entries.
+Use the built-in `/memory` command to view or edit loaded memory files.
+
 ## Project type
 This is a local web application developed and tested on localhost.
 

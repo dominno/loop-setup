@@ -13,6 +13,7 @@ The workflow starts with critique, not coding — and ends with proof, not confi
 CLAUDE.md                         Project rules + multi-agent workflow + doc-scanner workflow
 .claude/
   loop.md                         Recurring multi-agent watchdog loop (used by /loop)
+  memory.md                       Durable learnings, imported by CLAUDE.md (maintained by /dream)
   settings.local.json             Allowed commands for the workflow
   commands/
     multi-agent-dev.md            Full critic-led development pass
@@ -21,10 +22,12 @@ CLAUDE.md                         Project rules + multi-agent workflow + doc-sca
     qa-pass.md                    Pre-ship QA checklist
     fix-localhost.md              Drive localhost back to a working state
     memory-audit.md               Audit project memory vs CLAUDE.md
+    dream.md                      Self-learning pass: consolidate durable learnings into memory
     scan-project-docs.md          Build the user-story / status / coverage map from docs
     sync-story-status.md          Re-sync story statuses with code and tests
     story-gap-analysis.md         Gap analysis: docs vs code vs E2E
 docs/
+  prd.md                          Product requirements (source of record for stories)
   product-docs-index.md           Source documents scanned
   user-stories.md                 Living backlog of user stories
   implementation-status.md        Story → implementation/test/verification status
@@ -75,6 +78,29 @@ Product delivery audit:
 /sync-story-status current branch
 /story-gap-analysis MVP readiness
 ```
+
+## Self-learning (`/dream`)
+
+The project "self-learns" by consolidating durable knowledge into memory so future
+sessions start smarter. This uses Claude Code's **real** memory system:
+
+- `.claude/memory.md` holds curated, durable learnings (stack, conventions,
+  gotchas). It is imported into `CLAUDE.md` via `@.claude/memory.md`, so it loads
+  every session.
+- `/dream` (a **custom** command — see `.claude/commands/dream.md`) reviews the
+  session, extracts only durable, verifiable learnings, and appends them to
+  `.claude/memory.md` (proposing `CLAUDE.md` rule changes when warranted).
+- The built-in `/memory` command lets you view and edit loaded memory files.
+
+```txt
+/dream            # run at the end of a task to capture what was learned
+/memory-audit     # periodically prune stale or duplicated memory
+```
+
+> Note: `/dream` is **not** an official Claude Code command. It is implemented here
+> as a custom slash command on top of the memory system. Hard rules: only durable,
+> verifiable facts; never secrets; never temporary/branch-specific bugs; prefer
+> appending; confirm before removing entries.
 
 ## Severity model
 

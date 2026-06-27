@@ -6,6 +6,7 @@ Maps each user story to Playwright/browser coverage.
 |---|---|---|---|---|---|---|---|
 | US-001 | Greeting form | `e2e/critical-flows.spec.ts` | Yes | Yes (empty name) | Yes (recovery; 41-char rejected; 40-char accepted) | 2026-06-27 | None |
 | US-001 | App smoke / health | `e2e/smoke.spec.ts` | Yes | — | — | 2026-06-27 | None |
+| US-002 | Remember me on return | Missing | No | No | No | Never | Not started — no implementation or tests yet |
 
 ## Rules
 

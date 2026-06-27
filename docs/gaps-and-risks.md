@@ -4,7 +4,7 @@ Tracks missing requirements, unclear docs, untested areas, and contradictions
 found during documentation/story synchronization.
 
 ## Requirements in docs but not implemented
-- _none recorded yet_
+- US-002 (Remember me on return, `docs/prd.md#52`): documented but `Not started`. No `localStorage`/persistence code or tests exist. Next: implement behind a `src/lib/storage` helper with unit + E2E coverage (incl. AC4 negative case and a reload scenario).
 
 ## Implemented features not described in docs
 - _none recorded yet_
@@ -22,7 +22,7 @@ found during documentation/story synchronization.
 - _none recorded yet_ (US-001 passes; richer motion/illustration is an optional nice-to-have)
 
 ## Ambiguous or contradictory requirements
-- No formal PRD exists yet. US-001 was derived from the README and the implemented code; future stories should be backed by a real product doc.
+- _none currently_ — `docs/prd.md` is now the source of record. US-002 AC2 (auto-show greeting on load) interacts with US-001's empty-state; the Regression Critic flagged it as a behavior to preserve, not a contradiction.
 
 ## Blocked in current environment
 - Manual MCP browser verification of US-001 is **blocked here**: no Playwright/Chrome MCP server is configured and this is a headless remote container. Automated Playwright (Chromium) is the available browser-verification path and is green (7/7). Promote US-001 to `Done` from an interactive session with the MCP browser, or relax the "manual MCP" requirement to "automated E2E on Chromium" for headless runs.
@@ -30,4 +30,5 @@ found during documentation/story synchronization.
 ## Recommended next implementation order
 1. ~~Add an E2E case for the US-001 max-length boundary.~~ **Done 2026-06-27.**
 2. Promote US-001 to `Done`: run manual Chrome/Playwright MCP verification + a post-implementation critic round from an interactive session (blocked in headless env — see above).
-3. Add a real PRD under `docs/` and re-run `/scan-project-docs` to extract further stories.
+3. ~~Add a real PRD under `docs/` and re-run `/scan-project-docs`.~~ **Done 2026-06-27** — `docs/prd.md` added; scan extracted US-002 (`Not started`).
+4. Implement US-002 (Remember me on return) with unit + E2E coverage, then run critic rounds.

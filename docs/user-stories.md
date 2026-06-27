@@ -5,7 +5,7 @@ Each story uses the format below. Populate with `/scan-project-docs`.
 
 ## US-001: Greet a visitor by name
 
-**Source:** `README.md` (starter-app description), implemented in `src/`
+**Source:** `docs/prd.md` section 5.1 "Greeting", implemented in `src/`
 
 **User story:**
 As a first-time visitor, I want to enter my name and get a personalized
@@ -46,6 +46,55 @@ E2E tested
 **Next action:**
 Manually browser-verify on localhost via Chrome/Playwright MCP and run a
 post-implementation critic round, then promote to `Done`.
+
+---
+
+## US-002: Remember me on return
+
+**Source:** `docs/prd.md` section 5.2 "Remember me on return"
+
+**User story:**
+As a returning visitor, I want the app to remember my name in my browser, so that
+I don't have to retype it on every visit.
+
+**Acceptance criteria:**
+- [ ] AC1: After a successful greeting, the name is persisted to `localStorage`.
+- [ ] AC2: On reload, the input is pre-filled with the remembered name and that
+      greeting is shown automatically.
+- [ ] AC3: A visible "Not you? Clear" control removes the remembered name and
+      resets the form.
+- [ ] AC4: Nothing is persisted when validation fails.
+- [ ] AC5: No personal data leaves the browser (localStorage only).
+
+**Implementation evidence:**
+- Status: Not started
+- Files: none found
+- Notes: Code search for `localStorage|persist|remember|clear` across `src/` and
+  `e2e/` returned no matches (2026-06-27). The greeting form holds name in React
+  state only and does not persist it.
+
+**Test evidence:**
+- Unit/component tests: Missing
+- E2E tests: Missing
+- Browser verified: No
+- Evidence: none
+
+**Critic status:**
+- Product Requirements Critic: pass (story matches PRD 5.2)
+- Acceptance Criteria Critic: pass (AC1–AC5 are concrete and testable; includes a
+  negative case AC4 and a privacy constraint AC5)
+- Code Evidence Critic: blocker for `Done` — no implementation exists
+- QA / E2E Critic: blocker for `Done` — no tests exist
+- Regression Critic: note — pre-filling + auto-greeting on load must not break the
+  existing US-001 empty-state and validation flows
+
+**Final status:**
+Not started
+
+**Next action:**
+Implement persistence behind a small `src/lib/storage` helper (keep DOM/storage
+access out of the pure greeting rule), add unit + E2E coverage (including AC4 and a
+reload scenario), then run the critic rounds.
 
 ---
 
