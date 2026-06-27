@@ -4,7 +4,7 @@ Tracks missing requirements, unclear docs, untested areas, and contradictions
 found during documentation/story synchronization.
 
 ## Requirements in docs but not implemented
-- US-002 (Remember me on return, `docs/prd.md#52`): documented but `Not started`. No `localStorage`/persistence code or tests exist. Next: implement behind a `src/lib/storage` helper with unit + E2E coverage (incl. AC4 negative case and a reload scenario).
+- _none_ — US-002 (Remember me on return) is now implemented and `E2E tested` (`src/lib/rememberedName.ts`, `e2e/remember-me.spec.ts`).
 
 ## Implemented features not described in docs
 - _none recorded yet_
@@ -30,5 +30,5 @@ found during documentation/story synchronization.
 ## Recommended next implementation order
 1. ~~Add an E2E case for the US-001 max-length boundary.~~ **Done 2026-06-27.**
 2. Promote US-001 to `Done`: run manual Chrome/Playwright MCP verification + a post-implementation critic round from an interactive session (blocked in headless env — see above).
-3. ~~Add a real PRD under `docs/` and re-run `/scan-project-docs`.~~ **Done 2026-06-27** — `docs/prd.md` added; scan extracted US-002 (`Not started`).
-4. Implement US-002 (Remember me on return) with unit + E2E coverage, then run critic rounds.
+3. ~~Add a real PRD under `docs/` and re-run `/scan-project-docs`.~~ **Done 2026-06-27** — `docs/prd.md` added; scan extracted US-002.
+4. ~~Implement US-002 (Remember me on return) with unit + E2E coverage, then run critic rounds.~~ **Done 2026-06-27** — implemented, 13 unit + 11 E2E green, post-implementation critics clean. Remaining: manual MCP browser verification to reach `Done`.

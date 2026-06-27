@@ -123,17 +123,20 @@ src/
     globals.css           Dark, cohesive theme
     api/health/route.ts   Liveness endpoint (used by smoke test)
   components/
-    GreetingForm.tsx      Client form with accessible error wiring
+    GreetingForm.tsx      Client form: greeting, persistence, Clear control
   lib/
     greeting.ts           Pure validation/greeting rule (unit-tested)
     greeting.test.ts      Vitest unit tests
+    rememberedName.ts     Safe localStorage wrapper + change subscription
+    rememberedName.test.ts Vitest unit tests (incl. storage-unavailable path)
 e2e/
   smoke.spec.ts           Home renders + /api/health responds
-  critical-flows.spec.ts  Greeting happy path, validation failure, recovery
+  critical-flows.spec.ts  Greeting happy path, validation, boundaries, recovery
+  remember-me.spec.ts     Reload persistence, clear, no-persist-on-failure, no-network
 ```
 
-The one feature (`US-001`, greet a visitor by name) is tracked through the audit
-docs in `docs/` as a worked example.
+Two features are tracked through the audit docs in `docs/` as worked examples:
+`US-001` (greet a visitor by name) and `US-002` (remember me on return).
 
 ### Setup
 
