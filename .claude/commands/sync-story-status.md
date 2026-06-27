@@ -5,7 +5,9 @@ $ARGUMENTS
 
 Procedure:
 
-1. Read `docs/user-stories.md`.
+1. Read `docs/user-stories.md`. Also consult the memory wiki
+   (`.claude/memory/index.md` → relevant topic pages such as `topics/testing.md`)
+   so evidence judgments match the project's testing/verification conventions.
 2. Read `docs/implementation-status.md` if it exists.
 3. Inspect relevant source files.
 4. Inspect relevant unit/component tests.

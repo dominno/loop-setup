@@ -19,3 +19,10 @@ change). Format: `## [YYYY-MM-DD] <op> | <summary>`.
   `log.md`. No facts removed; each former section became a topic page.
 - `CLAUDE.md` now imports only `.claude/memory/index.md` (small, always-loaded);
   topic pages are read on demand to keep per-session context flat as memory grows.
+
+## [2026-06-27] lint | First health-check of the wiki
+- Index ↔ topics in sync (7/7 rows resolve); no broken cross-links, no
+  contradictions, no stale claims.
+- Fixed one semi-orphan: `topics/workflow.md` had no inbound cross-links from
+  sibling pages. Added reciprocal links between `workflow.md` and
+  `build-and-verify.md`. Every page now has an inbound link beyond the index.

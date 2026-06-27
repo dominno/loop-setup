@@ -6,4 +6,4 @@
   (`import next from "eslint-config-next"`). Do **not** use `FlatCompat` — it
   crashes under ESLint 9 ("Converting circular structure to JSON").
 
-Related: [tooling](./tooling.md) · [testing](./testing.md)
+Related: [tooling](./tooling.md) · [testing](./testing.md) · [workflow](./workflow.md)

@@ -21,7 +21,10 @@ Use these critic agents:
 
 Procedure:
 
-1. Read `CLAUDE.md`.
+1. Read `CLAUDE.md`. Then consult the memory wiki: read `.claude/memory/index.md`
+   and open the topic pages relevant to judging evidence (e.g.
+   `topics/testing.md`, `topics/build-and-verify.md`, `topics/code-organization.md`)
+   so status decisions match the project's real conventions and gotchas.
 2. Find product docs, PRDs, specs, README files, planning docs, route docs, API docs, and existing story docs.
 3. Create or update `docs/product-docs-index.md` with scanned sources.
 4. Extract product requirements.
@@ -41,8 +44,10 @@ Procedure:
     - `docs/story-verification-log.md`
     - `docs/gaps-and-risks.md`
 15. Run a post-scan critic review.
-16. Do not change product code unless explicitly asked.
-17. Do not mark stories `Done` without implementation evidence, test evidence, and verification evidence.
+16. If the scan surfaced a durable engineering learning (a convention or gotcha,
+    not a story-specific note), run `/dream` to file it into the memory wiki.
+17. Do not change product code unless explicitly asked.
+18. Do not mark stories `Done` without implementation evidence, test evidence, and verification evidence.
 
 Output:
 

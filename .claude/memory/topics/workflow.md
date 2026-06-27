@@ -7,4 +7,4 @@
 - `docs/prd.md` is the source of record for user stories; `docs/` holds the
   evidence-based story/status maps kept in sync by the doc-scanner commands.
 
-Related: (none)
+Related: [build-and-verify](./build-and-verify.md) · [testing](./testing.md)

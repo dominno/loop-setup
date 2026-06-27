@@ -3,6 +3,11 @@ Analyze the gap between product documentation, implemented code, and E2E tests.
 Scope:
 $ARGUMENTS
 
+Before analyzing, consult the memory wiki: read `.claude/memory/index.md` and open
+the topic pages relevant to the gaps you're assessing (e.g. `topics/testing.md`,
+`topics/build-and-verify.md`) so "tested / not tested" and "edge cases" judgments
+reflect the project's real conventions.
+
 Produce:
 
 1. Requirements found in docs but not implemented.
