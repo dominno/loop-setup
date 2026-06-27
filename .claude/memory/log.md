@@ -26,3 +26,11 @@ change). Format: `## [YYYY-MM-DD] <op> | <summary>`.
 - Fixed one semi-orphan: `topics/workflow.md` had no inbound cross-links from
   sibling pages. Added reciprocal links between `workflow.md` and
   `build-and-verify.md`. Every page now has an inbound link beyond the index.
+
+## [2026-06-27] ingest | Skills-system + adoption edge-case learnings
+- Added to topics/workflow.md: command `description` enables model auto-invocation
+  (use `disable-model-invocation: true` for manual-only); team perms belong in
+  committed `settings.json`, and git auto-allow is opt-in.
+- Source: critic round on the skills-index changes + adoption-guide hardening
+  (stale seeded facts, verify-chain trimming, name collisions, monorepo, import
+  path, permissions).
