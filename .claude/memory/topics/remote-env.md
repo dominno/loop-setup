@@ -8,5 +8,11 @@
   Playwright without a matching browser will fail in headless web sessions.
 - Manual MCP browser verification is unavailable in headless web sessions (no
   Chrome/Playwright MCP attached); automated Chromium E2E is the verification path.
+- **CI is different from the web env:** GitHub Actions has no pre-provisioned
+  browser, so the CI workflow (`.github/workflows/verify.yml`) runs the normal
+  `pnpm exec playwright install --with-deps chromium`. Do NOT use
+  `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` in CI. CI runs checks as parallel jobs
+  (`typecheck`/`lint`/`test`/`build` matrix + separate `e2e`); `process.env.CI`
+  makes Playwright start a fresh server instead of reusing one.
 
-Related: [tooling](./tooling.md) · [testing](./testing.md)
+Related: [tooling](./tooling.md) · [testing](./testing.md) · [build-and-verify](./build-and-verify.md)
