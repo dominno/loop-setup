@@ -79,6 +79,9 @@ something real to run against until your own flows exist.
 5. **Start the story map empty** — clear the US-001/US-002 example content from
    `docs/*.md`, keep the formats, then run `/scan-project-docs` against your docs.
 6. **Adjust `.claude/settings.local.json`** to the commands your tools actually use.
+7. **Already have a wiki in `docs/`?** See “Reconciling with an existing `docs/`
+   wiki” before step 5 — you’ll likely namespace the story map and bridge the two
+   memory systems.
 
 ---
 
@@ -148,6 +151,78 @@ tests + E2E/browser verification recorded in `docs/story-verification-log.md`.
 
 ---
 
+## Reconciling with an existing `docs/` wiki
+
+If your project already keeps a knowledge wiki in `docs/` — especially one whose
+index **indexes every file in `docs/`** — adopting this template creates two
+problems. Solve them by keeping three concerns separate:
+
+| Concern | This template | Don't confuse it with |
+|---|---|---|
+| **Engineering memory** — *how* to work here (stack, conventions, gotchas) | `.claude/memory/` (imported) | your domain wiki |
+| **Product-delivery audit** — *what's* built/tested (stories, evidence) | `docs/` story map | your domain wiki pages |
+| **Domain knowledge** — architecture, research, notes | *(your existing wiki)* | the two above |
+
+**Problem 1 — your docs-wiki will sweep in the story map.** A wiki that auto-indexes
+all of `docs/` will treat `user-stories.md`, `implementation-status.md`, `prd.md`,
+etc. as wiki pages, polluting its index.
+
+**Problem 2 — two competing memory systems.** Your domain wiki and
+`.claude/memory/` overlap. Running both as “the memory” causes drift.
+
+### Fix Problem 1 — namespace the story map
+
+Move the delivery audit into its own subdirectory so it reads as one labeled
+sub-area instead of loose pages, then tell your wiki to skip it:
+
+```bash
+mkdir -p docs/delivery
+git mv docs/{product-docs-index,user-stories,implementation-status,\
+e2e-coverage-map,story-verification-log,gaps-and-risks}.md docs/delivery/
+# keep prd.md wherever your product docs already live
+```
+
+Then update the paths in `CLAUDE.md` (the “Documentation Scanner” file list) and in
+`.claude/commands/{scan-project-docs,sync-story-status,story-gap-analysis}.md` to
+point at `docs/delivery/…`, and add `docs/delivery/` to your wiki’s ignore/exclude
+list (or register it in the wiki index as a single “Delivery / story status”
+section rather than per-file pages).
+
+> Prefer not to touch `docs/` at all? Move the audit out entirely, e.g.
+> `delivery/` at the repo root or `.claude/delivery/`, and repoint the same files.
+
+### Fix Problem 2 — pick ONE canonical knowledge base per concern
+
+Choose the strategy that matches how mature your existing wiki is:
+
+- **A. Bridge (recommended, least disruptive).** Keep `.claude/memory/` as the
+  small Claude-imported memory for **operational** facts (build/verify commands,
+  testing gotchas, env quirks). Add one row to `.claude/memory/index.md` that
+  **links to your domain wiki’s index** as the canonical source for architecture/
+  domain knowledge, read on demand. `CLAUDE.md` keeps importing only
+  `.claude/memory/index.md`, so context stays small. `/dream` files operational
+  learnings into `.claude/memory/` and domain learnings into your wiki (following
+  its conventions).
+
+- **B. Adopt your wiki as Claude’s memory.** If your wiki already follows the
+  index + pages + log shape, make it the single store: change the import in
+  `CLAUDE.md` from `@.claude/memory/index.md` to your wiki’s index (e.g.
+  `@docs/wiki/index.md`), delete `.claude/memory/`, and repoint `/dream`
+  (edit the paths in `.claude/commands/dream.md`) to maintain your wiki.
+  **Caveat:** only do this if your wiki’s index is *small*. `@import` loads the
+  whole file into every session — importing a giant “index of all docs” defeats
+  the token savings. If the index is large, use strategy A instead.
+
+- **C. Keep ours, fold yours in.** If the “wiki” is really just loose docs, migrate
+  the few durable engineering facts into `.claude/memory/topics/*`, and treat
+  `docs/` purely as product/domain docs that the scanner reads. 
+
+Whichever you pick, the rule is: **one canonical home per concern, and never two
+competing memory wikis.** Run `/dream lint` afterward to catch contradictions and
+orphan pages introduced by the merge.
+
+---
+
 ## Local machine vs. Claude Code on the web
 
 The starter is tuned for **Claude Code on the web**, where Chromium is
@@ -190,6 +265,8 @@ issues; record nice-to-haves; avoid unrelated refactors.
 [ ] Package-manager + localhost URL/port updated to match my project
 [ ] settings.local.json allows my real commands
 [ ] Memory wiki: removed stack facts that don't apply; will re-seed via /dream
+[ ] If a docs/ wiki already exists: namespaced the story map + picked ONE canonical
+    memory home (see "Reconciling with an existing docs/ wiki")
 [ ] Playwright/browser setup chosen (local install vs. web pre-provisioned)
 [ ] Ran my own `verify` chain green once
 [ ] Ran /scan-project-docs against my real docs
