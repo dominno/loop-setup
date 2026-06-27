@@ -34,3 +34,7 @@ lives in `.claude/memory/log.md`.
 - One verifiable fact per bullet. No secrets; no temporary or branch-specific bugs.
 - Adding a topic → create a page under `topics/` and add one row above.
 - Keep this index to summaries and links only; facts belong in topic pages.
+- **Log rotation:** when `log.md` exceeds **500 lines**, `/dream lint` rolls the
+  older entries into yearly archives `.claude/memory/log/<YYYY>.md`, keeping the
+  recent window in `log.md`. The log is not imported, so this is about read/append
+  cost, not session context.

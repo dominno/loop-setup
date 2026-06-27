@@ -2,7 +2,13 @@
 
 Append-only record of wiki operations. Newest entries at the bottom. Prefixes:
 `ingest` (new learnings filed), `lint` (health-check), `migrate` (structure
-change). Format: `## [YYYY-MM-DD] <op> | <summary>`.
+change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summary>`.
+
+> **Rotation:** when this file passes **500 lines**, `/dream lint` moves the older
+> entries into yearly archives at `.claude/memory/log/<YYYY>.md` (created on demand)
+> and leaves the recent entries here, then logs a `rotate` entry. Archives are read
+> only when deep history is needed. This file is never `@imported`, so its size
+> costs nothing per session — rotation is purely to keep reads/appends cheap.
 
 ## [2026-06-27] ingest | Initial durable learnings
 - Seeded tooling, build & verify, testing, code organization, remote-env, and
@@ -34,3 +40,9 @@ change). Format: `## [YYYY-MM-DD] <op> | <summary>`.
 - Source: critic round on the skills-index changes + adoption-guide hardening
   (stale seeded facts, verify-chain trimming, name collisions, monorepo, import
   path, permissions).
+
+## [2026-06-27] migrate | Added log rotation rule (>500 lines)
+- `/dream lint` now rolls older entries into yearly archives
+  `.claude/memory/log/<YYYY>.md` once this file passes 500 lines, keeping a recent
+  window here. Documented in `index.md` and the log header. Lossless move; the log
+  is never `@imported`, so this is about read/append cost, not session context.
