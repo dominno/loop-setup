@@ -73,8 +73,10 @@ $ARGUMENTS
    their `[YYYY-MM-DD]` header. This is a **lossless move** (nothing is deleted), so
    lint may do it without separate confirmation; preserve every entry verbatim. If
    `log.md` is ≤ 500 lines, do nothing.
-5. Append one entry to `log.md`: `## [YYYY-MM-DD] lint | <summary>` (note any
-   rotation as `## [YYYY-MM-DD] rotate | moved <n> entries to log/<YYYY>.md`).
+5. Append a `## [YYYY-MM-DD] lint | <summary>` entry to `log.md`. **If you rotated
+   in step 4, append a *separate* `## [YYYY-MM-DD] rotate | moved <n> entries to
+   log/<YYYY>.md` entry** — rotation always gets its own `rotate` entry, never
+   folded into the `lint` entry (the prefixes are structured markers).
 
 ## Hard rules
 - Never write secrets, tokens, passwords, API keys, or personal data to the wiki.
