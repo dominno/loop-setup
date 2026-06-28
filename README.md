@@ -72,13 +72,19 @@ hand-written prompt. `CLAUDE.md` also tells Claude to *offer* this whenever you
 describe a non-trivial task.
 
 ```txt
-/write-goal add password reset       # → a production-grade /goal to review + run
-/multi-agent-dev implement [FEATURE]
+# Start a task — pick ONE entry point:
+/write-goal add password reset        # Claude writes a production-grade /goal → review, then run IT
+/multi-agent-dev implement [FEATURE]  # — or — drive the critic loop directly, no /goal
 /goal [FEATURE] is complete using the multi-agent critic workflow, verified on
       localhost, covered by E2E tests, with no post-implementation critic blockers.
-      Stop after 25 turns if not achieved.
+      Stop after 25 turns if not achieved.   # — or — hand-write the /goal yourself
+
+# Then, before committing:
 /qa-pass final pre-commit check
 ```
+
+These three are **alternatives**, not a sequence — if you used `/write-goal`, run
+the `/goal` it produced (don't skip to `/multi-agent-dev`).
 
 Every `/goal` should carry six things: a one-line task statement, 3–5 measurable
 success criteria, constraints, checkpoint rules, a self-verify instruction, and a

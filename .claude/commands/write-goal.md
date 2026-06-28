@@ -1,6 +1,6 @@
 ---
 description: Turn a described outcome into a production-grade, copy-pasteable /goal (or /loop) prompt for this project — grounded in CLAUDE.md, the memory wiki, and the verify gates. Use when starting a non-trivial task, or when asked to "write the /goal/loop for this".
-argument-hint: [outcome in plain English, e.g. "add password reset"] [| loop]
+argument-hint: [outcome in plain English, e.g. "add password reset" — say "loop" for a /loop]
 ---
 
 Write the optimal **`/goal`** prompt (or a **`/loop`** prompt if asked) for the
