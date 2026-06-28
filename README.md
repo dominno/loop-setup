@@ -67,13 +67,22 @@ Documentation Consistency critics.
 
 ## Everyday workflow
 
+Let Claude write the `/goal` for you — it knows the project's gates better than a
+hand-written prompt. `CLAUDE.md` also tells Claude to *offer* this whenever you
+describe a non-trivial task.
+
 ```txt
+/write-goal add password reset       # → a production-grade /goal to review + run
 /multi-agent-dev implement [FEATURE]
 /goal [FEATURE] is complete using the multi-agent critic workflow, verified on
       localhost, covered by E2E tests, with no post-implementation critic blockers.
       Stop after 25 turns if not achieved.
 /qa-pass final pre-commit check
 ```
+
+Every `/goal` should carry six things: a one-line task statement, 3–5 measurable
+success criteria, constraints, checkpoint rules, a self-verify instruction, and a
+max-budget guard. `/write-goal` produces all six, grounded in this repo.
 
 Long-running watchdog:
 

@@ -17,5 +17,11 @@
   `.claude/settings.local.json` is conventionally personal (often git-ignored).
   Auto-allowing `git commit`/`git add` lets the agent commit without a prompt — opt
   in deliberately.
+- **Let the agent write its own `/goal`/`/loop`.** When the user describes a
+  non-trivial task, first offer to write the `/goal` prompt (`/write-goal`). Every
+  `/goal` must carry six things: one-line task, 3–5 measurable success criteria,
+  constraints, checkpoint rules (pause vs run-through), a self-verify instruction,
+  and a max-budget/turn guard. See `CLAUDE.md` → "Writing `/goal` and `/loop`
+  prompts".
 
 Related: [build-and-verify](./build-and-verify.md) · [testing](./testing.md)
