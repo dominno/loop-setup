@@ -25,6 +25,7 @@ CLAUDE.md                         Project rules + multi-agent workflow + doc-sca
     topics/                       One page per subject, read on demand
   settings.local.json             Allowed commands for the workflow
   commands/                       Each command has a description used for routing
+    write-goal.md                 Write a production-grade /goal (or /loop) prompt for a task
     multi-agent-dev.md            Full critic-led development pass
     critic-round.md               Review-only multi-agent critic round
     multi-agent-e2e.md            Critic-driven E2E test design + run
@@ -45,6 +46,10 @@ docs/
   story-verification-log.md       Evidence log of checks actually run
   gaps-and-risks.md               Missing/untested/contradictory areas
 ```
+
+**Which command when?** Each command above carries a one-line description; the full
+grouped *"when to use which"* catalog (with a pick-by-intent guide) is
+[`.claude/skills-index.md`](.claude/skills-index.md).
 
 ## Critic roster
 
@@ -67,13 +72,28 @@ Documentation Consistency critics.
 
 ## Everyday workflow
 
+Let Claude write the `/goal` for you — it knows the project's gates better than a
+hand-written prompt. `CLAUDE.md` also tells Claude to *offer* this whenever you
+describe a non-trivial task.
+
 ```txt
-/multi-agent-dev implement [FEATURE]
+# Start a task — pick ONE entry point:
+/write-goal add password reset        # Claude writes a production-grade /goal → review, then run IT
+/multi-agent-dev implement [FEATURE]  # — or — drive the critic loop directly, no /goal
 /goal [FEATURE] is complete using the multi-agent critic workflow, verified on
       localhost, covered by E2E tests, with no post-implementation critic blockers.
-      Stop after 25 turns if not achieved.
+      Stop after 25 turns if not achieved.   # — or — hand-write the /goal yourself
+
+# Then, before committing:
 /qa-pass final pre-commit check
 ```
+
+These three are **alternatives**, not a sequence — if you used `/write-goal`, run
+the `/goal` it produced (don't skip to `/multi-agent-dev`).
+
+Every `/goal` should carry six things: a one-line task statement, 3–5 measurable
+success criteria, constraints, checkpoint rules, a self-verify instruction, and a
+max-budget guard. `/write-goal` produces all six, grounded in this repo.
 
 Long-running watchdog:
 

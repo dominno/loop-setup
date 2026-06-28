@@ -415,6 +415,31 @@ guidance and the version-pin note from `.claude/memory/topics/remote-env.md`.
 
 ---
 
+## Driving work: let Claude write the `/goal`
+
+The template follows the "let the agent write its own `/goal`" practice — Claude
+knows the project's gates better than a hand-written prompt. You inherit:
+
+- **A power-move instruction** in `CLAUDE.md` ("Writing `/goal` and `/loop`
+  prompts"): when you describe a non-trivial task, Claude first **offers to write
+  the `/goal`** instead of silently starting.
+- **The `/write-goal` command** — turns a described outcome into a copy-pasteable
+  `/goal` (or `/loop`) that includes all six parts: a one-line task statement,
+  3–5 **measurable** success criteria, constraints, **checkpoint rules** (pause vs.
+  run-through), a **self-verify** instruction, and a **max-budget guard**
+  (e.g. "stop after N turns").
+
+To adapt it: the generated criteria reference this repo's gates (`pnpm verify`,
+E2E coverage, no critic blockers) — once you've wired your own commands (above),
+`/write-goal` will cite *those*. Usage:
+
+```txt
+/write-goal add password reset and verify it end to end
+# → review the /goal it prints, then run it (don't skip to /multi-agent-dev)
+```
+
+---
+
 ## Tune the critics to your product
 
 The 10 critics are general-purpose. Adjust emphasis to your product type:

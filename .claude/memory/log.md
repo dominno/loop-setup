@@ -46,3 +46,10 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
   `.claude/memory/log/<YYYY>.md` once this file passes 500 lines, keeping a recent
   window here. Documented in `index.md` and the log header. Lossless move; the log
   is never `@imported`, so this is about read/append cost, not session context.
+
+## [2026-06-27] ingest | Let the agent write its own /goal
+- Adopted the "agent writes its own /goal" principle (Boris Cherny): CLAUDE.md now
+  has a "Writing /goal and /loop prompts" section (power-move offer + six-part goal
+  checklist + 3 methods + triggers), a new `/write-goal` command, and a
+  skills-index row. Filed the principle in topics/workflow.md.
+- Source: audit of the template against the "/goal authoring" guidance.

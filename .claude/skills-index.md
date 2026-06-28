@@ -13,6 +13,7 @@ catalog so both you and Claude can route to the right command.
 > this during its `lint`/`ingest` passes).
 
 ## Pick by intent
+- **Start a non-trivial task — let Claude write the goal** → `/write-goal`
 - **Build or change something non-trivial** → `/multi-agent-dev`
 - **Just review, don't change code** → `/critic-round`
 - **Add/expand end-to-end tests** → `/multi-agent-e2e`
@@ -26,6 +27,7 @@ catalog so both you and Claude can route to the right command.
 ## Development loop
 | Command | When to use | Args |
 |---|---|---|
+| `/write-goal` | Start of a non-trivial task: turn a described outcome into a production-grade `/goal` (or `/loop`) prompt to review and run | `[outcome]` (say "loop" for a /loop) |
 | `/multi-agent-dev` | Default for any non-trivial feature, bug fix, or UI change; ends with browser + test evidence | `[task]` |
 | `/critic-round` | Read-only review of the current app/flow; returns a findings matrix, changes no code | `[focus]` |
 | `/multi-agent-e2e` | A user flow needs new or expanded Playwright E2E coverage | `[target flow]` |

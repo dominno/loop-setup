@@ -31,6 +31,36 @@ The custom slash commands live in `.claude/commands/` and each carries a
 see `.claude/skills-index.md` (a plain catalog, kept in sync by `/dream`). Consult
 it when unsure which command fits the task.
 
+## Writing `/goal` and `/loop` prompts
+Let the agent write its own `/goal`/`/loop` — Claude knows this project's
+capabilities and gates better than a hand-written prompt does.
+
+**Power move (do this every time):** when the user describes a non-trivial task,
+**first ask whether they want you to write the `/goal` (or `/loop`) prompt before
+starting.** If yes, produce it; don't silently start executing. The `/write-goal`
+command does this on demand.
+
+**Every `/goal` you author must include all six:**
+1. A clear **one-line task statement**.
+2. **3–5 measurable success criteria** (objectively checkable, tied to this repo's
+   gates: the `verify` chain, no blocking console errors, E2E coverage, no
+   post-implementation critic blockers).
+3. **Constraints** that must hold throughout (scope limits, "don't touch X", no
+   unrelated refactors, don't weaken tests).
+4. **Checkpoint rules** — when to pause for review vs. run straight through.
+5. A **self-verify instruction** (run the relevant checks + a post-implementation
+   critic round and report evidence before claiming done).
+6. A **max-budget guard** (e.g. "stop after N turns if not achieved").
+
+**Three ways to get there:** (a) describe the outcome and ask for the `/goal`;
+(b) `/plan` first, then convert the plan into a `/goal`; (c) context-dump
+(`CLAUDE.md`, the memory wiki, the docs story map) and ask which `/goal`s are worth
+building. Triggers: "write me the `/goal` for this", "turn this into a `/loop`",
+"what `/goal` should we build based on how this project works?".
+
+For recurring/watchdog work, the standing loop prompt is `.claude/loop.md`
+(used by `/loop`).
+
 ## Project type
 This is a local web application developed and tested on localhost.
 
