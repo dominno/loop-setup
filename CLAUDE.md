@@ -215,8 +215,9 @@ Before marking any story status, Claude must consult these perspectives:
 Claude must create or update:
 
 - `docs/product-docs-index.md`
-- `docs/user-stories.md`
-- `docs/implementation-status.md`
+- `docs/stories/US-<id>-<slug>.md` — **one file per story** (the full record; copy `docs/stories/_TEMPLATE.md`)
+- `docs/user-stories.md` — the story index (one row per story → its file)
+- `docs/implementation-status.md` — the evidence dashboard
 - `docs/e2e-coverage-map.md`
 - `docs/story-verification-log.md`
 - `docs/gaps-and-risks.md`

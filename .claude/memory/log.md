@@ -60,3 +60,10 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
   web env's SKIP flag); CI runs parallel jobs (matrix + e2e); `process.env.CI` makes
   Playwright start a fresh server.
 - Source: adding `.github/workflows/verify.yml` (parallel-jobs CI).
+
+## [2026-06-28] migrate | User stories → one file per story
+- Split the monolithic `docs/user-stories.md` into per-story files under
+  `docs/stories/US-<id>-<slug>.md` (+ `_TEMPLATE.md`); `user-stories.md` is now the
+  index and `implementation-status.md` the dashboard. Scanner commands + CLAUDE.md
+  doc-scanner list + README/adoption-guide updated. Scales the backlog for a large
+  project (same reasoning as the memory wiki / log split). Stacked on PR #8.

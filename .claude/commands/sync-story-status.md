@@ -10,7 +10,8 @@ $ARGUMENTS
 
 Procedure:
 
-1. Read `docs/user-stories.md`. Also consult the memory wiki
+1. Read `docs/user-stories.md` (the index), then open only the per-story files
+   under `docs/stories/` that are in scope. Also consult the memory wiki
    (`.claude/memory/index.md` → relevant topic pages such as `topics/testing.md`)
    so evidence judgments match the project's testing/verification conventions.
 2. Read `docs/implementation-status.md` if it exists.
@@ -19,7 +20,9 @@ Procedure:
 5. Inspect relevant E2E tests.
 6. Start or reuse localhost when browser verification is needed.
 7. Verify implemented flows in browser when possible.
-8. Update story statuses using the strict status model.
+8. Update each story's status in its own `docs/stories/US-*.md` file using the
+   strict status model, and reflect it in the `docs/user-stories.md` index table
+   and the `docs/implementation-status.md` dashboard row.
 9. Record evidence in `docs/story-verification-log.md`.
 10. Update `docs/e2e-coverage-map.md`.
 11. Update `docs/gaps-and-risks.md`.
