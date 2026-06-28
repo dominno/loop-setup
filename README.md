@@ -25,6 +25,7 @@ CLAUDE.md                         Project rules + multi-agent workflow + doc-sca
     topics/                       One page per subject, read on demand
   settings.local.json             Allowed commands for the workflow
   commands/                       Each command has a description used for routing
+    write-goal.md                 Write a production-grade /goal (or /loop) prompt for a task
     multi-agent-dev.md            Full critic-led development pass
     critic-round.md               Review-only multi-agent critic round
     multi-agent-e2e.md            Critic-driven E2E test design + run
@@ -45,6 +46,10 @@ docs/
   story-verification-log.md       Evidence log of checks actually run
   gaps-and-risks.md               Missing/untested/contradictory areas
 ```
+
+**Which command when?** Each command above carries a one-line description; the full
+grouped *"when to use which"* catalog (with a pick-by-intent guide) is
+[`.claude/skills-index.md`](.claude/skills-index.md).
 
 ## Critic roster
 
