@@ -440,6 +440,33 @@ E2E coverage, no critic blockers) — once you've wired your own commands (above
 
 ---
 
+## Continuous integration (CI)
+
+The template ships `.github/workflows/verify.yml` — a GitHub Actions workflow that
+runs the `verify` chain on every push to `main` and every PR, so the green bar is
+enforced automatically (this is the "run in CI" half of the verification contract).
+
+It runs the checks as **parallel jobs**: a matrix runs `typecheck`, `lint`, `test`,
+and `build` concurrently (`fail-fast: false`, so you see *all* failures at once),
+and a separate `e2e` job runs Playwright. Each appears as its own status check, so
+you can mark them **required** in branch protection to block merges on red.
+
+Adapt it to your stack:
+
+- **Browser install (the key CI difference).** GitHub Actions has **no**
+  pre-provisioned Chromium, so the `e2e` job runs
+  `pnpm exec playwright install --with-deps chromium`. This is the normal install —
+  do **not** copy the web env’s `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` flag into CI.
+- **Match the matrix to your real scripts.** Drop `typecheck` if you have none,
+  rename scripts, etc. — keep it in sync with your `package.json` and `verify`.
+- **No E2E?** Delete the `e2e` job.
+- **Package manager / Node.** The workflow pins `pnpm 10` and Node 22; change both
+  to match your project (or add a `packageManager` field to `package.json`).
+- **Required checks.** In *Settings → Branches → branch protection*, add
+  `typecheck`, `lint`, `test`, `build`, `e2e` as required status checks.
+
+---
+
 ## Tune the critics to your product
 
 The 10 critics are general-purpose. Adjust emphasis to your product type:

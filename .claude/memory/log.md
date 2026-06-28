@@ -53,3 +53,10 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
   checklist + 3 methods + triggers), a new `/write-goal` command, and a
   skills-index row. Filed the principle in topics/workflow.md.
 - Source: audit of the template against the "/goal authoring" guidance.
+
+## [2026-06-27] ingest | CI workflow learnings
+- Added to topics/remote-env.md: CI (GitHub Actions) has no pre-provisioned
+  browser, so it runs the normal `playwright install --with-deps chromium` (not the
+  web env's SKIP flag); CI runs parallel jobs (matrix + e2e); `process.env.CI` makes
+  Playwright start a fresh server.
+- Source: adding `.github/workflows/verify.yml` (parallel-jobs CI).

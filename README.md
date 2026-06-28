@@ -45,6 +45,9 @@ docs/
   e2e-coverage-map.md             Story → Playwright/browser coverage
   story-verification-log.md       Evidence log of checks actually run
   gaps-and-risks.md               Missing/untested/contradictory areas
+.github/
+  workflows/
+    verify.yml                    CI: runs typecheck/lint/test/build (matrix) + e2e on push & PR
 ```
 
 **Which command when?** Each command above carries a one-line description; the full
