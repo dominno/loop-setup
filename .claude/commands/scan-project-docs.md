@@ -33,7 +33,9 @@ Procedure:
 2. Find product docs, PRDs, specs, README files, planning docs, route docs, API docs, and existing story docs.
 3. Create or update `docs/product-docs-index.md` with scanned sources.
 4. Extract product requirements.
-5. Convert requirements into user stories.
+5. Convert requirements into user stories — **one file per story** under
+   `docs/stories/US-<id>-<slug>.md` (copy `docs/stories/_TEMPLATE.md`). Do not
+   pile stories into a single file.
 6. Split large stories into independently testable stories.
 7. Add measurable acceptance criteria.
 8. Search the codebase for implementation evidence.
@@ -42,9 +44,10 @@ Procedure:
 11. Open relevant pages using Chrome or Playwright MCP.
 12. Verify implemented user flows in browser when possible.
 13. Check console errors and failed network requests.
-14. Update:
-    - `docs/user-stories.md`
-    - `docs/implementation-status.md`
+14. Update the story map:
+    - `docs/stories/US-<id>-<slug>.md` — one file per story (the full record)
+    - `docs/user-stories.md` — the index table (one row per story → its file)
+    - `docs/implementation-status.md` — the evidence dashboard (link each row to its story file)
     - `docs/e2e-coverage-map.md`
     - `docs/story-verification-log.md`
     - `docs/gaps-and-risks.md`

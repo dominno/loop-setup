@@ -26,7 +26,7 @@ CLAUDE.md                     Project rules, critic roster, completion gates
 .claude/loop.md               Recurring watchdog loop (used by /loop)
 .claude/memory/               Knowledge wiki (index.md + topics/ + log.md)
 .claude/settings.local.json   Allowed commands (adapt to your tools)
-docs/*.md                     Story-map scaffolds (product-docs-index, user-stories, ...)
+docs/*.md  docs/stories/      Story-map scaffolds (user-stories index, stories/ per-story files, ...)
 ```
 
 **Starter-only — demonstrates the commands (do NOT copy into an existing app):**
@@ -180,15 +180,20 @@ you.
 
 ## Adapt the story map (docs/)
 
-`docs/` holds the evidence-based product-delivery audit. To adopt:
+`docs/` holds the evidence-based product-delivery audit. **Each user story is its
+own file** under `docs/stories/US-<id>-<slug>.md` (so the backlog scales to a large
+project); `docs/user-stories.md` is the index and `docs/implementation-status.md`
+is the evidence dashboard. To adopt:
 
-1. Clear the example content in `docs/user-stories.md`,
-   `docs/implementation-status.md`, `docs/e2e-coverage-map.md`,
-   `docs/story-verification-log.md`, and `docs/gaps-and-risks.md` — keep the
-   headers and table formats.
+1. Delete the example story files (`docs/stories/US-001-*.md`,
+   `docs/stories/US-002-*.md`) but **keep `docs/stories/_TEMPLATE.md`**. Clear the
+   example rows in `docs/user-stories.md`, `docs/implementation-status.md`,
+   `docs/e2e-coverage-map.md`, `docs/story-verification-log.md`, and
+   `docs/gaps-and-risks.md` — keep the headers and table formats.
 2. Put your real requirements in `docs/prd.md` (or point the scanner at your
    existing PRD/specs).
-3. Run `/scan-project-docs full project` to extract stories and map evidence.
+3. Run `/scan-project-docs full project` — it writes one file per story under
+   `docs/stories/` and updates the index + dashboard.
 4. Keep it current with `/sync-story-status` and `/story-gap-analysis`.
 
 Status is **evidence-based**: a story is only `Done` with implementation + passing
@@ -224,6 +229,7 @@ sub-area instead of loose pages, then tell your wiki to skip it:
 mkdir -p docs/delivery
 git mv docs/{product-docs-index,user-stories,implementation-status,\
 e2e-coverage-map,story-verification-log,gaps-and-risks}.md docs/delivery/
+git mv docs/stories docs/delivery/stories       # the per-story files move too
 # keep prd.md wherever your product docs already live
 ```
 

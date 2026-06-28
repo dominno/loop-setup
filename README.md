@@ -40,8 +40,9 @@ docs/
   adoption-guide.md               How to adopt this template in a real project
   prd.md                          Product requirements (source of record for stories)
   product-docs-index.md           Source documents scanned
-  user-stories.md                 Living backlog of user stories
-  implementation-status.md        Story → implementation/test/verification status
+  user-stories.md                 Story index (one row per story → its file)
+  stories/                        One file per user story (US-<id>-<slug>.md) + _TEMPLATE.md
+  implementation-status.md        Evidence dashboard: story → impl/test/verification status
   e2e-coverage-map.md             Story → Playwright/browser coverage
   story-verification-log.md       Evidence log of checks actually run
   gaps-and-risks.md               Missing/untested/contradictory areas
