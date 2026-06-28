@@ -54,6 +54,34 @@ docs/
 grouped *"when to use which"* catalog (with a pick-by-intent guide) is
 [`.claude/skills-index.md`](.claude/skills-index.md).
 
+## Quickstart: add to an existing project
+
+The full walkthrough (with snippets, the existing-wiki bridge, and a checklist) is
+in **[`docs/adoption-guide.md`](docs/adoption-guide.md)** — the short version:
+
+1. **Copy the portable workflow** — `CLAUDE.md` (merge into yours, don't
+   overwrite), `.claude/commands/`, `.claude/loop.md`, `.claude/memory/`,
+   `.claude/skills-index.md`, `.claude/settings.local.json`, `docs/*.md`, and
+   `.github/workflows/verify.yml`. **Do not** copy the starter app (`src/`, `e2e/`,
+   `package.json`, and the build configs) — that's only a demo.
+2. **Wire the verification commands** — point `CLAUDE.md`'s *Main commands* at your
+   real scripts and **trim `verify`** to the steps you actually have (it's a hard
+   `&&` chain — a missing script breaks the gate). Adjust the package manager,
+   `localhost` port, and (in monorepos) the `src/`/`e2e/` paths.
+3. **Clear the seeded memory facts FIRST** — `.claude/memory/topics/*` ship this
+   template's Next/React stack facts and load as authoritative memory; delete the
+   ones that don't fit, then run `/dream` to seed your own.
+4. **Start the story map empty** — clear the example content in `docs/*.md` (keep
+   the formats) and run `/scan-project-docs` against your real docs/PRD.
+5. **Mind the integration gotchas** — already have a `docs/` wiki? Namespace the
+   story map and *bridge* (don't run two memories). Already have slash commands?
+   Check name collisions, give each a `description`, and set
+   `disable-model-invocation: true` on heavy ones. Put shared permissions in
+   `.claude/settings.json`; the `git add`/`git commit` auto-allow is opt-in. In CI,
+   install the browser normally (no `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD`).
+6. **First session** — `pnpm verify` (green once) → `/scan-project-docs` →
+   `/write-goal <your first task>` (review, then run it) → `/qa-pass` → `/dream`.
+
 ## Critic roster
 
 Pre-implementation and post-implementation critic rounds use:
