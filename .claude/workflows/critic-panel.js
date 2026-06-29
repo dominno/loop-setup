@@ -12,21 +12,27 @@ export const meta = {
 const focus =
   (args && (args.focus || (typeof args === 'string' ? args : null))) ||
   'the current app/flow and the changed files'
+// Optional: evidence the Lead already gathered (test/lint/build output, browser
+// findings, git diff). Critics verify against it instead of re-deriving from scratch.
+const priorEvidence = (args && args.priorEvidence) || null
+// Optional: skip the 5 UI/browser critics for non-UI (backend/docs/config) changes.
+// Defaults to including them (safe). Callers pass `uiInScope: false` to save fan-out.
+const uiInScope = !(args && args.uiInScope === false)
 
-// The standard critic roster. UI-facing critics should drive the running app via
-// Playwright/Chrome MCP (reachable through ToolSearch) when a localhost flow exists.
-const CRITICS = [
-  { key: 'first-time-user', label: 'First-Time User Critic', lens: 'Can a new user understand the first screen and complete the flow without help? Labels, errors, hidden assumptions.' },
-  { key: 'ux-flow', label: 'UX Flow Critic', lens: 'Beginning/middle/end of the journey, feedback on every action, confirm destructive actions, loading/success/recovery states.' },
-  { key: 'designer', label: 'Designer Critic', lens: 'Layout hierarchy, spacing, alignment, typography, color, button/empty/loading/error states, mobile responsiveness.' },
-  { key: 'artistic-direction', label: 'Artistic Direction Critic', lens: 'Mood, visual identity, beauty, coherence — is it intentional and memorable or generic?' },
-  { key: 'frontend-arch', label: 'Frontend Architecture Critic', lens: 'Component boundaries, state, hooks, server/client split, TypeScript correctness, SOLID/DRY/KISS, no duplicated logic.' },
-  { key: 'qa-e2e', label: 'QA / E2E Critic', lens: 'Critical paths, missing Playwright tests, meaningful vs superficial assertions, edge cases, did we actually verify localhost?' },
-  { key: 'accessibility', label: 'Accessibility Critic', lens: 'Keyboard nav, focus states, accessible names, labels, form-error linkage, contrast, semantic HTML, dialog a11y.' },
-  { key: 'performance', label: 'Performance Critic', lens: 'Unnecessary re-renders, large client bundles, heavy images, blocking fetches, overuse of client components.' },
-  { key: 'security', label: 'Security Critic', lens: 'Unsafe input handling, secrets exposed to the client, auth-bypass risk, missing server-side validation, unsafe redirects, XSS, insecure storage.' },
-  { key: 'regression', label: 'Regression Critic', lens: 'Existing routes/flows affected, shared components/APIs changed, snapshots, styling side effects, backward compatibility.' },
+// The standard critic roster. `ui: true` marks browser-facing critics.
+const ALL_CRITICS = [
+  { key: 'first-time-user', ui: true, label: 'First-Time User Critic', lens: 'Can a new user understand the first screen and complete the flow without help? Labels, errors, hidden assumptions.' },
+  { key: 'ux-flow', ui: true, label: 'UX Flow Critic', lens: 'Beginning/middle/end of the journey, feedback on every action, confirm destructive actions, loading/success/recovery states.' },
+  { key: 'designer', ui: true, label: 'Designer Critic', lens: 'Layout hierarchy, spacing, alignment, typography, color, button/empty/loading/error states, mobile responsiveness.' },
+  { key: 'artistic-direction', ui: true, label: 'Artistic Direction Critic', lens: 'Mood, visual identity, beauty, coherence — is it intentional and memorable or generic?' },
+  { key: 'frontend-arch', ui: false, label: 'Frontend Architecture Critic', lens: 'Component boundaries, state, hooks, server/client split, TypeScript correctness, SOLID/DRY/KISS, no duplicated logic.' },
+  { key: 'qa-e2e', ui: false, label: 'QA / E2E Critic', lens: 'Critical paths, missing Playwright tests, meaningful vs superficial assertions, edge cases, did we actually verify localhost?' },
+  { key: 'accessibility', ui: true, label: 'Accessibility Critic', lens: 'Keyboard nav, focus states, accessible names, labels, form-error linkage, contrast, semantic HTML, dialog a11y.' },
+  { key: 'performance', ui: false, label: 'Performance Critic', lens: 'Unnecessary re-renders, large client bundles, heavy images, blocking fetches, overuse of client components.' },
+  { key: 'security', ui: false, label: 'Security Critic', lens: 'Unsafe input handling, secrets exposed to the client, auth-bypass risk, missing server-side validation, unsafe redirects, XSS, insecure storage.' },
+  { key: 'regression', ui: false, label: 'Regression Critic', lens: 'Existing routes/flows affected, shared components/APIs changed, snapshots, styling side effects, backward compatibility.' },
 ]
+const CRITICS = ALL_CRITICS.filter((c) => uiInScope || !c.ui)
 
 const FINDINGS_SCHEMA = {
   type: 'object',
@@ -66,24 +72,31 @@ phase('Review')
 const reviews = await parallel(
   CRITICS.map((c) => () =>
     agent(
-      `You are the **${c.label}** for this project. Read CLAUDE.md and the relevant memory topic page(s), inspect ${focus} (read the code; if a localhost flow is in scope, drive it via Playwright/Chrome MCP and check console + network), then review strictly through your lens:\n${c.lens}\n\nReturn only findings you can back with concrete evidence. An empty list is a valid, honest answer.`,
+      `You are the **${c.label}** for this project. Read CLAUDE.md and the relevant memory topic page(s), inspect ${focus} (read the code; if a localhost flow is in scope, drive it via Playwright/Chrome MCP and check console + network), then review strictly through your lens:\n${c.lens}\n${priorEvidence ? `\nEvidence already gathered by the Lead — verify against it instead of re-deriving from scratch:\n${typeof priorEvidence === 'string' ? priorEvidence : JSON.stringify(priorEvidence)}\n` : ''}\nReturn only findings you can back with concrete evidence. An empty list is a valid, honest answer.`,
       { label: `critic:${c.key}`, phase: 'Review', schema: FINDINGS_SCHEMA },
     ).then((r) => ({ critic: c.key, label: c.label, findings: (r && r.findings) || [] })),
   ),
 )
 
-// Flatten + light dedup (same severity + near-same title) across critics.
+// Flatten, then dedup on (severity + exact normalized title). On a collision, MERGE
+// (keep the corroborating critic + its evidence) rather than dropping it — two
+// critics agreeing is a stronger signal, not a duplicate to discard.
 const all = reviews
   .filter(Boolean)
   .flatMap((r) => r.findings.map((f) => ({ ...f, critic: r.critic, criticLabel: r.label })))
-const seen = new Set()
-const deduped = all.filter((f) => {
-  const k = `${f.severity}::${f.title.trim().toLowerCase()}`
-  if (seen.has(k)) return false
-  seen.add(k)
-  return true
-})
-log(`${deduped.length} findings from ${CRITICS.length} critics (${all.length} before dedup)`)
+const byKey = new Map()
+for (const f of all) {
+  const k = `${f.severity}::${String(f.title || '').trim().toLowerCase()}`
+  const existing = byKey.get(k)
+  if (existing) {
+    existing.alsoFlaggedBy = existing.alsoFlaggedBy || []
+    existing.alsoFlaggedBy.push({ critic: f.critic, evidence: f.evidence })
+  } else {
+    byKey.set(k, { ...f })
+  }
+}
+const deduped = [...byKey.values()]
+log(`${deduped.length} findings from ${CRITICS.length} critics (${all.length} before merge-dedup)`)
 
 // Phase 2 — adversarially verify each blocker/important finding with a SEPARATE
 // skeptic agent (the reviewer never confirms its own finding). Nice-to-haves are
@@ -105,8 +118,9 @@ const verified = await parallel(
 )
 
 const niceToHaves = deduped.filter((f) => f.severity === 'nice-to-have')
-const confirmed = verified.filter((f) => f.real !== false)
-const refuted = verified.filter((f) => f.real === false)
+const settled = verified.filter(Boolean)
+const confirmed = settled.filter((f) => f.real !== false)
+const refuted = settled.filter((f) => f.real === false)
 
 return {
   focus,

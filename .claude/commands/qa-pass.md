@@ -25,10 +25,11 @@ Checklist:
     - forms have labels
     - keyboard navigation works for critical flow
 12. Run a **post-implementation critic round as a Workflow** — invoke the Workflow
-    tool with `scriptPath: .claude/workflows/critic-panel.js`,
-    `args: { "focus": "the changed flows for $ARGUMENTS + git diff" }`. The critics
-    run as parallel subagents and each blocker/important finding is verified by a
-    separate skeptic (no single agent simulating the panel).
+    tool with `scriptPath: .claude/workflows/critic-panel.js` and
+    `args: { "focus": "the changed flows for $ARGUMENTS", "priorEvidence": "<git diff summary + the typecheck/lint/unit/build/E2E results + a11y/browser findings from steps 2-11>" }`.
+    The critics run as parallel subagents and verify against that evidence; each
+    blocker/important finding is checked by a separate skeptic (no single agent
+    simulating the panel).
 13. Report the workflow's `confirmed` blockers/non-blockers and recommended next
     actions.
 

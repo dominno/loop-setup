@@ -95,3 +95,21 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
   parallel agents get unique labels (map index), schema-required fields get fallback
   strings, and `scan-docs` statuses are capped at "E2E tested" (browser pass is the
   caller's job). Filed the workflow-authoring gotchas in topics/workflow.md.
+
+## [2026-06-29] lint | Ran critic-panel-style Workflow on the workflow scripts
+- Dogfooded a real multi-agent review (18 agents) over `.claude/workflows/*`: 1
+  blocker + 10 important confirmed, 0 refuted. Fixes applied:
+  - scan-docs: guard the first-stage `evidence` result (blocker — unguarded deref
+    crashed the pipeline); fail CLOSED on a missing verdict (cap the maker's
+    self-proposed status) instead of accepting it.
+  - critic-panel: `.filter(Boolean)` the verified array; MERGE duplicate findings
+    (keep corroborating critics) instead of dropping; optional `args.uiInScope`
+    (skip the 5 UI critics for non-UI changes) and `args.priorEvidence` (verify
+    against already-gathered evidence, not a re-run).
+  - loop-iteration: implementer returns the REAL `git diff`; verifier reviews the
+    actual diff (not a self-report) and the caller applies the returned patch; added
+    a hard programmatic DENYLIST gate on changedFiles (defense-in-depth).
+  - e2e-design: dedup key includes category; title coalesced before `.trim()`.
+- Lesson: a maker/checker that hands the checker only the maker's self-report is
+  weak — give the checker the real artifact (diff). Exact-title dedup also let one
+  bug appear as two findings; merge, don't drop.

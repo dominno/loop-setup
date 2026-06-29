@@ -33,9 +33,11 @@ budget, denylist, escalation, stop conditions). Before running, fix the loop's
    - L2/L3: fix the confirmed blockers + directly-related important findings via the
      **loop-iteration Workflow** (`.claude/workflows/loop-iteration.js`,
      `args.items` = the triaged, denylist-cleared items): an implementer subagent
-     fixes each in an isolated worktree and a *separate* verifier approves/rejects.
-     Apply approved changes; escalate the rest. Never fix nice-to-haves
-     automatically; never start unrelated refactors.
+     fixes each in an isolated worktree and a *separate* verifier reviews the real
+     diff and approves/rejects (a hard denylist gate also forces escalation). For
+     each **approved** item, apply its returned `diff` patch and re-run the smallest
+     relevant check before committing; escalate `rejected`/`escalate` items. Never
+     fix nice-to-haves automatically; never start unrelated refactors.
 10. **Append a run entry** to `.claude/memory/loop-run-log.md` (see format below).
 
 ## Denylist — never touch autonomously (escalate instead)

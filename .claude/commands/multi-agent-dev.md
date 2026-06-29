@@ -34,8 +34,10 @@ Procedure:
 9. Add or update Playwright E2E tests for the verified flow; run them.
 10. Run typecheck, lint, unit tests, and build if appropriate.
 11. **Post-implementation critic round** — invoke the same Workflow again with
-    `args.focus` set to the changed flow + `git diff`. Fix any remaining confirmed
-    blockers (re-run the workflow until none remain).
+    `args.focus` set to the changed flow and `args.priorEvidence` set to what you
+    already gathered (git diff summary + test/lint/build results + browser/console
+    findings) so the critics verify against it instead of re-running everything.
+    Fix any remaining confirmed blockers (re-run the workflow until none remain).
 12. Report final evidence.
 
 Never mark complete unless:

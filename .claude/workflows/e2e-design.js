@@ -45,7 +45,9 @@ const results = await parallel(
 const all = results.filter(Boolean).flat()
 const seen = new Set()
 const cases = all.filter((c) => {
-  const k = c.title.trim().toLowerCase()
+  // Key on category + title so a failure-path case isn't dropped for sharing a
+  // title with a happy-path case.
+  const k = `${c.category}::${String(c.title || '').trim().toLowerCase()}`
   if (seen.has(k)) return false
   seen.add(k)
   return true
