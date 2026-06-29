@@ -19,6 +19,13 @@
   routing); the grouped "when to use" catalog is `.claude/skills-index.md`. A
   catalog file must NOT live in `.claude/commands/` — anything there auto-registers
   as its own `/command`.
+- **Critic rounds and the doc-scan run as deterministic multi-agent Workflows**, not
+  one agent simulating critics: `.claude/workflows/critic-panel.js` (fan-out critics
+  → adversarial verify → matrix) and `.claude/workflows/scan-docs.js` (per-story
+  parallel evidence → separate status verifier). The critic commands invoke these
+  via the Workflow tool (the sanctioned multi-agent opt-in). Name the workflow
+  distinctly from any command (e.g. `critic-panel` vs the `/critic-round` command)
+  to avoid a duplicate entry in the skills list.
 - A command's `description` also lets Claude **auto-invoke** it. Add
   `disable-model-invocation: true` to heavy/code-changing commands that should be
   manual-only.

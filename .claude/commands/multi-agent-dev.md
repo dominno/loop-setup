@@ -8,53 +8,35 @@ Run a full multi-agent development loop for this local web app.
 User task:
 $ARGUMENTS
 
-You are the Lead Agent.
-
-You must use the following critic agents before implementation:
-
-1. First-Time User Critic
-2. UX Flow Critic
-3. Designer Critic
-4. Artistic Direction Critic
-5. Frontend Architecture Critic
-6. QA / E2E Critic
-7. Accessibility Critic
-8. Performance Critic
-9. Security Critic
-10. Regression Critic
+You are the Lead Agent. The critic rounds run as a **deterministic multi-agent
+Workflow** (critics fan out as parallel subagents in their own contexts; each
+blocker/important finding is verified by a separate skeptic) — **not** one agent
+simulating critics. Invoking the Workflow tool here is expected (this command opts
+into multi-agent orchestration).
 
 Procedure:
 
-1. Read CLAUDE.md.
-2. Read package.json.
-3. Inspect the relevant routes, components, API handlers, tests, and styles.
-4. Start or reuse the local dev server.
-5. Open the relevant localhost page using Chrome or Playwright MCP.
-6. Observe the current behavior.
-7. Run the critic round before implementation.
-
-For each critic, produce:
-
-- severity: blocker / important / nice-to-have
-- finding
-- evidence
-- recommended fix
-
-Then:
-
-8. Synthesize findings as Lead Agent.
-9. Choose the smallest safe implementation plan.
-10. Implement only blockers and important issues directly related to the task.
-11. Run the smallest relevant automated checks first.
-12. Verify in browser on localhost.
-13. Check console errors.
-14. Check failed network requests.
-15. Add or update Playwright E2E tests for the verified flow.
-16. Run relevant E2E tests.
-17. Run typecheck, lint, unit tests, and build if appropriate.
-18. Run a second critic round after implementation.
-19. Fix remaining blockers.
-20. Report final evidence.
+1. Read CLAUDE.md and package.json.
+2. Inspect the relevant routes, components, API handlers, tests, and styles.
+3. Start or reuse the local dev server; open the relevant localhost page (Chrome/
+   Playwright MCP) and observe current behavior.
+4. **Pre-implementation critic round** — invoke the Workflow tool with
+   `scriptPath: .claude/workflows/critic-panel.js`,
+   `args: { "focus": "$ARGUMENTS (current behavior + changed files)" }`.
+   Render the returned `confirmed` findings as the critic matrix; record
+   `niceToHaves`; ignore `refuted`.
+5. As Lead Agent, choose the smallest safe plan from the confirmed blockers +
+   directly-related important findings.
+6. Implement only those. Keep the **maker/checker split**: implementation is your
+   pass; the post-implementation workflow below is the independent checker.
+7. Run the smallest relevant automated checks first.
+8. Verify in browser on localhost; check console errors and failed network requests.
+9. Add or update Playwright E2E tests for the verified flow; run them.
+10. Run typecheck, lint, unit tests, and build if appropriate.
+11. **Post-implementation critic round** — invoke the same Workflow again with
+    `args.focus` set to the changed flow + `git diff`. Fix any remaining confirmed
+    blockers (re-run the workflow until none remain).
+12. Report final evidence.
 
 Never mark complete unless:
 

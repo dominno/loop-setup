@@ -124,6 +124,17 @@ Before implementation, the Lead Agent must consult these critic perspectives:
 9. Security Critic
 10. Regression Critic
 
+**Critic rounds run as a deterministic multi-agent Workflow, not one agent
+simulating critics.** Use the Workflow tool with
+`.claude/workflows/critic-panel.js`: each critic runs as its own subagent in its own
+context, and every blocker/important finding is adversarially verified by a
+*separate* skeptic before it counts. The doc-scanner uses
+`.claude/workflows/scan-docs.js` the same way (parallel evidence-gathering +
+separate status verifier). The commands (`/critic-round`, `/multi-agent-dev`,
+`/multi-agent-e2e`, `/qa-pass`, `/scan-project-docs`) invoke these workflows — that
+is the sanctioned multi-agent opt-in. This is heavier (many subagents) by design;
+it buys genuine independent review instead of a single context role-playing the panel.
+
 ## Development loop
 
 For every task:

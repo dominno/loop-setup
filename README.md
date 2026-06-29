@@ -26,6 +26,9 @@ CLAUDE.md                         Project rules + multi-agent workflow + doc-sca
     loop-run-log.md               Append-only /loop run history (the loop's durable state)
     topics/                       One page per subject, read on demand
   settings.local.json             Allowed commands for the workflow
+  workflows/                      Deterministic multi-agent orchestration scripts (Workflow tool)
+    critic-panel.js               Fan-out critics → adversarial verify → severity matrix
+    scan-docs.js                  Per-story parallel evidence-gathering → status verifier
   commands/                       Each command has a description used for routing
     write-goal.md                 Write a production-grade /goal (or /loop) prompt for a task
     multi-agent-dev.md            Full critic-led development pass
@@ -106,6 +109,14 @@ Pre-implementation and post-implementation critic rounds use:
 The documentation-scanner workflow adds: Product Requirements, User Story,
 Acceptance Criteria, Code Evidence, Unit Test Evidence, E2E Test Evidence, and
 Documentation Consistency critics.
+
+**These run as real multi-agent orchestration, not one agent simulating critics.**
+Critic rounds invoke the `.claude/workflows/critic-panel.js` Workflow — each critic
+is its own subagent in its own context, and every blocker/important finding is
+adversarially verified by a *separate* skeptic before it counts. The doc-scanner
+uses `.claude/workflows/scan-docs.js` (parallel per-story evidence + a separate
+status verifier). It's heavier by design — independent review beats a single context
+role-playing the panel.
 
 ## Everyday workflow
 

@@ -38,8 +38,15 @@ Procedure:
    pile stories into a single file.
 6. Split large stories into independently testable stories.
 7. Add measurable acceptance criteria.
-8. Search the codebase for implementation evidence.
-9. Search the test suite for unit, integration, and E2E evidence.
+8. **Gather evidence in parallel via a Workflow** — once you have the story list,
+   invoke the Workflow tool with `scriptPath: .claude/workflows/scan-docs.js` and
+   `args: { "stories": [ {id, title, source, acceptanceCriteria}, ... ] }`. It
+   pipelines each story through an evidence-gathering agent (searches code + tests)
+   and a *separate* status-verifier agent (evidence-based status, no overclaiming),
+   returning one record per story. This is real multi-agent orchestration, not one
+   agent judging every story in a single context. (Invoking Workflow here is expected.)
+9. Use the returned records as the source of truth for status; do browser
+   verification yourself where it raises a status to `Browser verified`/`Done`.
 10. Start or reuse localhost when browser verification is possible.
 11. Open relevant pages using Chrome or Playwright MCP.
 12. Verify implemented user flows in browser when possible.

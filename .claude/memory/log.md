@@ -76,3 +76,12 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
   with the >500-line rotation rule). Added the maker/checker no-self-approve rule
   and `Agent isolation: worktree` note to CLAUDE.md. Filed the principle in
   topics/workflow.md.
+
+## [2026-06-29] migrate | Critic rounds → deterministic multi-agent Workflows
+- Replaced "simulate critics" (one agent role-playing the panel) with real
+  orchestration: added `.claude/workflows/critic-panel.js` (parallel critics →
+  adversarial verify → matrix) and `.claude/workflows/scan-docs.js` (per-story
+  parallel evidence → separate status verifier). Rewired `/critic-round`,
+  `/multi-agent-dev`, `/multi-agent-e2e`, `/qa-pass`, `/scan-project-docs` to invoke
+  them via the Workflow tool. Named the workflow `critic-panel` (not `critic-round`)
+  to avoid colliding with the command in the skills list.
