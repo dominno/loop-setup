@@ -28,9 +28,11 @@ catalog so both you and Claude can route to the right command.
 
 ## Development loop
 
-> Critic rounds run as real multi-agent **Workflows** (`.claude/workflows/critic-panel.js`),
-> and the doc-scan uses `.claude/workflows/scan-docs.js` — parallel subagents +
-> adversarial verification, invoked via the Workflow tool. Not one agent simulating critics.
+> Fan-out commands run as real multi-agent **Workflows** under `.claude/workflows/`
+> (parallel subagents + adversarial/maker-checker verification), invoked via the
+> Workflow tool — not one agent simulating critics: `critic-panel` (critic rounds),
+> `scan-docs` (`/scan-project-docs`), `gap-analysis` (`/story-gap-analysis`),
+> `e2e-design` (`/multi-agent-e2e`), `loop-iteration` (`/loop` L2/L3).
 
 | Command | When to use | Args |
 |---|---|---|

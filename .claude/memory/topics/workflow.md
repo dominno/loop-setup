@@ -19,13 +19,21 @@
   routing); the grouped "when to use" catalog is `.claude/skills-index.md`. A
   catalog file must NOT live in `.claude/commands/` — anything there auto-registers
   as its own `/command`.
-- **Critic rounds and the doc-scan run as deterministic multi-agent Workflows**, not
-  one agent simulating critics: `.claude/workflows/critic-panel.js` (fan-out critics
-  → adversarial verify → matrix) and `.claude/workflows/scan-docs.js` (per-story
-  parallel evidence → separate status verifier). The critic commands invoke these
-  via the Workflow tool (the sanctioned multi-agent opt-in). Name the workflow
-  distinctly from any command (e.g. `critic-panel` vs the `/critic-round` command)
-  to avoid a duplicate entry in the skills list.
+- **Fan-out commands run as deterministic multi-agent Workflows** under
+  `.claude/workflows/`, not one agent simulating critics: `critic-panel` (critics →
+  adversarial verify → matrix), `scan-docs` (per-story evidence → status verifier),
+  `gap-analysis` (per-dimension gaps → synth order), `e2e-design` (per-category
+  cases → dedup), `loop-iteration` (worktree implementer → separate verifier).
+  Commands invoke them via the Workflow tool (the sanctioned opt-in). Name a workflow
+  distinctly from any command (e.g. `critic-panel` vs the `/critic-round` command) to
+  avoid a duplicate skills-list entry. Don't force non-fan-out commands
+  (`/fix-localhost`, `/write-goal`, `/dream`, `/memory-audit`) into workflows.
+- Workflow scripts use a DSL (`agent()/parallel()/pipeline()/phase()`, top-level
+  `await`/`return`); validate syntax by wrapping the body in `async function(){…}`
+  before `node --check` (bare `node --check` reports a false "illegal return").
+  Make verifier agents **fail safe** (a null/failed verdict must NOT confirm), give
+  parallel agents **unique labels** (add the map index), and provide **fallback
+  strings** for schema-required fields.
 - A command's `description` also lets Claude **auto-invoke** it. Add
   `disable-model-invocation: true` to heavy/code-changing commands that should be
   manual-only.

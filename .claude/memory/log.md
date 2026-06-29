@@ -85,3 +85,13 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
   `/multi-agent-dev`, `/multi-agent-e2e`, `/qa-pass`, `/scan-project-docs` to invoke
   them via the Workflow tool. Named the workflow `critic-panel` (not `critic-round`)
   to avoid colliding with the command in the skills list.
+
+## [2026-06-29] ingest | More orchestration workflows + review fixes
+- Added `gap-analysis.js` (→ `/story-gap-analysis`), `e2e-design.js` (→
+  `/multi-agent-e2e`), and `loop-iteration.js` (maker/checker for `/loop` L2/L3).
+  Wired the commands + `.claude/loop.md`; updated README, CLAUDE.md, skills-index,
+  adoption-guide (new "Multi-agent orchestration (Workflows)" section).
+- From PR #10 review: verifier agents now fail safe (null verdict ⇒ not confirmed),
+  parallel agents get unique labels (map index), schema-required fields get fallback
+  strings, and `scan-docs` statuses are capped at "E2E tested" (browser pass is the
+  caller's job). Filed the workflow-authoring gotchas in topics/workflow.md.
