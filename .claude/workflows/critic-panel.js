@@ -91,11 +91,16 @@ log(`${deduped.length} findings from ${CRITICS.length} critics (${all.length} be
 phase('Verify')
 const toVerify = deduped.filter((f) => f.severity === 'blocker' || f.severity === 'important')
 const verified = await parallel(
-  toVerify.map((f) => () =>
+  toVerify.map((f, i) => () =>
     agent(
       `Adversarially verify this ${f.severity} finding from the ${f.criticLabel}. Try to REFUTE it by inspecting the actual code/flow — default to real:false if the evidence does not hold up.\n\nTitle: ${f.title}\nEvidence: ${f.evidence}\nRecommendation: ${f.recommendation}`,
-      { label: `verify:${f.critic}`, phase: 'Verify', schema: VERDICT_SCHEMA },
-    ).then((v) => ({ ...f, real: v ? v.real : true, verifyReason: v && v.reason })),
+      { label: `verify:${f.critic}:${i}`, phase: 'Verify', schema: VERDICT_SCHEMA },
+    ).then((v) => ({
+      ...f,
+      // Fail safe: a missing/failed verdict must NOT confirm the finding.
+      real: v ? v.real : false,
+      verifyReason: (v && v.reason) || 'verifier returned no verdict — not confirmed',
+    })),
   ),
 )
 

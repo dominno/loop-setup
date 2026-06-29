@@ -15,11 +15,10 @@ Procedure:
 1. Inspect existing Playwright tests, app routes, and components.
 2. Start or reuse localhost; manually verify the target flow in browser.
 3. **Surface coverage gaps via the critic panel** — invoke the Workflow tool with
-   `scriptPath: .claude/workflows/critic-panel.js`,
-   `args: { "focus": "E2E coverage of the $ARGUMENTS flow: critical paths, failure/
-   edge/recovery states, accessibility, and regressions" }`. The QA/E2E,
-   First-Time User, UX Flow, Accessibility, and Regression critics each report in
-   their own context; findings are adversarially verified.
+   `scriptPath: .claude/workflows/critic-panel.js` and (on one line)
+   `args: { "focus": "E2E coverage of the $ARGUMENTS flow: critical paths, failure/edge/recovery states, accessibility, and regressions" }`.
+   The QA/E2E, First-Time User, UX Flow, Accessibility, and Regression critics each
+   report in their own context; findings are adversarially verified.
 4. Draft E2E test cases from the workflow's `confirmed` findings (happy + at least
    one failure/edge path).
 5. Implement Playwright tests; run the specific specs.

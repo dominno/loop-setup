@@ -15,9 +15,12 @@ if (!stories.length) {
   return { error: 'No stories provided. Extract stories from docs first, then pass args.stories = [{id,title,source}].', records: [] }
 }
 
-const STATUSES = [
+// This workflow only inspects the repo (code + tests). Statuses that require a
+// human/MCP browser pass — "Browser verified" and "Done" — are intentionally OUT of
+// scope: the caller raises a story to those after verifying it in a browser.
+const REPO_STATUSES = [
   'Not started', 'Partially implemented', 'Implemented',
-  'Unit tested', 'E2E tested', 'Browser verified', 'Done', 'Blocked', 'Deprecated',
+  'Unit tested', 'E2E tested', 'Blocked', 'Deprecated',
 ]
 
 const EVIDENCE_SCHEMA = {
@@ -28,7 +31,7 @@ const EVIDENCE_SCHEMA = {
     implementationFiles: { type: 'array', items: { type: 'string' }, description: 'files that implement this story (empty if none found)' },
     unitTests: { type: 'string', enum: ['Missing', 'Partial', 'Present'] },
     e2eTests: { type: 'string', enum: ['Missing', 'Partial', 'Present'] },
-    proposedStatus: { type: 'string', enum: STATUSES },
+    proposedStatus: { type: 'string', enum: REPO_STATUSES },
     notes: { type: 'string' },
   },
 }
@@ -38,7 +41,7 @@ const VERDICT_SCHEMA = {
   additionalProperties: false,
   required: ['finalStatus', 'justification'],
   properties: {
-    finalStatus: { type: 'string', enum: STATUSES },
+    finalStatus: { type: 'string', enum: REPO_STATUSES },
     justification: { type: 'string', description: 'why the evidence supports this status; downgrade if the proposed status overclaims' },
   },
 }
@@ -53,7 +56,7 @@ const records = await pipeline(
     ),
   (evidence, story) =>
     agent(
-      `You are a strict status verifier. Confirm an EVIDENCE-BASED status for story ${story.id} (${story.title}). A story is only "Done" with implementation + passing tests + E2E/browser verification recorded. Downgrade if the proposed status overclaims.\n\nProposed: ${JSON.stringify(evidence)}`,
+      `You are a strict status verifier for story ${story.id} (${story.title}). Confirm a status that is justified by REPO evidence only (code + tests). From repo evidence you can confirm at most "E2E tested"; "Browser verified" and "Done" require a separate browser pass and are OUT of scope here — never assign them. Downgrade if the proposed status overclaims.\n\nProposed: ${JSON.stringify(evidence)}`,
       { label: `verify:${story.id}`, phase: 'Verify', schema: VERDICT_SCHEMA },
     ).then((v) => ({
       id: story.id,
@@ -63,7 +66,7 @@ const records = await pipeline(
       unitTests: evidence.unitTests,
       e2eTests: evidence.e2eTests,
       finalStatus: v ? v.finalStatus : evidence.proposedStatus,
-      justification: v && v.justification,
+      justification: (v && v.justification) || 'verifier returned no verdict — using gathered repo evidence',
       notes: evidence.notes,
     })),
 )
