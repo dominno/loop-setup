@@ -113,3 +113,14 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
 - Lesson: a maker/checker that hands the checker only the maker's self-report is
   weak — give the checker the real artifact (diff). Exact-title dedup also let one
   bug appear as two findings; merge, don't drop.
+
+## [2026-06-29] ingest | Self-improvement axis: /improve-skills meta-critic
+- The self-learning system improved only its *facts* (the wiki via `/dream`), not its
+  *own prompts/workflows*. Added `/improve-skills` (`.claude/workflows/improve-skills.js`
+  + `.claude/commands/improve-skills.md`): a per-lens meta-critic (clarity,
+  instruction-following risk, safety/gating, consistency/DRY, workflow DSL, routing)
+  over the project's OWN command/workflow/instruction surface, with a separate skeptic
+  verifying each finding on two axes (problem **real** + edit **safe**). Returns
+  proposed edits only — confirmation-gated, `disable-model-invocation: true`.
+- Wired into CLAUDE.md (workflow list + "self-improvement vs self-learning" note),
+  skills-index, and topics/workflow.md. Filed the two-axis principle there.

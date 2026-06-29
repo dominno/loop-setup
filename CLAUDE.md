@@ -138,10 +138,18 @@ multi-agent opt-in:
 - `e2e-design.js` — per-category E2E case enumeration → dedup (`/multi-agent-e2e`).
 - `loop-iteration.js` — worktree implementer → separate verifier per item
   (`/loop` at L2/L3).
+- `improve-skills.js` — per-lens meta-critic over the project's OWN prompts and
+  workflows → adversarial verify → proposed edits (`/improve-skills`).
 
 This is heavier (many subagents) by design; it buys genuine independent review
 instead of one context role-playing the panel. Commands that don't fan out
 (`/fix-localhost`, `/write-goal`, `/dream`, `/memory-audit`) stay single-agent.
+
+**Self-improvement, not just self-learning.** `/dream` improves what the system
+*knows* (the memory wiki); `/improve-skills` improves the *machinery* — it dogfoods
+the critic panel on our own command/workflow prompts and proposes tightenings.
+Both are confirmation-gated: never auto-create, rewrite, or delete a command/skill,
+and never weaken an instruction or remove a safety gate as an "improvement".
 
 ## Development loop
 
