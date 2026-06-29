@@ -451,7 +451,7 @@ applies "loop engineering" operating rules (adapted from
 [loop-engineering](https://github.com/cobusgreyling/loop-engineering)): declare a
 **trust level** — **L1 report-only → L2 assisted → L3 unattended** — and keep the
 loop inside it; read/write the append-only `.claude/memory/loop-run-log.md` each
-run; honor the **denylist** (auth, payments, secrets, infra, CI config, migrations),
+iteration; honor the **denylist** (auth, payments, secrets, infra, CI config, migrations),
 the **escalation triggers**, and the **red-flag stop conditions** (e.g. >3 fix
 attempts on one item, verifier == implementer, auto-merge without an allowlist).
 Before raising a loop to a higher trust level, satisfy `.claude/loop-checklist.md`.

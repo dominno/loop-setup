@@ -34,7 +34,7 @@ this repo from the "loop engineering" loop-design checklist
 
 **5. State / memory**
 - [ ] Run state documented (`.claude/memory/loop-run-log.md`)
-- [ ] Prior state read at every run start
+- [ ] Prior state read at every iteration start
 - [ ] Outcomes + timestamps written; resolved items pruned; human overrides recorded
 
 **6. Human handoff**
@@ -48,11 +48,11 @@ this repo from the "loop engineering" loop-design checklist
 
 **8. Cost & limits**
 - [ ] Token/turn budget estimated; per-run cap + kill switch
-- [ ] Append-only run log; budget checked at run start/end
+- [ ] Append-only run log; remaining budget checked each iteration (against the per-run cap)
 - [ ] Max iterations per item per run; max auto-PRs per day
 
 **9. Observability**
-- [ ] Each run logged (started, items found, actions, escalations)
+- [ ] Each iteration logged (started, items found, actions, escalations)
 - [ ] Success metric chosen; state inspectable without reading chat logs
 
 **10. Safety**
@@ -63,6 +63,6 @@ this repo from the "loop engineering" loop-design checklist
 ## Red flags (stop & fix before raising the level)
 - Same PR/issue with >3 automated fix attempts without progress.
 - Verifier is the same session as the implementer.
-- No run-log (memory loss each run).
+- No run-log (memory loss each iteration).
 - Notifications on every run regardless of findings.
 - Auto-merge without a path allowlist.

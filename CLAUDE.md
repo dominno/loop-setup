@@ -61,8 +61,8 @@ building. Triggers: "write me the `/goal` for this", "turn this into a `/loop`",
 For recurring/watchdog work, the standing loop prompt is `.claude/loop.md`
 (used by `/loop`). Loops are **hardened** ("loop engineering"): declare a trust
 level — **L1 report-only → L2 assisted → L3 unattended** — and stay within it; read
-`.claude/memory/loop-run-log.md` at the start of each run and append an entry at the
-end; respect the denylist (auth, payments, secrets, infra, CI config, migrations),
+`.claude/memory/loop-run-log.md` at the start of each iteration and append an entry
+per iteration; respect the denylist (auth, payments, secrets, infra, CI config, migrations),
 the escalation triggers, and the red-flag stop conditions. Before raising a loop's
 trust level, satisfy `.claude/loop-checklist.md`.
 

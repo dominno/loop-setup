@@ -13,8 +13,10 @@ budget, denylist, escalation, stop conditions). Before running, fix the loop's
   `.claude/loop-checklist.md` to be satisfied first.
 
 ## Per-iteration process (act as Lead Agent)
-1. **Read state first:** open `.claude/memory/loop-run-log.md` (prior runs,
-   outcomes, human overrides) and check the budget before doing anything.
+1. **Read state first:** open `.claude/memory/loop-run-log.md` (prior iterations,
+   outcomes, human overrides) and check **remaining budget** against the per-run cap
+   (turns or tokens — see *Budget & limits*) before doing anything; stop and
+   escalate if it is already exhausted.
 2. Identify the current active task from the conversation.
 3. Check git status and changed files.
 4. Start or reuse the dev server.
@@ -52,7 +54,9 @@ Notify only when action is needed — do not ping on a no-op run.
 - Auto-merge is enabled without a path allowlist.
 
 ## Budget & limits
-- Respect a per-run turn/token cap; stop and escalate when reached.
+- Declare a **per-run cap** with the trust level — a turn budget (e.g. 25 turns) or
+  a token ceiling — and record remaining budget in every run-log entry; stop and
+  escalate when reached.
 - Max iterations per item per run: small (e.g. 3). Max auto-PRs per day: small.
 - A loop with an empty watchlist should self-stop, not spin.
 
@@ -65,6 +69,7 @@ Notify only when action is needed — do not ping on a no-op run.
 ## [YYYY-MM-DD HH:MM] L<level> | <task>
 - found: <n blockers / n important / n nice-to-have>
 - actions: <fixes applied, or "report only">
+- budget: <used>/<cap> (turns or tokens)
 - escalations: <none | reason>
 - evidence: <tests/browser>
 - next: <stop | continue | awaiting human>
