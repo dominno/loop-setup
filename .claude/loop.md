@@ -22,16 +22,22 @@ budget, denylist, escalation, stop conditions). Before running, fix the loop's
 4. Start or reuse the dev server.
 5. Open the relevant localhost page in Chrome or Playwright MCP.
 6. Check browser console errors and failed network requests.
-7. Run a critic round (First-Time User, UX Flow, Designer, Artistic Direction,
-   Frontend Architecture, QA / E2E, Accessibility, Performance, Security,
-   Regression) and produce a critic matrix.
-8. **Maker/checker:** the critic that verifies a fix must be a *separate* pass from
-   the one that made it — the implementer never marks its own work "done".
+7. Run the critic round as the **critic-panel Workflow**
+   (`.claude/workflows/critic-panel.js`, `args.focus` = the current task/flow):
+   critics fan out as parallel subagents and findings are adversarially verified.
+   Render the returned `confirmed` matrix.
+8. **Maker/checker:** the pass that verifies a fix must be *separate* from the one
+   that made it — the implementer never marks its own work "done".
 9. Act **only within the trust level**:
    - L1: record findings only.
-   - L2/L3: fix blockers directly related to the current task; fix important issues
-     only if low-risk and in scope; re-run the smallest relevant test; re-check
-     browser. Never fix nice-to-haves automatically; never start unrelated refactors.
+   - L2/L3: fix the confirmed blockers + directly-related important findings via the
+     **loop-iteration Workflow** (`.claude/workflows/loop-iteration.js`,
+     `args.items` = the triaged, denylist-cleared items): an implementer subagent
+     fixes each in an isolated worktree and a *separate* verifier reviews the real
+     diff and approves/rejects (a hard denylist gate also forces escalation). For
+     each **approved** item, apply its returned `diff` patch and re-run the smallest
+     relevant check before committing; escalate `rejected`/`escalate` items. Never
+     fix nice-to-haves automatically; never start unrelated refactors.
 10. **Append a run entry** to `.claude/memory/loop-run-log.md` (see format below).
 
 ## Denylist — never touch autonomously (escalate instead)

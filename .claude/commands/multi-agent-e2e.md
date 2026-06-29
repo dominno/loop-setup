@@ -3,40 +3,27 @@ description: Design and run Playwright E2E tests for a user flow via a critic wo
 argument-hint: [target flow, e.g. "onboarding"]
 ---
 
-Design and run E2E tests using a multi-agent critic workflow.
+Design and run E2E tests using a **deterministic multi-agent Workflow** (the critic
+panel runs as parallel subagents in their own contexts) — not one agent simulating
+critics.
 
 Target flow:
 $ARGUMENTS
 
-Roles:
-
-1. QA / E2E Critic
-   - Defines critical paths and edge cases.
-
-2. First-Time User Critic
-   - Defines what a new user would try first.
-
-3. UX Flow Critic
-   - Defines success, failure, loading, and recovery states.
-
-4. Accessibility Critic
-   - Defines keyboard and screen-reader relevant checks.
-
-5. Regression Critic
-   - Identifies existing flows that could break.
-
 Procedure:
 
-1. Inspect existing Playwright tests.
-2. Inspect app routes and components.
-3. Start or reuse localhost.
-4. Manually verify the target flow in browser.
-5. Draft E2E test cases from critic findings.
-6. Implement Playwright tests.
-7. Run the specific E2E tests.
-8. Fix test or app failures, but do not weaken assertions.
-9. Run browser verification again.
-10. Report evidence.
+1. Inspect existing Playwright tests, app routes, and components.
+2. Start or reuse localhost; manually verify the target flow in browser.
+3. **Enumerate test cases via a Workflow** — invoke the Workflow tool with
+   `scriptPath: .claude/workflows/e2e-design.js`, `args: { "flow": "$ARGUMENTS" }`.
+   One agent per path category (happy, failure, edge, accessibility, regression)
+   enumerates concrete cases in its own context; results are deduped. (Invoking
+   Workflow here is expected.) It returns `{ flow, count, cases }`.
+4. Implement Playwright tests from the returned `cases` (cover the happy path + at
+   least one failure/edge path); run the specific specs.
+5. Fix test or app failures, but do not weaken assertions.
+6. Run browser verification again.
+7. Report evidence.
 
 Required output:
 

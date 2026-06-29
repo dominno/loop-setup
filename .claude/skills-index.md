@@ -27,6 +27,13 @@ catalog so both you and Claude can route to the right command.
   `.claude/memory/loop-run-log.md`)
 
 ## Development loop
+
+> Fan-out commands run as real multi-agent **Workflows** under `.claude/workflows/`
+> (parallel subagents + adversarial/maker-checker verification), invoked via the
+> Workflow tool — not one agent simulating critics: `critic-panel` (critic rounds),
+> `scan-docs` (`/scan-project-docs`), `gap-analysis` (`/story-gap-analysis`),
+> `e2e-design` (`/multi-agent-e2e`), `loop-iteration` (`/loop` L2/L3).
+
 | Command | When to use | Args |
 |---|---|---|
 | `/write-goal` | Start of a non-trivial task: turn a described outcome into a production-grade `/goal` (or `/loop`) prompt to review and run | `[outcome]` (say "loop" for a /loop) |

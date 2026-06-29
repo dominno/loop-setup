@@ -19,6 +19,27 @@
   routing); the grouped "when to use" catalog is `.claude/skills-index.md`. A
   catalog file must NOT live in `.claude/commands/` — anything there auto-registers
   as its own `/command`.
+- **Fan-out commands run as deterministic multi-agent Workflows** under
+  `.claude/workflows/`, not one agent simulating critics: `critic-panel` (critics →
+  adversarial verify → matrix), `scan-docs` (per-story evidence → status verifier),
+  `gap-analysis` (per-dimension gaps → synth order), `e2e-design` (per-category
+  cases → dedup), `loop-iteration` (worktree implementer → separate verifier).
+  Commands invoke them via the Workflow tool (the sanctioned opt-in). Name a workflow
+  distinctly from any command (e.g. `critic-panel` vs the `/critic-round` command) to
+  avoid a duplicate skills-list entry. Don't force non-fan-out commands
+  (`/fix-localhost`, `/write-goal`, `/dream`, `/memory-audit`) into workflows.
+- Workflow scripts use a DSL (`agent()/parallel()/pipeline()/phase()`, top-level
+  `await`/`return`); validate syntax by wrapping the body in `async function(){…}`
+  before `node --check` (bare `node --check` reports a false "illegal return").
+  Make verifier agents **fail safe** (a null/failed verdict must NOT confirm), give
+  parallel agents **unique labels** that **always include the map index** (so
+  duplicate caller-supplied ids can't collide — `${id || 'x'}-${i}`, not `${id||i}`),
+  and provide **fallback strings** for schema-required fields. Also guard the
+  *first* pipeline stage's result before deref (`const ev = stage1 || {}`), fail
+  **closed** (don't accept a maker's self-proposed value when the checker is
+  missing), and give a maker/checker checker the **real artifact** (the diff), not
+  the maker's self-report. The DSL auto-caps concurrency (~min(16, cores-2)), so a
+  large fan-out won't spawn unbounded agents — no manual limit needed.
 - A command's `description` also lets Claude **auto-invoke** it. Add
   `disable-model-invocation: true` to heavy/code-changing commands that should be
   manual-only.

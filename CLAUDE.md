@@ -124,6 +124,25 @@ Before implementation, the Lead Agent must consult these critic perspectives:
 9. Security Critic
 10. Regression Critic
 
+**Critic rounds and other fan-out work run as deterministic multi-agent Workflows,
+not one agent simulating critics.** The commands invoke `Workflow`-tool scripts in
+`.claude/workflows/` — parallel subagents (own context each) with adversarial /
+maker-checker verification — and that command-driven invocation is the sanctioned
+multi-agent opt-in:
+
+- `critic-panel.js` — fan-out critics → adversarial verify → matrix
+  (`/critic-round`, `/multi-agent-dev`, `/qa-pass`, `/loop`).
+- `scan-docs.js` — per-story parallel evidence → separate status verifier
+  (`/scan-project-docs`).
+- `gap-analysis.js` — per-dimension gaps → synthesized order (`/story-gap-analysis`).
+- `e2e-design.js` — per-category E2E case enumeration → dedup (`/multi-agent-e2e`).
+- `loop-iteration.js` — worktree implementer → separate verifier per item
+  (`/loop` at L2/L3).
+
+This is heavier (many subagents) by design; it buys genuine independent review
+instead of one context role-playing the panel. Commands that don't fan out
+(`/fix-localhost`, `/write-goal`, `/dream`, `/memory-audit`) stay single-agent.
+
 ## Development loop
 
 For every task:

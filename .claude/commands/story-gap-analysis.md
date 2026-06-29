@@ -13,27 +13,21 @@ the topic pages relevant to the gaps you're assessing (e.g. `topics/testing.md`,
 `topics/build-and-verify.md`) so "tested / not tested" and "edge cases" judgments
 reflect the project's real conventions.
 
-Produce:
+**Run the analysis as a deterministic multi-agent Workflow** — invoke the Workflow
+tool with `scriptPath: .claude/workflows/gap-analysis.js`,
+`args: { "scope": "$ARGUMENTS" }`. One agent analyzes each gap dimension in its own
+context, in parallel; a final agent synthesizes the recommended order. (Invoking
+Workflow here is expected.)
 
-1. Requirements found in docs but not implemented.
-2. Implemented features not described in docs.
-3. Stories implemented but not unit-tested.
-4. Stories implemented but not E2E-tested.
-5. Stories E2E-tested but missing important edge cases.
-6. Stories that work functionally but fail UX/design/artistic direction review.
-7. Ambiguous or contradictory requirements.
-8. Recommended next implementation order.
+The workflow returns `{ scope, totalGaps, byDimension, recommendedOrder }` covering:
 
-Use critic agents:
+1. Requirements found in docs but not implemented (`docs-not-impl`).
+2. Implemented features not described in docs (`impl-not-docs`).
+3. Stories implemented but not unit-tested (`impl-not-unit`).
+4. Stories implemented but not E2E-tested (`impl-not-e2e`).
+5. Stories E2E-tested but missing important edge cases (`e2e-missing-edges`).
+6. Stories that work but fail UX/design/artistic-direction review (`ux-design`).
+7. Ambiguous or contradictory requirements (`ambiguous`).
+8. Recommended next implementation order (`recommendedOrder`).
 
-- Product Requirements Critic
-- Code Evidence Critic
-- Unit Test Evidence Critic
-- E2E Test Evidence Critic
-- UX / First-Time User Critic
-- Designer Critic
-- Artistic Direction Critic
-- Regression Critic
-- Documentation Consistency Critic
-
-Do not edit files unless explicitly asked.
+Render the dimensions + the recommended order. Do not edit files unless explicitly asked.

@@ -24,13 +24,13 @@ Checklist:
     - buttons have accessible names
     - forms have labels
     - keyboard navigation works for critical flow
-12. Run a post-implementation critic round using:
-    - First-Time User Critic
-    - UX Flow Critic
-    - Designer Critic
-    - QA / E2E Critic
-    - Accessibility Critic
-    - Regression Critic
-13. Report blockers, non-blockers, and recommended next actions.
+12. Run a **post-implementation critic round as a Workflow** — invoke the Workflow
+    tool with `scriptPath: .claude/workflows/critic-panel.js` and
+    `args: { "focus": "the changed flows for $ARGUMENTS", "priorEvidence": "<git diff summary + the typecheck/lint/unit/build/E2E results + a11y/browser findings from steps 2-11>" }`.
+    The critics run as parallel subagents and verify against that evidence; each
+    blocker/important finding is checked by a separate skeptic (no single agent
+    simulating the panel).
+13. Report the workflow's `confirmed` blockers/non-blockers and recommended next
+    actions.
 
 Never mark as complete if build, tests, or critical browser flow fails.

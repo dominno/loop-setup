@@ -23,8 +23,9 @@ The portable part is everything **except** the starter app. The starter app
 ```txt
 CLAUDE.md                     Project rules, critic roster, completion gates
 .claude/commands/*            Slash commands (/multi-agent-dev, /critic-round, /dream, ...)
-.claude/loop.md               Recurring watchdog loop (used by /loop)
-.claude/memory/               Knowledge wiki (index.md + topics/ + log.md)
+.claude/workflows/*           Multi-agent orchestration scripts (critic-panel, scan-docs, ...)
+.claude/loop.md  loop-checklist.md   Recurring watchdog loop + readiness rubric (used by /loop)
+.claude/memory/               Knowledge wiki (index.md + topics/ + log.md + loop-run-log.md)
 .claude/settings.local.json   Allowed commands (adapt to your tools)
 docs/*.md  docs/stories/      Story-map scaffolds (user-stories index, stories/ per-story files, ...)
 ```
@@ -488,6 +489,31 @@ Adapt it to your stack:
   to match your project (or add a `packageManager` field to `package.json`).
 - **Required checks.** In *Settings → Branches → branch protection*, add
   `typecheck`, `lint`, `test`, `build`, `e2e` as required status checks.
+
+---
+
+## Multi-agent orchestration (Workflows)
+
+The critic-bearing commands don't simulate critics in one context — they invoke
+deterministic **`Workflow`-tool scripts** under `.claude/workflows/` that fan out
+parallel subagents (own context each) with adversarial / maker-checker verification:
+`critic-panel`, `scan-docs`, `gap-analysis`, `e2e-design`, and `loop-iteration`.
+
+To adapt them:
+
+- **They're project-aware via prompts, not config** — the agents read `CLAUDE.md`,
+  the memory wiki, and your `src/`/`e2e/`/`docs/` paths. Adjust those paths in the
+  scripts if your layout differs (e.g. a monorepo package dir).
+- **Cost is real.** A critic round spawns ~10 critic agents + a verifier per
+  blocker/important finding; `/multi-agent-dev` runs that twice (pre + post). That's
+  the price of genuine independent review — scale the roster down if you want it
+  lighter, or reserve the workflows for substantive changes.
+- **Name workflows distinctly from commands** — a workflow whose `meta.name`
+  matches a command shows up as a duplicate in the skills list (that's why the
+  critic workflow is `critic-panel`, not `critic-round`).
+- **Requires a Claude Code build with the `Workflow` tool.** If yours lacks it, the
+  commands still work as a single Lead agent simulating the panel — just without the
+  independent contexts.
 
 ---
 

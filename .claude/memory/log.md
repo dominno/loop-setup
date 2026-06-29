@@ -76,3 +76,40 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
   with the >500-line rotation rule). Added the maker/checker no-self-approve rule
   and `Agent isolation: worktree` note to CLAUDE.md. Filed the principle in
   topics/workflow.md.
+
+## [2026-06-29] migrate | Critic rounds → deterministic multi-agent Workflows
+- Replaced "simulate critics" (one agent role-playing the panel) with real
+  orchestration: added `.claude/workflows/critic-panel.js` (parallel critics →
+  adversarial verify → matrix) and `.claude/workflows/scan-docs.js` (per-story
+  parallel evidence → separate status verifier). Rewired `/critic-round`,
+  `/multi-agent-dev`, `/multi-agent-e2e`, `/qa-pass`, `/scan-project-docs` to invoke
+  them via the Workflow tool. Named the workflow `critic-panel` (not `critic-round`)
+  to avoid colliding with the command in the skills list.
+
+## [2026-06-29] ingest | More orchestration workflows + review fixes
+- Added `gap-analysis.js` (→ `/story-gap-analysis`), `e2e-design.js` (→
+  `/multi-agent-e2e`), and `loop-iteration.js` (maker/checker for `/loop` L2/L3).
+  Wired the commands + `.claude/loop.md`; updated README, CLAUDE.md, skills-index,
+  adoption-guide (new "Multi-agent orchestration (Workflows)" section).
+- From PR #10 review: verifier agents now fail safe (null verdict ⇒ not confirmed),
+  parallel agents get unique labels (map index), schema-required fields get fallback
+  strings, and `scan-docs` statuses are capped at "E2E tested" (browser pass is the
+  caller's job). Filed the workflow-authoring gotchas in topics/workflow.md.
+
+## [2026-06-29] lint | Ran critic-panel-style Workflow on the workflow scripts
+- Dogfooded a real multi-agent review (18 agents) over `.claude/workflows/*`: 1
+  blocker + 10 important confirmed, 0 refuted. Fixes applied:
+  - scan-docs: guard the first-stage `evidence` result (blocker — unguarded deref
+    crashed the pipeline); fail CLOSED on a missing verdict (cap the maker's
+    self-proposed status) instead of accepting it.
+  - critic-panel: `.filter(Boolean)` the verified array; MERGE duplicate findings
+    (keep corroborating critics) instead of dropping; optional `args.uiInScope`
+    (skip the 5 UI critics for non-UI changes) and `args.priorEvidence` (verify
+    against already-gathered evidence, not a re-run).
+  - loop-iteration: implementer returns the REAL `git diff`; verifier reviews the
+    actual diff (not a self-report) and the caller applies the returned patch; added
+    a hard programmatic DENYLIST gate on changedFiles (defense-in-depth).
+  - e2e-design: dedup key includes category; title coalesced before `.trim()`.
+- Lesson: a maker/checker that hands the checker only the maker's self-report is
+  weak — give the checker the real artifact (diff). Exact-title dedup also let one
+  bug appear as two findings; merge, don't drop.
