@@ -458,6 +458,10 @@ Before raising a loop to a higher trust level, satisfy `.claude/loop-checklist.m
 Adopters should start every new loop at **L1** and only promote it once the
 checklist passes.
 
+For a full step-by-step (copy list, scope/cadence, budget, loop-pattern recipes,
+worktree isolation, and a first-loop walkthrough), see
+[`loop-integration-guide.md`](./loop-integration-guide.md).
+
 ---
 
 ## Continuous integration (CI)

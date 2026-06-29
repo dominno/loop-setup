@@ -40,6 +40,7 @@ CLAUDE.md                         Project rules + multi-agent workflow + doc-sca
     story-gap-analysis.md         Gap analysis: docs vs code vs E2E
 docs/
   adoption-guide.md               How to adopt this template in a real project
+  loop-integration-guide.md       How to add hardened recurring /loop automations to a project
   prd.md                          Product requirements (source of record for stories)
   product-docs-index.md           Source documents scanned
   user-stories.md                 Story index (one row per story → its file)
