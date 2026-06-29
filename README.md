@@ -17,11 +17,13 @@ The workflow starts with critique, not coding — and ends with proof, not confi
 ```txt
 CLAUDE.md                         Project rules + multi-agent workflow + doc-scanner workflow
 .claude/
-  loop.md                         Recurring multi-agent watchdog loop (used by /loop)
+  loop.md                         Recurring watchdog loop, hardened: trust levels + denylist + stop rules
+  loop-checklist.md               Readiness rubric to raise a loop's trust level (L0→L3)
   skills-index.md                 Grouped "when to use which command" catalog (kept in sync by /dream)
   memory/                         Knowledge wiki (Karpathy LLM-wiki pattern), maintained by /dream
     index.md                      Small catalog imported by CLAUDE.md (always loaded)
     log.md                        Append-only history of wiki operations
+    loop-run-log.md               Append-only /loop run history (the loop's durable state)
     topics/                       One page per subject, read on demand
   settings.local.json             Allowed commands for the workflow
   commands/                       Each command has a description used for routing
@@ -38,6 +40,7 @@ CLAUDE.md                         Project rules + multi-agent workflow + doc-sca
     story-gap-analysis.md         Gap analysis: docs vs code vs E2E
 docs/
   adoption-guide.md               How to adopt this template in a real project
+  loop-integration-guide.md       How to add hardened recurring /loop automations to a project
   prd.md                          Product requirements (source of record for stories)
   product-docs-index.md           Source documents scanned
   user-stories.md                 Story index (one row per story → its file)

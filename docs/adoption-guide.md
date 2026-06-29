@@ -444,6 +444,24 @@ E2E coverage, no critic blockers) — once you've wired your own commands (above
 # → review the /goal it prints, then run it (don't skip to /multi-agent-dev)
 ```
 
+### Recurring loops are hardened
+
+For recurring/watchdog work (`/loop`, used via `.claude/loop.md`), the template
+applies "loop engineering" operating rules (adapted from
+[loop-engineering](https://github.com/cobusgreyling/loop-engineering)): declare a
+**trust level** — **L1 report-only → L2 assisted → L3 unattended** — and keep the
+loop inside it; read/write the append-only `.claude/memory/loop-run-log.md` each
+iteration; honor the **denylist** (auth, payments, secrets, infra, CI config, migrations),
+the **escalation triggers**, and the **red-flag stop conditions** (e.g. >3 fix
+attempts on one item, verifier == implementer, auto-merge without an allowlist).
+Before raising a loop to a higher trust level, satisfy `.claude/loop-checklist.md`.
+Adopters should start every new loop at **L1** and only promote it once the
+checklist passes.
+
+For a full step-by-step (copy list, scope/cadence, budget, loop-pattern recipes,
+worktree isolation, and a first-loop walkthrough), see
+[`loop-integration-guide.md`](./loop-integration-guide.md).
+
 ---
 
 ## Continuous integration (CI)

@@ -10,6 +10,11 @@
   (copy `docs/stories/_TEMPLATE.md`); `docs/user-stories.md` is the index and
   `docs/implementation-status.md` is the evidence dashboard. Don't pile stories into
   one file — same scaling reason as the memory wiki and log.
+- **Loops are hardened ("loop engineering"):** every `/loop` declares a trust level
+  (L1 report → L2 assisted → L3 unattended), reads/writes
+  `.claude/memory/loop-run-log.md`, and obeys the denylist + red-flag stop
+  conditions in `.claude/loop.md`. Raise a level only after `.claude/loop-checklist.md`
+  passes. The verifier pass is always separate from the implementer (no self-approve).
 - Custom commands live in `.claude/commands/` (each with a `description` for
   routing); the grouped "when to use" catalog is `.claude/skills-index.md`. A
   catalog file must NOT live in `.claude/commands/` — anything there auto-registers
