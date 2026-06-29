@@ -53,7 +53,8 @@ command does this on demand.
 6. A **max-budget guard** (e.g. "stop after N turns if not achieved").
 
 **Three ways to get there:** (a) describe the outcome and ask for the `/goal`;
-(b) `/plan` first, then convert the plan into a `/goal`; (c) context-dump
+(b) outline the plan inline first (steps + files touched), then convert it into a
+`/goal`; (c) context-dump
 (`CLAUDE.md`, the memory wiki, the docs story map) and ask which `/goal`s are worth
 building. Triggers: "write me the `/goal` for this", "turn this into a `/loop`",
 "what `/goal` should we build based on how this project works?".
@@ -104,6 +105,10 @@ Before browser testing:
 - Do not delete tests to make the suite pass.
 - Always explain root cause before applying a fix.
 - After fixing, run the smallest relevant test first, then the full verification command.
+- Commit or push only when the user explicitly asks. Never commit/push as a side
+  effect of completing a task; `git commit`/`git add` being pre-allowed in
+  `settings.local.json` is a convenience, not a license to commit unprompted. If on
+  the default branch, branch first.
 
 ## Multi-Agent Development Workflow
 
@@ -138,10 +143,18 @@ multi-agent opt-in:
 - `e2e-design.js` — per-category E2E case enumeration → dedup (`/multi-agent-e2e`).
 - `loop-iteration.js` — worktree implementer → separate verifier per item
   (`/loop` at L2/L3).
+- `improve-skills.js` — per-lens meta-critic over the project's OWN prompts and
+  workflows → adversarial verify → proposed edits (`/improve-skills`).
 
 This is heavier (many subagents) by design; it buys genuine independent review
 instead of one context role-playing the panel. Commands that don't fan out
 (`/fix-localhost`, `/write-goal`, `/dream`, `/memory-audit`) stay single-agent.
+
+**Self-improvement, not just self-learning.** `/dream` improves what the system
+*knows* (the memory wiki); `/improve-skills` improves the *machinery* — it dogfoods
+the critic panel on our own command/workflow prompts and proposes tightenings.
+Both are confirmation-gated: never auto-create, rewrite, or delete a command/skill,
+and never weaken an instruction or remove a safety gate as an "improvement".
 
 ## Development loop
 

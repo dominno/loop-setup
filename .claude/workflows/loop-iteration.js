@@ -40,6 +40,10 @@ const VERDICT_SCHEMA = {
 const DENYLIST = [
   /(^|\/)\.env(\.|$)/i, /(^|\/)auth(\/|\.|$)/i, /payment/i, /secret/i,
   /(^|\/)migrations?(\/|$)/i, /\.github\/workflows\//i, /(^|\/)(infra|deploy)(\/|$)/i,
+  // Self-modification guard: a loop must never autonomously rewrite the prompt
+  // surface that governs it. Touching .claude/ or CLAUDE.md forces escalation; the
+  // sanctioned path to edit prompts is the manual, confirmation-gated /improve-skills.
+  /(^|\/)\.claude(\/|$)/i, /(^|\/)CLAUDE\.md$/i,
 ]
 const hitsDenylist = (files) => (files || []).some((f) => DENYLIST.some((re) => re.test(f)))
 

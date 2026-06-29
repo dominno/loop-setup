@@ -36,7 +36,10 @@ $ARGUMENTS
    verifiable bullet. If it fits no existing page, create a new
    `topics/<slug>.md`, add cross-links, and add one row to `index.md`.
 5. If a learning is really a session-governing rule (a do/don't policy or a
-   completion gate), propose it for `CLAUDE.md` and apply the edit.
+   completion gate), it belongs in `CLAUDE.md`. Show the proposed `CLAUDE.md` edit and
+   apply it **only after explicit confirmation** — `CLAUDE.md` is a core governing
+   prompt (it overrides every session), so it always needs confirmation, even for an
+   addition. Topic-page and index-row additions do not.
 6. **Skills check.** Decide whether the learning is a *fact* or a *recurring
    procedure*:
    - A **fact** (gotcha, convention, command) → a topic page, as above.
@@ -83,6 +86,8 @@ $ARGUMENTS
 - Never record temporary or branch-specific bugs, or one-time errors already fixed.
 - Prefer appending; editing or removing an existing fact needs explicit user
   confirmation. Adding a topic or an index row does not.
+- Adding or changing a rule in `CLAUDE.md` (a core governing prompt), unlike adding a
+  topic-page fact, **always** needs explicit confirmation.
 - Never auto-create, rewrite, or delete a command/skill. Propose it and act only on
   confirmation. Updating `.claude/skills-index.md` rows additively is fine.
 - Keep `index.md` to summaries + links; facts belong in topic pages.

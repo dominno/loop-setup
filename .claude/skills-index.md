@@ -22,6 +22,7 @@ catalog so both you and Claude can route to the right command.
 - **Map what's built vs documented vs tested** → `/scan-project-docs`, then
   `/sync-story-status`, `/story-gap-analysis`
 - **Capture/curate what was learned** → `/dream`, `/memory-audit`
+- **Improve the system's own prompts/skills/workflows** → `/improve-skills`
 - **Keep watching localhost on an interval** → `/loop` (uses `.claude/loop.md`;
   gate trust level with `.claude/loop-checklist.md`, state in
   `.claude/memory/loop-run-log.md`)
@@ -32,7 +33,8 @@ catalog so both you and Claude can route to the right command.
 > (parallel subagents + adversarial/maker-checker verification), invoked via the
 > Workflow tool — not one agent simulating critics: `critic-panel` (critic rounds),
 > `scan-docs` (`/scan-project-docs`), `gap-analysis` (`/story-gap-analysis`),
-> `e2e-design` (`/multi-agent-e2e`), `loop-iteration` (`/loop` L2/L3).
+> `e2e-design` (`/multi-agent-e2e`), `loop-iteration` (`/loop` L2/L3),
+> `improve-skills` (`/improve-skills` — meta-critic over our own prompts/workflows).
 
 | Command | When to use | Args |
 |---|---|---|
@@ -55,6 +57,7 @@ catalog so both you and Claude can route to the right command.
 |---|---|---|
 | `/dream` | End of a non-trivial task: ingest durable learnings into the wiki, lint it, and propose new skills | `[ingest \| query <q> \| lint]` |
 | `/memory-audit` | Periodically prune stale/duplicated/misleading memory (no deletes without confirmation) | — |
+| `/improve-skills` | Periodically improve the system's OWN prompts/skills/workflows via a meta-critic; proposes edits, confirmation-gated (manual-only) | `[scope]` |
 
 ## Conventions for adding a command
 - Every command needs a one-line `description` frontmatter (used for routing) and,

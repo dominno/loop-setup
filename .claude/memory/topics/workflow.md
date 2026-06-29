@@ -23,11 +23,28 @@
   `.claude/workflows/`, not one agent simulating critics: `critic-panel` (critics →
   adversarial verify → matrix), `scan-docs` (per-story evidence → status verifier),
   `gap-analysis` (per-dimension gaps → synth order), `e2e-design` (per-category
-  cases → dedup), `loop-iteration` (worktree implementer → separate verifier).
-  Commands invoke them via the Workflow tool (the sanctioned opt-in). Name a workflow
+  cases → dedup), `loop-iteration` (worktree implementer → separate verifier),
+  `improve-skills` (per-lens meta-critic over our OWN prompts/workflows → proposed
+  edits, confirmation-gated). Commands invoke them via the Workflow tool (the
+  sanctioned opt-in). Name a workflow
   distinctly from any command (e.g. `critic-panel` vs the `/critic-round` command) to
   avoid a duplicate skills-list entry. Don't force non-fan-out commands
   (`/fix-localhost`, `/write-goal`, `/dream`, `/memory-audit`) into workflows.
+- **Self-improvement vs self-learning (two axes).** `/dream` improves what the system
+  *knows* (curates the memory wiki — facts); `/improve-skills` improves the *machinery*
+  (a meta-critic Workflow that reviews the project's OWN command/workflow prompts and
+  proposes tightenings). Both are confirmation-gated: never auto-create, rewrite, or
+  delete a command/skill, and never weaken an instruction or remove a safety gate as
+  an "improvement". `/improve-skills` is `disable-model-invocation: true` (manual-only)
+  because it edits core prompts; its verifier judges a finding on *two* axes — is the
+  problem **real** and is the proposed edit **safe** (won't weaken instruction-following
+  or break a workflow) — and only real-and-safe findings are `applyReady`.
+- **A self-improving system must add its OWN prompt surface to every autonomous
+  denylist.** The loop's deterministic gate (`loop-iteration.js` DENYLIST) and prose
+  denylist (`loop.md`) both include `.claude/` and `CLAUDE.md`, so an L2/L3 loop can
+  never autonomously rewrite the rules that constrain it — it escalates instead. The
+  only sanctioned way to change the prompt surface is the manual, confirmation-gated
+  `/improve-skills`. (Found by the first `/improve-skills` run, on its own machinery.)
 - Workflow scripts use a DSL (`agent()/parallel()/pipeline()/phase()`, top-level
   `await`/`return`); validate syntax by wrapping the body in `async function(){…}`
   before `node --check` (bare `node --check` reports a false "illegal return").

@@ -44,6 +44,7 @@ Never mark complete unless:
 
 - the flow works in browser
 - no blocking console errors remain
+- typecheck, lint, and unit tests pass (build passes when the change warrants it)
 - relevant E2E tests pass
 - post-implementation critic round has no blockers
 - files changed are reported

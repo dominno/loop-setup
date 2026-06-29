@@ -113,3 +113,41 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
 - Lesson: a maker/checker that hands the checker only the maker's self-report is
   weak — give the checker the real artifact (diff). Exact-title dedup also let one
   bug appear as two findings; merge, don't drop.
+
+## [2026-06-29] ingest | Self-improvement axis: /improve-skills meta-critic
+- The self-learning system improved only its *facts* (the wiki via `/dream`), not its
+  *own prompts/workflows*. Added `/improve-skills` (`.claude/workflows/improve-skills.js`
+  + `.claude/commands/improve-skills.md`): a per-lens meta-critic (clarity,
+  instruction-following risk, safety/gating, consistency/DRY, workflow DSL, routing)
+  over the project's OWN command/workflow/instruction surface, with a separate skeptic
+  verifying each finding on two axes (problem **real** + edit **safe**). Returns
+  proposed edits only — confirmation-gated, `disable-model-invocation: true`.
+- Wired into CLAUDE.md (workflow list + "self-improvement vs self-learning" note),
+  skills-index, and topics/workflow.md. Filed the two-axis principle there.
+
+## [2026-06-29] ingest | First /improve-skills run found a self-modification gap
+- Dogfooded `/improve-skills` (25 agents, 6 lenses): 2 blockers + 10 important
+  confirmed, 7 refuted (the two-axis verifier rejected 3 "improvements" that would
+  have *weakened* a gate — proof the editSafe axis works). Applied 7 fixes:
+  - **Self-modification guard (blocker):** the autonomous-loop denylist protected only
+    product/infra paths, so an L2/L3 loop could rewrite its OWN governing prompts.
+    Added `.claude/` + `CLAUDE.md` to the `loop-iteration.js` regex gate AND the
+    `loop.md` prose denylist. The sanctioned path to edit prompts is the manual,
+    confirmation-gated `/improve-skills`.
+  - `/dream`: gated `CLAUDE.md` edits behind explicit confirmation (was "propose and
+    apply" — contradicted its own Hard rules); added the matching Hard rule.
+  - `CLAUDE.md`: added "commit/push only when the user asks" (settings pre-allow
+    `git commit`, but no rule said not to commit unprompted).
+  - `loop.md`: fail-safe defaults — unstated per-run cap → 25 turns, unstated trust
+    level → L1 at the action step, no identifiable task → self-stop (don't invent one).
+  - `fix-localhost`: made its single-agent intent explicit (it was naming a critic
+    panel inline, which CLAUDE.md says must be a Workflow / is single-agent).
+  - `multi-agent-dev`: its "never mark complete unless" gate omitted
+    typecheck/lint/unit/build that CLAUDE.md requires — added them.
+  - `write-goal` + `CLAUDE.md`: removed the dangling `/plan` reference (no such repo
+    command) → "outline the plan inline".
+  - Hardened `improve-skills.js` to parse a JSON-string `args` (a command may pass
+    args as a string; was leaking the raw JSON into `scope`).
+- Lesson: a self-improving system MUST add its own prompt surface (`.claude/`,
+  `CLAUDE.md`) to every autonomous denylist — otherwise the loop can edit the rules
+  that constrain it. The meta-critic caught this in its own machinery on the first run.
