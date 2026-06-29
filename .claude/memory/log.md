@@ -67,3 +67,12 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
   index and `implementation-status.md` the dashboard. Scanner commands + CLAUDE.md
   doc-scanner list + README/adoption-guide updated. Scales the backlog for a large
   project (same reasoning as the memory wiki / log split). Stacked on PR #8.
+
+## [2026-06-28] ingest | Loop hardening ("loop engineering")
+- Integrated concepts from github.com/cobusgreyling/loop-engineering: trust levels
+  (L1/L2/L3), denylist + escalation rubric, red-flag stop conditions, and a
+  budget/run-log into `.claude/loop.md`; added `.claude/loop-checklist.md`
+  (readiness rubric) and `.claude/memory/loop-run-log.md` (append-only loop state,
+  with the >500-line rotation rule). Added the maker/checker no-self-approve rule
+  and `Agent isolation: worktree` note to CLAUDE.md. Filed the principle in
+  topics/workflow.md.

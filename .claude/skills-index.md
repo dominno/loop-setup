@@ -22,7 +22,9 @@ catalog so both you and Claude can route to the right command.
 - **Map what's built vs documented vs tested** → `/scan-project-docs`, then
   `/sync-story-status`, `/story-gap-analysis`
 - **Capture/curate what was learned** → `/dream`, `/memory-audit`
-- **Keep watching localhost on an interval** → `/loop` (uses `.claude/loop.md`)
+- **Keep watching localhost on an interval** → `/loop` (uses `.claude/loop.md`;
+  gate trust level with `.claude/loop-checklist.md`, state in
+  `.claude/memory/loop-run-log.md`)
 
 ## Development loop
 | Command | When to use | Args |

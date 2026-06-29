@@ -59,7 +59,17 @@ building. Triggers: "write me the `/goal` for this", "turn this into a `/loop`",
 "what `/goal` should we build based on how this project works?".
 
 For recurring/watchdog work, the standing loop prompt is `.claude/loop.md`
-(used by `/loop`).
+(used by `/loop`). Loops are **hardened** ("loop engineering"): declare a trust
+level — **L1 report-only → L2 assisted → L3 unattended** — and stay within it; read
+`.claude/memory/loop-run-log.md` at the start of each run and append an entry at the
+end; respect the denylist (auth, payments, secrets, infra, CI config, migrations),
+the escalation triggers, and the red-flag stop conditions. Before raising a loop's
+trust level, satisfy `.claude/loop-checklist.md`.
+
+**Maker/checker rule:** the pass that verifies a fix must be separate from the pass
+that made it — the implementer never marks its own work "done" (post-implementation
+critic round is the checker). For loops that mutate files in parallel, run the
+implementer via `Agent` with `isolation: worktree`.
 
 ## Project type
 This is a local web application developed and tested on localhost.
