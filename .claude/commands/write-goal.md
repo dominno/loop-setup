@@ -15,7 +15,8 @@ $ARGUMENTS
    `.claude/memory/index.md` → the relevant topic page(s), so the prompt uses this
    project's **real** commands, conventions, and gates — not generic ones.
 2. If the task is broad or unclear, ask 1–2 sharp clarifying questions first, or
-   suggest running `/plan` and converting the plan into the goal.
+   first outline the plan inline (the steps + files it touches) and convert that
+   outline into the goal.
 3. Produce a single, copy-pasteable prompt in a fenced block, grounded in this repo.
 
 ## A `/goal` must include all six

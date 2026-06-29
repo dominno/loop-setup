@@ -8,9 +8,20 @@ export const meta = {
   ],
 }
 
+// Normalize args: a command may pass `args` as an object, a plain string, or a
+// JSON-encoded string (e.g. '{"scope":"..."}'). Parse the JSON-string case so
+// `a.scope`/`a.targets` resolve instead of leaking the raw JSON into `scope`.
+let a = args
+if (typeof a === 'string') {
+  const s = a.trim()
+  if (s.startsWith('{') || s.startsWith('[')) {
+    try { a = JSON.parse(s) } catch { /* keep the string as a plain scope note */ }
+  }
+}
+
 // Optional focus note + explicit target list, passed via the Workflow `args`.
 const scope =
-  (args && (args.scope || (typeof args === 'string' ? args : null))) ||
+  (a && (a.scope || (typeof a === 'string' ? a : null))) ||
   'all custom prompts, skills, and workflow orchestration in this repo'
 // The default prompt surface to review. Callers can pass args.targets to scope it.
 const DEFAULT_TARGETS = [
@@ -22,7 +33,7 @@ const DEFAULT_TARGETS = [
   '.claude/loop.md',
   '.claude/loop-checklist.md',
 ]
-const targets = (args && Array.isArray(args.targets) && args.targets.length ? args.targets : DEFAULT_TARGETS)
+const targets = (a && Array.isArray(a.targets) && a.targets.length ? a.targets : DEFAULT_TARGETS)
 const targetList = targets.join(', ')
 
 // Meta-critic lenses — each reviews the SYSTEM'S OWN instructions, not product code.

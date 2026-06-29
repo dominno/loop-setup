@@ -16,8 +16,11 @@ budget, denylist, escalation, stop conditions). Before running, fix the loop's
 1. **Read state first:** open `.claude/memory/loop-run-log.md` (prior iterations,
    outcomes, human overrides) and check **remaining budget** against the per-run cap
    (turns or tokens — see *Budget & limits*) before doing anything; stop and
-   escalate if it is already exhausted.
-2. Identify the current active task from the conversation.
+   escalate if it is already exhausted. **If no per-run cap was declared, default to
+   25 turns and record that you used the default** in the run-log entry.
+2. Identify the current active task from the conversation or run-log. **If no active
+   task is identifiable, treat the watchlist as empty and self-stop (per *Stop when*)
+   rather than inventing a task.**
 3. Check git status and changed files.
 4. Start or reuse the dev server.
 5. Open the relevant localhost page in Chrome or Playwright MCP.
@@ -28,7 +31,8 @@ budget, denylist, escalation, stop conditions). Before running, fix the loop's
    Render the returned `confirmed` matrix.
 8. **Maker/checker:** the pass that verifies a fix must be *separate* from the one
    that made it — the implementer never marks its own work "done".
-9. Act **only within the trust level**:
+9. Act **only within the trust level** (**if no level was explicitly declared for
+   this run, treat it as L1 — never infer L2/L3 from context**):
    - L1: record findings only.
    - L2/L3: fix the confirmed blockers + directly-related important findings via the
      **loop-iteration Workflow** (`.claude/workflows/loop-iteration.js`,
@@ -43,7 +47,12 @@ budget, denylist, escalation, stop conditions). Before running, fix the loop's
 ## Denylist — never touch autonomously (escalate instead)
 Auth, payments, secrets/`.env`, infrastructure/deploy, CI workflow config, and
 database migrations. Also: do not push, deploy, delete data, modify secrets, or
-auto-merge without an explicit allowlist.
+auto-merge without an explicit allowlist. **And the agent's own configuration and
+prompt surface — `.claude/` (commands, workflows, `loop.md`, `loop-checklist.md`,
+the memory wiki) and `CLAUDE.md`: a loop never self-modifies its own instructions
+autonomously, even at L3 — propose and escalate instead** (this is enforced
+deterministically by the `loop-iteration.js` denylist regex; the sanctioned path to
+change the prompt surface is the manual, confirmation-gated `/improve-skills`).
 
 ## Escalate to a human (pause and ask) when
 - A fix would touch a denylist path.

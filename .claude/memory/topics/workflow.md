@@ -39,6 +39,12 @@
   because it edits core prompts; its verifier judges a finding on *two* axes — is the
   problem **real** and is the proposed edit **safe** (won't weaken instruction-following
   or break a workflow) — and only real-and-safe findings are `applyReady`.
+- **A self-improving system must add its OWN prompt surface to every autonomous
+  denylist.** The loop's deterministic gate (`loop-iteration.js` DENYLIST) and prose
+  denylist (`loop.md`) both include `.claude/` and `CLAUDE.md`, so an L2/L3 loop can
+  never autonomously rewrite the rules that constrain it — it escalates instead. The
+  only sanctioned way to change the prompt surface is the manual, confirmation-gated
+  `/improve-skills`. (Found by the first `/improve-skills` run, on its own machinery.)
 - Workflow scripts use a DSL (`agent()/parallel()/pipeline()/phase()`, top-level
   `await`/`return`); validate syntax by wrapping the body in `async function(){…}`
   before `node --check` (bare `node --check` reports a false "illegal return").

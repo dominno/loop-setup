@@ -53,7 +53,8 @@ command does this on demand.
 6. A **max-budget guard** (e.g. "stop after N turns if not achieved").
 
 **Three ways to get there:** (a) describe the outcome and ask for the `/goal`;
-(b) `/plan` first, then convert the plan into a `/goal`; (c) context-dump
+(b) outline the plan inline first (steps + files touched), then convert it into a
+`/goal`; (c) context-dump
 (`CLAUDE.md`, the memory wiki, the docs story map) and ask which `/goal`s are worth
 building. Triggers: "write me the `/goal` for this", "turn this into a `/loop`",
 "what `/goal` should we build based on how this project works?".
@@ -104,6 +105,10 @@ Before browser testing:
 - Do not delete tests to make the suite pass.
 - Always explain root cause before applying a fix.
 - After fixing, run the smallest relevant test first, then the full verification command.
+- Commit or push only when the user explicitly asks. Never commit/push as a side
+  effect of completing a task; `git commit`/`git add` being pre-allowed in
+  `settings.local.json` is a convenience, not a license to commit unprompted. If on
+  the default branch, branch first.
 
 ## Multi-Agent Development Workflow
 
