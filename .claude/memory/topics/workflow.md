@@ -32,8 +32,14 @@
   `await`/`return`); validate syntax by wrapping the body in `async function(){…}`
   before `node --check` (bare `node --check` reports a false "illegal return").
   Make verifier agents **fail safe** (a null/failed verdict must NOT confirm), give
-  parallel agents **unique labels** (add the map index), and provide **fallback
-  strings** for schema-required fields.
+  parallel agents **unique labels** that **always include the map index** (so
+  duplicate caller-supplied ids can't collide — `${id || 'x'}-${i}`, not `${id||i}`),
+  and provide **fallback strings** for schema-required fields. Also guard the
+  *first* pipeline stage's result before deref (`const ev = stage1 || {}`), fail
+  **closed** (don't accept a maker's self-proposed value when the checker is
+  missing), and give a maker/checker checker the **real artifact** (the diff), not
+  the maker's self-report. The DSL auto-caps concurrency (~min(16, cores-2)), so a
+  large fan-out won't spawn unbounded agents — no manual limit needed.
 - A command's `description` also lets Claude **auto-invoke** it. Add
   `disable-model-invocation: true` to heavy/code-changing commands that should be
   manual-only.
