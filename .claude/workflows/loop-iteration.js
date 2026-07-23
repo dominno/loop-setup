@@ -11,8 +11,27 @@ export const meta = {
 // args.items: [{ id, description }] — already triaged and denylist-cleared by the loop.
 const items = (args && args.items) || []
 const level = (args && args.level) || 'L2'
+
+// Model tiering (graph-engineering): the adversarial verifier (the safety gate) runs
+// on the strong tier. The IMPLEMENTER intentionally has NO override — it writes real
+// code in a worktree, so it inherits the session model rather than being silently
+// downgraded (correctness of the change matters more than fan-out throughput here).
+// Override the verifier tier via args.models.judge.
+const JUDGE_MODEL = (args && args.models && args.models.judge) || 'opus'
 if (!items.length) {
   return { error: 'No work items. Triage + denylist-check first, then pass args.items = [{id, description}].', applied: [], rejected: [] }
+}
+
+// Budget as a HARD stop (soft + hard controls, graph-engineering): worktree
+// implementers are expensive, so if the turn's token target is nearly spent, do NOT
+// start any of them — escalate every item for a later run instead of failing mid-fix.
+const ITER_FLOOR = 80_000 // tokens to leave before starting the implement/verify fan-out
+if (budget.total && budget.remaining() < ITER_FLOOR) {
+  return {
+    level, applied: [], rejected: [], escalate: items.map((it) => it.id),
+    budgetStopped: true,
+    note: `budget floor reached (${Math.round(budget.remaining() / 1000)}k left < ${ITER_FLOOR / 1000}k) — no items processed; all ${items.length} escalated for a later run`,
+  }
 }
 
 const IMPL_SCHEMA = {
@@ -68,7 +87,7 @@ const outcomes = await pipeline(
     }
     return agent(
       `You are a SEPARATE verifier (not the implementer). Adversarially review the ACTUAL diff below for correctness, scope creep, and denylist violations, and judge whether the change is safe to apply. Default to pass:false if you cannot confirm it from the diff.\n\nItem: ${JSON.stringify(item)}\nChanged files: ${JSON.stringify(im.changedFiles || [])}\nchecksPassed (self-reported): ${!!im.checksPassed}\nDiff:\n${im.diff || '(no diff returned)'}`,
-      { label: `verify:${item.id || 'item'}-${i}`, phase: 'Verify', schema: VERDICT_SCHEMA },
+      { label: `verify:${item.id || 'item'}-${i}`, phase: 'Verify', schema: VERDICT_SCHEMA, model: JUDGE_MODEL },
     ).then((v) => ({
       id: item.id,
       // Fail safe: no verdict / verifier died → not approved.

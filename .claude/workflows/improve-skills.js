@@ -36,6 +36,11 @@ const DEFAULT_TARGETS = [
 const targets = (a && Array.isArray(a.targets) && a.targets.length ? a.targets : DEFAULT_TARGETS)
 const targetList = targets.join(', ')
 
+// Model tiering (graph-engineering): the fan-out of meta-critics on the fast tier,
+// the two-axis adversarial verifier on the strong tier. Override via args.models.
+const FANOUT_MODEL = (a && a.models && a.models.fanout) || 'sonnet'
+const JUDGE_MODEL = (a && a.models && a.models.judge) || 'opus'
+
 // Meta-critic lenses — each reviews the SYSTEM'S OWN instructions, not product code.
 // `code: true` lenses focus on the workflow .js orchestration; the rest on prose prompts.
 const LENSES = [
@@ -88,7 +93,7 @@ const reviews = await parallel(
   LENSES.map((c) => () =>
     agent(
       `You are the **${c.label}** auditing this project's OWN Claude Code configuration — its custom prompts, skills, and multi-agent orchestration. You are NOT reviewing product/application code; you are reviewing the instructions that drive the agent.\n\nRead these files (the prompt surface): ${targetList}\n${c.code ? 'Focus on the workflow orchestration scripts (.claude/workflows/*.js).' : 'Focus on the prose prompts (commands, CLAUDE.md, skills-index, loop files).'}\n\nReview strictly through your lens:\n${c.lens}\n\nScope: ${scope}\n\nFor each issue return concrete evidence (a quote or file:line) AND a specific proposedEdit (what to change to what). Propose improvements to the prompts/workflows themselves — do not propose product-code changes. An empty list is a valid, honest answer.`,
-      { label: `meta:${c.key}`, phase: 'Review', schema: FINDINGS_SCHEMA },
+      { label: `meta:${c.key}`, phase: 'Review', schema: FINDINGS_SCHEMA, model: FANOUT_MODEL },
     ).then((r) => ({ critic: c.key, label: c.label, findings: (r && r.findings) || [] })),
   ),
 )
@@ -118,20 +123,37 @@ log(`${deduped.length} findings from ${LENSES.length} meta-critics (${all.length
 // a safe improvement (so we never "improve" a prompt into being weaker or less safe).
 phase('Verify')
 const toVerify = deduped.filter((f) => f.severity === 'blocker' || f.severity === 'important')
-const verified = await parallel(
-  toVerify.map((f, i) => () =>
-    agent(
-      `You are a SEPARATE skeptic (not the critic who raised this). Read the actual file and try to REFUTE this ${f.severity} finding about the project's own prompts/workflows.\n\nJudge two things independently:\n1. real — is the problem genuine? Default real:false if the evidence does not hold up.\n2. editSafe — would the proposed edit be a real improvement that does NOT weaken instruction-following, remove a safety/confirmation gate, or break a workflow? Default editSafe:false if you cannot confirm it is safe.\n\nFile: ${f.file}\nTitle: ${f.title}\nEvidence: ${f.evidence}\nProposed edit: ${f.proposedEdit}`,
-      { label: `verify:${f.critic}:${i}`, phase: 'Verify', schema: VERDICT_SCHEMA },
-    ).then((v) => ({
-      ...f,
-      // Fail safe: a missing/failed verdict must NOT confirm the finding or its edit.
-      real: v ? v.real : false,
-      editSafe: v ? v.editSafe : false,
-      verifyReason: (v && v.reason) || 'verifier returned no verdict — not confirmed',
-    })),
-  ),
-)
+
+// Budget as a HARD stop (soft + hard controls, graph-engineering): if the turn's token
+// target is nearly spent, do NOT spawn the verifier fan-out. Route findings to
+// needsDesign (real:true, editSafe:false) so nothing is auto-applied unverified.
+const VERIFY_FLOOR = 60_000 // tokens to leave for the verify phase
+const budgetStop = !!(budget.total && budget.remaining() < VERIFY_FLOOR)
+let verified
+if (budgetStop) {
+  log(`budget floor reached (${Math.round(budget.remaining() / 1000)}k left) — skipping adversarial verify; ${toVerify.length} findings routed to needsDesign (unverified, never auto-applied)`)
+  verified = toVerify.map((f) => ({
+    ...f,
+    real: true,
+    editSafe: false, // unverified ⇒ not apply-ready; surfaced for human review only
+    verifyReason: 'unverified — token budget floor reached before the verify phase',
+  }))
+} else {
+  verified = await parallel(
+    toVerify.map((f, i) => () =>
+      agent(
+        `You are a SEPARATE skeptic (not the critic who raised this). Read the actual file and try to REFUTE this ${f.severity} finding about the project's own prompts/workflows.\n\nJudge two things independently:\n1. real — is the problem genuine? Default real:false if the evidence does not hold up.\n2. editSafe — would the proposed edit be a real improvement that does NOT weaken instruction-following, remove a safety/confirmation gate, or break a workflow? Default editSafe:false if you cannot confirm it is safe.\n\nFile: ${f.file}\nTitle: ${f.title}\nEvidence: ${f.evidence}\nProposed edit: ${f.proposedEdit}`,
+        { label: `verify:${f.critic}:${i}`, phase: 'Verify', schema: VERDICT_SCHEMA, model: JUDGE_MODEL },
+      ).then((v) => ({
+        ...f,
+        // Fail safe: a missing/failed verdict must NOT confirm the finding or its edit.
+        real: v ? v.real : false,
+        editSafe: v ? v.editSafe : false,
+        verifyReason: (v && v.reason) || 'verifier returned no verdict — not confirmed',
+      })),
+    ),
+  )
+}
 
 const niceToHaves = deduped.filter((f) => f.severity === 'nice-to-have')
 const settled = verified.filter(Boolean)
@@ -146,6 +168,7 @@ const refuted = settled.filter((f) => f.real === false)
 return {
   scope,
   targets,
+  budgetStop, // true ⇒ verify was skipped for budget; applyReady is empty by design
   counts: {
     lenses: LENSES.length,
     confirmedBlockers: confirmed.filter((f) => f.severity === 'blocker').length,

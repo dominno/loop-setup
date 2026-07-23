@@ -7,6 +7,11 @@ export const meta = {
 
 const flow = (args && (args.flow || (typeof args === 'string' ? args : null))) || 'the target flow'
 
+// Model tiering (graph-engineering): this workflow is pure fan-out enumeration
+// (the dedup is plain code, not an agent), so every node runs on the fast tier.
+// Override via args.models.fanout.
+const FANOUT_MODEL = (args && args.models && args.models.fanout) || 'sonnet'
+
 const CATEGORIES = [
   { key: 'happy', prompt: 'the happy path(s) a user follows when everything works' },
   { key: 'failure', prompt: 'validation/failure paths and error states' },
@@ -37,7 +42,7 @@ const results = await parallel(
   CATEGORIES.map((c) => () =>
     agent(
       `Enumerate concrete Playwright E2E test cases for "${flow}" covering ${c.prompt}. Inspect the routes/components and existing specs first. Each case needs: title, steps, and the visible expected outcome to assert.`,
-      { label: `e2e:${c.key}`, phase: 'Design', schema: CASES_SCHEMA },
+      { label: `e2e:${c.key}`, phase: 'Design', schema: CASES_SCHEMA, model: FANOUT_MODEL },
     ).then((r) => ((r && r.cases) || []).map((x) => ({ ...x, category: c.key }))),
   ),
 )

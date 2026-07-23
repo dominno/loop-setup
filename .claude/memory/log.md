@@ -151,3 +151,23 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
 - Lesson: a self-improving system MUST add its own prompt surface (`.claude/`,
   `CLAUDE.md`) to every autonomous denylist — otherwise the loop can edit the rules
   that constrain it. The meta-critic caught this in its own machinery on the first run.
+
+## [2026-06-29] ingest | Graph-engineering upgrades (model tiering, budget, diagrams)
+- Distilled from a "graph engineering" post (Slate/Random Labs). Our `Workflow` tool
+  already IS a graph runtime (nodes=agents, edges=hand-offs, parallel/pipeline, scoped
+  failure); three real gaps were closed:
+  - **Model tiering** across all 6 workflows: fan-out nodes (critics, evidence, gaps,
+    E2E cases, meta-critics) → `model: 'sonnet'`; gates/judgment (verifiers, status
+    verifier, synthesis) → `model: 'opus'`; overridable via `args.models`. The
+    `loop-iteration` implementer stays on the session model (never downgrade a
+    code-writing node). Cuts fan-out cost, keeps quality at the decision points.
+  - **Budget hard-stops**: `improve-skills` skips the verify fan-out below a token
+    floor (findings → `needsDesign`, unverified, never auto-applied); `loop-iteration`
+    escalates all items below its floor instead of failing mid-fix. Guarded on
+    `budget.total` (null ⇒ no cap).
+  - **Diagram-first**: `docs/workflow-graphs.md` draws every workflow's node/edge graph
+    (Mermaid) with the per-node model tier — the "see the graph before you run" view.
+- Filed the tiering + soft/hard-budget + diagram-drift conventions in topics/workflow.md.
+- Not adopted (out of scope): the post's quant/hedge-fund framing and the standalone
+  Slate runtime — we already have the graph runtime; the trading claims overstate what
+  orchestration solves (data quality, costs, overfitting remain the hard part).

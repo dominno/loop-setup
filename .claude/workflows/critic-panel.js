@@ -19,6 +19,11 @@ const priorEvidence = (args && args.priorEvidence) || null
 // Defaults to including them (safe). Callers pass `uiInScope: false` to save fan-out.
 const uiInScope = !(args && args.uiInScope === false)
 
+// Model tiering (graph-engineering): high-volume fan-out on the fast tier, the
+// high-stakes adversarial gate on the strong tier. Override via args.models.
+const FANOUT_MODEL = (args && args.models && args.models.fanout) || 'sonnet'
+const JUDGE_MODEL = (args && args.models && args.models.judge) || 'opus'
+
 // The standard critic roster. `ui: true` marks browser-facing critics.
 const ALL_CRITICS = [
   { key: 'first-time-user', ui: true, label: 'First-Time User Critic', lens: 'Can a new user understand the first screen and complete the flow without help? Labels, errors, hidden assumptions.' },
@@ -73,7 +78,7 @@ const reviews = await parallel(
   CRITICS.map((c) => () =>
     agent(
       `You are the **${c.label}** for this project. Read CLAUDE.md and the relevant memory topic page(s), inspect ${focus} (read the code; if a localhost flow is in scope, drive it via Playwright/Chrome MCP and check console + network), then review strictly through your lens:\n${c.lens}\n${priorEvidence ? `\nEvidence already gathered by the Lead — verify against it instead of re-deriving from scratch:\n${typeof priorEvidence === 'string' ? priorEvidence : JSON.stringify(priorEvidence)}\n` : ''}\nReturn only findings you can back with concrete evidence. An empty list is a valid, honest answer.`,
-      { label: `critic:${c.key}`, phase: 'Review', schema: FINDINGS_SCHEMA },
+      { label: `critic:${c.key}`, phase: 'Review', schema: FINDINGS_SCHEMA, model: FANOUT_MODEL },
     ).then((r) => ({ critic: c.key, label: c.label, findings: (r && r.findings) || [] })),
   ),
 )
@@ -107,7 +112,7 @@ const verified = await parallel(
   toVerify.map((f, i) => () =>
     agent(
       `Adversarially verify this ${f.severity} finding from the ${f.criticLabel}. Try to REFUTE it by inspecting the actual code/flow — default to real:false if the evidence does not hold up.\n\nTitle: ${f.title}\nEvidence: ${f.evidence}\nRecommendation: ${f.recommendation}`,
-      { label: `verify:${f.critic}:${i}`, phase: 'Verify', schema: VERDICT_SCHEMA },
+      { label: `verify:${f.critic}:${i}`, phase: 'Verify', schema: VERDICT_SCHEMA, model: JUDGE_MODEL },
     ).then((v) => ({
       ...f,
       // Fail safe: a missing/failed verdict must NOT confirm the finding.

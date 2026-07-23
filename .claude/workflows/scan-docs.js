@@ -23,6 +23,11 @@ const REPO_STATUSES = [
   'Unit tested', 'E2E tested', 'Blocked', 'Deprecated',
 ]
 
+// Model tiering (graph-engineering): per-story evidence gathering on the fast tier,
+// the strict status verifier (the gate) on the strong tier. Override via args.models.
+const FANOUT_MODEL = (args && args.models && args.models.fanout) || 'sonnet'
+const JUDGE_MODEL = (args && args.models && args.models.judge) || 'opus'
+
 const EVIDENCE_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -60,7 +65,7 @@ const records = await pipeline(
   (story, i) =>
     agent(
       `Gather IMPLEMENTATION and TEST evidence for this user story by searching the codebase and tests (do not write any files):\n${JSON.stringify(story)}\n\nReport which files implement it, whether unit and E2E tests cover it, and the most defensible status. "Not started" is correct when no implementation is found.`,
-      { label: `evidence:${story.id || 'story'}-${i}`, phase: 'Evidence', schema: EVIDENCE_SCHEMA },
+      { label: `evidence:${story.id || 'story'}-${i}`, phase: 'Evidence', schema: EVIDENCE_SCHEMA, model: FANOUT_MODEL },
     ),
   (evidence, story, i) => {
     // Guard the first-stage result like every sibling workflow does — a null/failed
@@ -68,7 +73,7 @@ const records = await pipeline(
     const ev = evidence || {}
     return agent(
       `You are a strict status verifier for story ${story.id} (${story.title}). Confirm a status that is justified by REPO evidence only (code + tests). From repo evidence you can confirm at most "E2E tested"; "Browser verified" and "Done" require a separate browser pass and are OUT of scope here — never assign them. Downgrade if the proposed status overclaims.\n\nProposed: ${JSON.stringify(ev)}`,
-      { label: `verify:${story.id || 'story'}-${i}`, phase: 'Verify', schema: VERDICT_SCHEMA },
+      { label: `verify:${story.id || 'story'}-${i}`, phase: 'Verify', schema: VERDICT_SCHEMA, model: JUDGE_MODEL },
     ).then((v) => ({
       id: story.id,
       title: story.title,
