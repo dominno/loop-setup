@@ -67,10 +67,10 @@ const ORDER_SCHEMA = {
 
 phase('Dimensions')
 const results = await parallel(
-  DIMENSIONS.map((d) => () =>
+  DIMENSIONS.map((d, i) => () =>
     agent(
       `Analyze the gap for "${scope}" along this dimension by reading docs/, src/, e2e/, and the story map:\n${d.prompt}\nReturn only gaps backed by concrete references; an empty list is a valid, honest answer.`,
-      { label: `gap:${d.key}`, phase: 'Dimensions', schema: GAP_SCHEMA, model: FANOUT_MODEL },
+      { label: `gap:${d.key}-${i}`, phase: 'Dimensions', schema: GAP_SCHEMA, model: FANOUT_MODEL },
     ).then((r) => ({ dimension: d.key, gaps: (r && r.gaps) || [] })),
   ),
 )

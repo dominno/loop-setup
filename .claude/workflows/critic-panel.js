@@ -86,10 +86,10 @@ const VERDICT_SCHEMA = {
 // the full set before deduping and verifying).
 phase('Review')
 const reviews = await parallel(
-  CRITICS.map((c) => () =>
+  CRITICS.map((c, i) => () =>
     agent(
       `You are the **${c.label}** for this project. Read CLAUDE.md and the relevant memory topic page(s), inspect ${focus} (read the code; if a localhost flow is in scope, drive it via Playwright/Chrome MCP and check console + network), then review strictly through your lens:\n${c.lens}\n${priorEvidence ? `\nEvidence already gathered by the Lead — verify against it instead of re-deriving from scratch:\n${typeof priorEvidence === 'string' ? priorEvidence : JSON.stringify(priorEvidence)}\n` : ''}\nReturn only findings you can back with concrete evidence. An empty list is a valid, honest answer.`,
-      { label: `critic:${c.key}`, phase: 'Review', schema: FINDINGS_SCHEMA, model: FANOUT_MODEL },
+      { label: `critic:${c.key}-${i}`, phase: 'Review', schema: FINDINGS_SCHEMA, model: FANOUT_MODEL },
     ).then((r) => ({ critic: c.key, label: c.label, findings: (r && r.findings) || [] })),
   ),
 )

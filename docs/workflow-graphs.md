@@ -44,6 +44,10 @@ flowchart LR
   V --> out([confirmed matrix + niceToHaves + refuted])
 ```
 
+> `uiInScope: false` drops the 5 UI-facing critics (First-Time User, UX Flow, Designer,
+> Artistic Direction, Accessibility) from the Review fan-out for non-UI (backend / docs /
+> config) changes — the 10-node graph above is the default/full case.
+
 ## `improve-skills` — meta-critic over our own prompts (`/improve-skills`)
 
 ```mermaid

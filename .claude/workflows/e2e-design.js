@@ -49,10 +49,10 @@ const CASES_SCHEMA = {
 
 phase('Design')
 const results = await parallel(
-  CATEGORIES.map((c) => () =>
+  CATEGORIES.map((c, i) => () =>
     agent(
       `Enumerate concrete Playwright E2E test cases for "${flow}" covering ${c.prompt}. Inspect the routes/components and existing specs first. Each case needs: title, steps, and the visible expected outcome to assert.`,
-      { label: `e2e:${c.key}`, phase: 'Design', schema: CASES_SCHEMA, model: FANOUT_MODEL },
+      { label: `e2e:${c.key}-${i}`, phase: 'Design', schema: CASES_SCHEMA, model: FANOUT_MODEL },
     ).then((r) => ((r && r.cases) || []).map((x) => ({ ...x, category: c.key }))),
   ),
 )

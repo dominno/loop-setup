@@ -91,10 +91,10 @@ const VERDICT_SCHEMA = {
 // (a barrier: we want the full set before deduping and verifying).
 phase('Review')
 const reviews = await parallel(
-  LENSES.map((c) => () =>
+  LENSES.map((c, i) => () =>
     agent(
       `You are the **${c.label}** auditing this project's OWN Claude Code configuration — its custom prompts, skills, and multi-agent orchestration. You are NOT reviewing product/application code; you are reviewing the instructions that drive the agent.\n\nRead these files (the prompt surface): ${targetList}\n${c.code ? 'Focus on the workflow orchestration scripts (.claude/workflows/*.js).' : 'Focus on the prose prompts (commands, CLAUDE.md, skills-index, loop files).'}\n\nReview strictly through your lens:\n${c.lens}\n\nScope: ${scope}\n\nFor each issue return concrete evidence (a quote or file:line) AND a specific proposedEdit (what to change to what). Propose improvements to the prompts/workflows themselves — do not propose product-code changes. An empty list is a valid, honest answer.`,
-      { label: `meta:${c.key}`, phase: 'Review', schema: FINDINGS_SCHEMA, model: FANOUT_MODEL },
+      { label: `meta:${c.key}-${i}`, phase: 'Review', schema: FINDINGS_SCHEMA, model: FANOUT_MODEL },
     ).then((r) => ({ critic: c.key, label: c.label, findings: (r && r.findings) || [] })),
   ),
 )

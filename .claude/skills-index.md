@@ -35,6 +35,8 @@ catalog so both you and Claude can route to the right command.
 > `scan-docs` (`/scan-project-docs`), `gap-analysis` (`/story-gap-analysis`),
 > `e2e-design` (`/multi-agent-e2e`), `loop-iteration` (`/loop` L2/L3),
 > `improve-skills` (`/improve-skills` — meta-critic over our own prompts/workflows).
+> Pass `args.models = { fanout, judge }` when invoking any of these to override the
+> default `sonnet`/`opus` model tiering (e.g. for cost control on a large fan-out).
 
 | Command | When to use | Args |
 |---|---|---|
