@@ -8,12 +8,22 @@ export const meta = {
   ],
 }
 
-const scope = (args && (args.scope || (typeof args === 'string' ? args : null))) || 'the whole project'
+// Normalize args: object, plain string, or JSON-encoded string. Parse the JSON case
+// so structured fields (models) resolve instead of silently no-opping.
+let a = args
+if (typeof a === 'string') {
+  const s = a.trim()
+  if (s.startsWith('{') || s.startsWith('[')) {
+    try { a = JSON.parse(s) } catch { /* keep the string as a plain scope note */ }
+  }
+}
+
+const scope = (a && (a.scope || (typeof a === 'string' ? a : null))) || 'the whole project'
 
 // Model tiering (graph-engineering): per-dimension gap discovery on the fast tier,
 // the synthesis/prioritization judgment on the strong tier. Override via args.models.
-const FANOUT_MODEL = (args && args.models && args.models.fanout) || 'sonnet'
-const JUDGE_MODEL = (args && args.models && args.models.judge) || 'opus'
+const FANOUT_MODEL = (a && a.models && a.models.fanout) || 'sonnet'
+const JUDGE_MODEL = (a && a.models && a.models.judge) || 'opus'
 
 const DIMENSIONS = [
   { key: 'docs-not-impl', prompt: 'Requirements in docs (docs/prd.md, docs/stories/*, README) with NO implementation evidence in the codebase.' },

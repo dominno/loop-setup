@@ -8,9 +8,19 @@ export const meta = {
   ],
 }
 
+// Normalize args: object, plain string, or JSON-encoded string. Parse the JSON case
+// so structured fields (stories, models) resolve instead of silently no-opping.
+let a = args
+if (typeof a === 'string') {
+  const s = a.trim()
+  if (s.startsWith('{') || s.startsWith('[')) {
+    try { a = JSON.parse(s) } catch { /* no structured fields available */ }
+  }
+}
+
 // args.stories: [{ id, title, source, acceptanceCriteria? }]
 // The caller extracts the story list from the PRD/docs first, then runs this.
-const stories = (args && args.stories) || []
+const stories = (a && a.stories) || []
 if (!stories.length) {
   return { error: 'No stories provided. Extract stories from docs first, then pass args.stories = [{id,title,source}].', records: [] }
 }
@@ -25,8 +35,8 @@ const REPO_STATUSES = [
 
 // Model tiering (graph-engineering): per-story evidence gathering on the fast tier,
 // the strict status verifier (the gate) on the strong tier. Override via args.models.
-const FANOUT_MODEL = (args && args.models && args.models.fanout) || 'sonnet'
-const JUDGE_MODEL = (args && args.models && args.models.judge) || 'opus'
+const FANOUT_MODEL = (a && a.models && a.models.fanout) || 'sonnet'
+const JUDGE_MODEL = (a && a.models && a.models.judge) || 'opus'
 
 const EVIDENCE_SCHEMA = {
   type: 'object',

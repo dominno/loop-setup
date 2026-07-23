@@ -8,21 +8,32 @@ export const meta = {
   ],
 }
 
+// Normalize args: the Workflow tool may hand args as an object, a plain string, or a
+// JSON-encoded string. Parse the JSON-string case so structured fields (models,
+// priorEvidence, uiInScope) resolve instead of silently no-opping.
+let a = args
+if (typeof a === 'string') {
+  const s = a.trim()
+  if (s.startsWith('{') || s.startsWith('[')) {
+    try { a = JSON.parse(s) } catch { /* keep the string as a plain focus note */ }
+  }
+}
+
 // What to review (focus) + how deep, passed via the Workflow `args`.
 const focus =
-  (args && (args.focus || (typeof args === 'string' ? args : null))) ||
+  (a && (a.focus || (typeof a === 'string' ? a : null))) ||
   'the current app/flow and the changed files'
 // Optional: evidence the Lead already gathered (test/lint/build output, browser
 // findings, git diff). Critics verify against it instead of re-deriving from scratch.
-const priorEvidence = (args && args.priorEvidence) || null
+const priorEvidence = (a && a.priorEvidence) || null
 // Optional: skip the 5 UI/browser critics for non-UI (backend/docs/config) changes.
 // Defaults to including them (safe). Callers pass `uiInScope: false` to save fan-out.
-const uiInScope = !(args && args.uiInScope === false)
+const uiInScope = !(a && a.uiInScope === false)
 
 // Model tiering (graph-engineering): high-volume fan-out on the fast tier, the
 // high-stakes adversarial gate on the strong tier. Override via args.models.
-const FANOUT_MODEL = (args && args.models && args.models.fanout) || 'sonnet'
-const JUDGE_MODEL = (args && args.models && args.models.judge) || 'opus'
+const FANOUT_MODEL = (a && a.models && a.models.fanout) || 'sonnet'
+const JUDGE_MODEL = (a && a.models && a.models.judge) || 'opus'
 
 // The standard critic roster. `ui: true` marks browser-facing critics.
 const ALL_CRITICS = [
