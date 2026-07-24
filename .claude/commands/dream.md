@@ -65,6 +65,11 @@ $ARGUMENTS
    `.claude/commands/*.md` has a `description` and a row in the index; **flag**
    (report, don't auto-remove) any index rows for commands that no longer exist and
    any near-duplicate commands.
+2b. Health-check the **workflow diagrams** (`docs/workflow-graphs.md`) against
+   `.claude/workflows/*.js`: for each workflow, confirm the diagram's node labels,
+   model tier (🟢/🔵/⚪/▫️), and edges (parallel/pipeline/gates) match the script's
+   `CRITICS`/`LENSES`/`DIMENSIONS`/`CATEGORIES` arrays and `FANOUT_MODEL`/`JUDGE_MODEL`
+   usage; **report (don't auto-fix)** any diagram that has drifted from its script.
 3. Auto-fix only additive/clerical issues (broken links, a missing index row, a
    missing `description`). Everything else — removing a dead index row, deleting a
    command, merging duplicates, or removing/rewriting a fact — is **reported only**

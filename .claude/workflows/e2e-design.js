@@ -5,7 +5,22 @@ export const meta = {
   phases: [{ title: 'Design', detail: 'one agent per path category enumerates test cases in parallel' }],
 }
 
-const flow = (args && (args.flow || (typeof args === 'string' ? args : null))) || 'the target flow'
+// Normalize args: object, plain string, or JSON-encoded string. Parse the JSON case
+// so structured fields (models) resolve instead of silently no-opping.
+let a = args
+if (typeof a === 'string') {
+  const s = a.trim()
+  if (s.startsWith('{') || s.startsWith('[')) {
+    try { a = JSON.parse(s) } catch { /* keep the string as a plain flow note */ }
+  }
+}
+
+const flow = (a && (a.flow || (typeof a === 'string' ? a : null))) || 'the target flow'
+
+// Model tiering (graph-engineering): this workflow is pure fan-out enumeration
+// (the dedup is plain code, not an agent), so every node runs on the fast tier.
+// Override via args.models.fanout.
+const FANOUT_MODEL = (a && a.models && a.models.fanout) || 'sonnet'
 
 const CATEGORIES = [
   { key: 'happy', prompt: 'the happy path(s) a user follows when everything works' },
@@ -34,10 +49,10 @@ const CASES_SCHEMA = {
 
 phase('Design')
 const results = await parallel(
-  CATEGORIES.map((c) => () =>
+  CATEGORIES.map((c, i) => () =>
     agent(
       `Enumerate concrete Playwright E2E test cases for "${flow}" covering ${c.prompt}. Inspect the routes/components and existing specs first. Each case needs: title, steps, and the visible expected outcome to assert.`,
-      { label: `e2e:${c.key}`, phase: 'Design', schema: CASES_SCHEMA },
+      { label: `e2e:${c.key}-${i}`, phase: 'Design', schema: CASES_SCHEMA, model: FANOUT_MODEL },
     ).then((r) => ((r && r.cases) || []).map((x) => ({ ...x, category: c.key }))),
   ),
 )

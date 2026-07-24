@@ -151,3 +151,47 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
 - Lesson: a self-improving system MUST add its own prompt surface (`.claude/`,
   `CLAUDE.md`) to every autonomous denylist — otherwise the loop can edit the rules
   that constrain it. The meta-critic caught this in its own machinery on the first run.
+
+## [2026-06-29] ingest | Graph-engineering upgrades (model tiering, budget, diagrams)
+- Distilled from a "graph engineering" post (Slate/Random Labs). Our `Workflow` tool
+  already IS a graph runtime (nodes=agents, edges=hand-offs, parallel/pipeline, scoped
+  failure); three real gaps were closed:
+  - **Model tiering** across all 6 workflows: fan-out nodes (critics, evidence, gaps,
+    E2E cases, meta-critics) → `model: 'sonnet'`; gates/judgment (verifiers, status
+    verifier, synthesis) → `model: 'opus'`; overridable via `args.models`. The
+    `loop-iteration` implementer stays on the session model (never downgrade a
+    code-writing node). Cuts fan-out cost, keeps quality at the decision points.
+  - **Budget hard-stops**: `improve-skills` skips the verify fan-out below a token
+    floor (findings → `needsDesign`, unverified, never auto-applied); `loop-iteration`
+    escalates all items below its floor instead of failing mid-fix. Guarded on
+    `budget.total` (null ⇒ no cap).
+  - **Diagram-first**: `docs/workflow-graphs.md` draws every workflow's node/edge graph
+    (Mermaid) with the per-node model tier — the "see the graph before you run" view.
+- Filed the tiering + soft/hard-budget + diagram-drift conventions in topics/workflow.md.
+- Not adopted (out of scope): the post's quant/hedge-fund framing and the standalone
+  Slate runtime — we already have the graph runtime; the trading claims overstate what
+  orchestration solves (data quality, costs, overfitting remain the hard part).
+
+## [2026-06-29] ingest | Gate on the tiering change caught a denylist bypass (blocker)
+- Ran `/improve-skills` (21 agents, on the NEW tiering — Sonnet fan-out + Opus verify)
+  over the graph-engineering diff: 1 blocker + 7 important confirmed, 7 refuted. Fixes:
+  - **Blocker — `loop-iteration` denylist bypass:** the "hard, deterministic" gate
+    checked the implementer's SELF-REPORTED `changedFiles`, but the caller applies the
+    real `diff`. An under-reported file list touching a denylisted path (`.claude/`,
+    `.env`) would slip past. Fixed by parsing paths from the actual diff
+    (`parseDiffPaths`) and gating on the UNION of diff-paths + changedFiles. Unit-tested:
+    the attack (changedFiles omits `.claude/loop.md` while the diff edits it) now
+    escalates. This is the same "give the checker the real artifact, not the self-report"
+    lesson — it applies to the deterministic gate too, not just the LLM verifier.
+  - **args normalization** ported to the other 5 workflows (the JSON-string parse lived
+    only in `improve-skills`), rewiring every `args.X` read to the normalized `a` so the
+    `args.models` tiering override doesn't silently no-op.
+  - **`workflow-dsl` lens** now also checks model-tiering + budget-guard fail-safety;
+    **`consistency-dry` lens** + `/dream lint` now check `docs/workflow-graphs.md` for
+    drift vs the scripts; `docs/workflow-graphs.md` added to `improve-skills`
+    DEFAULT_TARGETS (the drift check was promised but not wired).
+  - **`improve-skills.md`** now documents `budgetStop` and instructs disclosing a
+    skipped-verification run (needsDesign items are UNVERIFIED, not design-pending).
+- Lesson: a deterministic gate is only as trustworthy as the input it reads — derive the
+  checked paths from the artifact that is actually applied (the diff), never from a
+  parallel self-report. The maker/checker "real artifact" rule extends to code gates.

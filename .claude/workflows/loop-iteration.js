@@ -8,11 +8,40 @@ export const meta = {
   ],
 }
 
+// Normalize args: object, plain string, or JSON-encoded string. Parse the JSON case
+// so structured fields (items, level, models) resolve instead of silently no-opping.
+let a = args
+if (typeof a === 'string') {
+  const s = a.trim()
+  if (s.startsWith('{') || s.startsWith('[')) {
+    try { a = JSON.parse(s) } catch { /* no structured fields available */ }
+  }
+}
+
 // args.items: [{ id, description }] — already triaged and denylist-cleared by the loop.
-const items = (args && args.items) || []
-const level = (args && args.level) || 'L2'
+const items = (a && a.items) || []
+const level = (a && a.level) || 'L2'
+
+// Model tiering (graph-engineering): the adversarial verifier (the safety gate) runs
+// on the strong tier. The IMPLEMENTER intentionally has NO override — it writes real
+// code in a worktree, so it inherits the session model rather than being silently
+// downgraded (correctness of the change matters more than fan-out throughput here).
+// Override the verifier tier via args.models.judge.
+const JUDGE_MODEL = (a && a.models && a.models.judge) || 'opus'
 if (!items.length) {
   return { error: 'No work items. Triage + denylist-check first, then pass args.items = [{id, description}].', applied: [], rejected: [] }
+}
+
+// Budget as a HARD stop (soft + hard controls, graph-engineering): worktree
+// implementers are expensive, so if the turn's token target is nearly spent, do NOT
+// start any of them — escalate every item for a later run instead of failing mid-fix.
+const ITER_FLOOR = 80_000 // tokens to leave before starting the implement/verify fan-out
+if (budget.total && budget.remaining() < ITER_FLOOR) {
+  return {
+    level, applied: [], rejected: [], escalate: items.map((it) => it.id),
+    budgetStopped: true,
+    note: `budget floor reached (${Math.round(budget.remaining() / 1000)}k left < ${ITER_FLOOR / 1000}k) — no items processed; all ${items.length} escalated for a later run`,
+  }
 }
 
 const IMPL_SCHEMA = {
@@ -47,6 +76,19 @@ const DENYLIST = [
 ]
 const hitsDenylist = (files) => (files || []).some((f) => DENYLIST.some((re) => re.test(f)))
 
+// Parse the file paths out of the ACTUAL unified diff (the artifact the caller
+// applies). The gate must not trust the implementer's self-reported `changedFiles`
+// alone: a maker that under-reports its changed files while its diff still touches a
+// denylisted path would otherwise slip past. We check the UNION of both.
+function parseDiffPaths(diff) {
+  const paths = []
+  const s = String(diff || '')
+  for (const m of s.matchAll(/^diff --git a\/(.+?) b\/(.+)$/gm)) { paths.push(m[1], m[2]) }
+  for (const m of s.matchAll(/^\+\+\+ b\/(.+)$/gm)) { if (m[1] !== '/dev/null') paths.push(m[1]) }
+  for (const m of s.matchAll(/^--- a\/(.+)$/gm)) { if (m[1] !== '/dev/null') paths.push(m[1]) }
+  return paths
+}
+
 phase('Implement')
 // Pipeline: each item flows implement → verify independently.
 const outcomes = await pipeline(
@@ -58,17 +100,20 @@ const outcomes = await pipeline(
     ),
   (impl, item, i) => {
     const im = impl || {}
-    // Hard denylist gate — independent of the verifier.
-    if (hitsDenylist(im.changedFiles)) {
+    // Hard denylist gate — independent of the verifier. Check the UNION of the
+    // self-reported changedFiles AND the paths parsed from the real diff (the artifact
+    // the caller applies), so an under-reported file list can't bypass the gate.
+    const gatedFiles = [...(im.changedFiles || []), ...parseDiffPaths(im.diff)]
+    if (hitsDenylist(gatedFiles)) {
       return {
         id: item.id, applied: false, status: 'escalated-denylist',
         changedFiles: im.changedFiles || [], diff: im.diff || '', checksPassed: !!im.checksPassed,
-        verdict: 'changed files match the denylist — forced escalation regardless of verdict',
+        verdict: 'changed files or diff paths match the denylist — forced escalation regardless of verdict',
       }
     }
     return agent(
       `You are a SEPARATE verifier (not the implementer). Adversarially review the ACTUAL diff below for correctness, scope creep, and denylist violations, and judge whether the change is safe to apply. Default to pass:false if you cannot confirm it from the diff.\n\nItem: ${JSON.stringify(item)}\nChanged files: ${JSON.stringify(im.changedFiles || [])}\nchecksPassed (self-reported): ${!!im.checksPassed}\nDiff:\n${im.diff || '(no diff returned)'}`,
-      { label: `verify:${item.id || 'item'}-${i}`, phase: 'Verify', schema: VERDICT_SCHEMA },
+      { label: `verify:${item.id || 'item'}-${i}`, phase: 'Verify', schema: VERDICT_SCHEMA, model: JUDGE_MODEL },
     ).then((v) => ({
       id: item.id,
       // Fail safe: no verdict / verifier died → not approved.

@@ -57,6 +57,26 @@
   missing), and give a maker/checker checker the **real artifact** (the diff), not
   the maker's self-report. The DSL auto-caps concurrency (~min(16, cores-2)), so a
   large fan-out won't spawn unbounded agents — no manual limit needed.
+- **Model tiering (graph-engineering): fan-out → fast tier, gate → strong tier.**
+  High-volume, individually-low-stakes fan-out nodes (critics, per-story evidence,
+  per-dimension gaps, per-category E2E cases) run `model: 'sonnet'`; the high-stakes
+  gates/judgment (adversarial verifiers, status verifier, synthesis) run
+  `model: 'opus'`. Define `FANOUT_MODEL`/`JUDGE_MODEL` constants (default `sonnet`/
+  `opus`, overridable via `args.models = { fanout, judge }`) and pass `model:` per
+  `agent()`. **Exception:** a node that writes real code (the `loop-iteration`
+  implementer) inherits the session model — never silently downgrade a code-writing
+  node. This cuts cost on the wide fan-out and keeps quality where the decision is made.
+- **Budget as soft + hard control.** For big fan-outs, guard on `budget.total` (it is
+  `null` when no target was set — without the guard `budget.remaining()` is `Infinity`
+  and a loop never stops). Hard-stop pattern: if `budget.total && budget.remaining()
+  < FLOOR`, skip the expensive stage instead of failing mid-run — `loop-iteration`
+  escalates all items (`budgetStopped`), `improve-skills` skips the verify fan-out and
+  routes findings to `needsDesign` (unverified ⇒ never auto-applied). Keep the fail-safe
+  direction: a budget stop must never *approve* unverified work.
+- **Diagram-first:** every workflow's node/edge graph is drawn in
+  `docs/workflow-graphs.md` (Mermaid), with the model tier per node. Update the diagram
+  when you add a node, edge, or change a tier — `/improve-skills` and `/dream lint`
+  flag drift between a diagram and its script.
 - A command's `description` also lets Claude **auto-invoke** it. Add
   `disable-model-invocation: true` to heavy/code-changing commands that should be
   manual-only.

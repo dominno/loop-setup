@@ -8,16 +8,32 @@ export const meta = {
   ],
 }
 
+// Normalize args: the Workflow tool may hand args as an object, a plain string, or a
+// JSON-encoded string. Parse the JSON-string case so structured fields (models,
+// priorEvidence, uiInScope) resolve instead of silently no-opping.
+let a = args
+if (typeof a === 'string') {
+  const s = a.trim()
+  if (s.startsWith('{') || s.startsWith('[')) {
+    try { a = JSON.parse(s) } catch { /* keep the string as a plain focus note */ }
+  }
+}
+
 // What to review (focus) + how deep, passed via the Workflow `args`.
 const focus =
-  (args && (args.focus || (typeof args === 'string' ? args : null))) ||
+  (a && (a.focus || (typeof a === 'string' ? a : null))) ||
   'the current app/flow and the changed files'
 // Optional: evidence the Lead already gathered (test/lint/build output, browser
 // findings, git diff). Critics verify against it instead of re-deriving from scratch.
-const priorEvidence = (args && args.priorEvidence) || null
+const priorEvidence = (a && a.priorEvidence) || null
 // Optional: skip the 5 UI/browser critics for non-UI (backend/docs/config) changes.
 // Defaults to including them (safe). Callers pass `uiInScope: false` to save fan-out.
-const uiInScope = !(args && args.uiInScope === false)
+const uiInScope = !(a && a.uiInScope === false)
+
+// Model tiering (graph-engineering): high-volume fan-out on the fast tier, the
+// high-stakes adversarial gate on the strong tier. Override via args.models.
+const FANOUT_MODEL = (a && a.models && a.models.fanout) || 'sonnet'
+const JUDGE_MODEL = (a && a.models && a.models.judge) || 'opus'
 
 // The standard critic roster. `ui: true` marks browser-facing critics.
 const ALL_CRITICS = [
@@ -70,10 +86,10 @@ const VERDICT_SCHEMA = {
 // the full set before deduping and verifying).
 phase('Review')
 const reviews = await parallel(
-  CRITICS.map((c) => () =>
+  CRITICS.map((c, i) => () =>
     agent(
       `You are the **${c.label}** for this project. Read CLAUDE.md and the relevant memory topic page(s), inspect ${focus} (read the code; if a localhost flow is in scope, drive it via Playwright/Chrome MCP and check console + network), then review strictly through your lens:\n${c.lens}\n${priorEvidence ? `\nEvidence already gathered by the Lead — verify against it instead of re-deriving from scratch:\n${typeof priorEvidence === 'string' ? priorEvidence : JSON.stringify(priorEvidence)}\n` : ''}\nReturn only findings you can back with concrete evidence. An empty list is a valid, honest answer.`,
-      { label: `critic:${c.key}`, phase: 'Review', schema: FINDINGS_SCHEMA },
+      { label: `critic:${c.key}-${i}`, phase: 'Review', schema: FINDINGS_SCHEMA, model: FANOUT_MODEL },
     ).then((r) => ({ critic: c.key, label: c.label, findings: (r && r.findings) || [] })),
   ),
 )
@@ -107,7 +123,7 @@ const verified = await parallel(
   toVerify.map((f, i) => () =>
     agent(
       `Adversarially verify this ${f.severity} finding from the ${f.criticLabel}. Try to REFUTE it by inspecting the actual code/flow — default to real:false if the evidence does not hold up.\n\nTitle: ${f.title}\nEvidence: ${f.evidence}\nRecommendation: ${f.recommendation}`,
-      { label: `verify:${f.critic}:${i}`, phase: 'Verify', schema: VERDICT_SCHEMA },
+      { label: `verify:${f.critic}:${i}`, phase: 'Verify', schema: VERDICT_SCHEMA, model: JUDGE_MODEL },
     ).then((v) => ({
       ...f,
       // Fail safe: a missing/failed verdict must NOT confirm the finding.

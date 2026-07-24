@@ -21,11 +21,17 @@ $ARGUMENTS
    instruction-following risk, safety/gating, consistency/DRY, workflow DSL, routing)
    runs in its own context, in parallel; a *separate* skeptic adversarially verifies
    every blocker/important finding. Invoking Workflow here is expected.
-2. The workflow returns `{ scope, targets, counts, applyReady, needsDesign, niceToHaves, refuted }`.
+2. The workflow returns `{ scope, targets, budgetStop, counts, applyReady, needsDesign, niceToHaves, refuted }`.
    Render `applyReady` and `needsDesign` as a matrix and list `niceToHaves` separately:
 
    | Lens | Severity | File | Finding | Evidence | Proposed edit | Edit verified safe? |
    |---|---|---|---|---|---|---|
+
+   **If `budgetStop` is true**, tell the user up front that the adversarial verify phase
+   was skipped due to the token-budget floor: every `needsDesign` item in this run is
+   **UNVERIFIED** (not merely design-pending — neither its reality nor its edit-safety
+   was checked), `applyReady` is empty by design, and a follow-up `/improve-skills` pass
+   should re-run verification before anything is applied.
 
 3. **Confirmation gate (hard rule).** This command may propose edits to core prompts
    but must **never apply them without explicit confirmation** — the same rule
