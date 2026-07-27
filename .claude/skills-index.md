@@ -24,8 +24,9 @@ catalog so both you and Claude can route to the right command.
 - **Capture/curate what was learned** → `/dream`, `/memory-audit`
 - **Improve the system's own prompts/skills/workflows** → `/improve-skills`
 - **Keep watching localhost on an interval** → `/loop` (uses `.claude/loop.md`;
-  gate trust level with `.claude/loop-checklist.md`, state in
-  `.claude/memory/loop-run-log.md`)
+  gate trust level with `.claude/loop-checklist.md`; state in
+  `.claude/memory/loop-plan.md` (current plan/DAG — every L2/L3 action traces to a ready
+  node here) and `.claude/memory/loop-run-log.md` (append-only history))
 
 ## Development loop
 
