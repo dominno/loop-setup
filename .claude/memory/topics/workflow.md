@@ -19,7 +19,7 @@
   `.claude/memory/loop-plan.md` — typed nodes with `after:` dependency edges and a
   `ready` rule (deps `done`). Three disciplines: (1) **persistent plan** the loop reads
   at iteration start (step 1) and rewrites in the re-plan step; (2) **re-plan is a
-  first-class node** that runs *before* dispatch (step 9) so the loop consults the fresh
+  first-class step** that runs *before* dispatch (step 9) so the loop consults the fresh
   DAG every iteration; (3) **no action without a node** — every L2/L3 dispatch is a ready
   plan node, and node creation is the *only* action exempt (the sanctioned bootstrap, so
   an empty plan populates rather than deadlocks). Readiness never bypasses the denylist

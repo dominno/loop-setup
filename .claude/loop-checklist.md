@@ -35,7 +35,8 @@ this repo from the "loop engineering" loop-design checklist
 **5. State / memory**
 - [ ] Run state documented (`.claude/memory/loop-run-log.md`)
 - [ ] Prior state read at every iteration start
-- [ ] Outcomes + timestamps written; resolved items pruned; human overrides recorded
+- [ ] Outcomes + timestamps appended to the run-log (append-only — never pruned there);
+      resolved *plan nodes* pruned only in `loop-plan.md`; human overrides recorded
 - [ ] Durable **plan/DAG** (`.claude/memory/loop-plan.md`) read at iteration start; every
       L2/L3 action traces to a **ready node** (no action without a node)
 - [ ] **Re-plan is an explicit step run before dispatch**; the empty/first-iteration plan

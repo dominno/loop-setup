@@ -32,10 +32,17 @@ One row per node in the table below:
 - `dropped` — obsoleted by re-plan; kept as a row for the decision trail.
 
 ## Ready-node rule (what the loop dispatches next)
-A node is **ready** iff `status ∉ {done, dropped, escalated}` **and** every `id` in its
-`after:` is `done`. The loop picks the highest-priority ready node (topmost first).
-Denylist and trust-level gates still apply **on top** of readiness — a ready node whose
-fix would touch a denylist path is escalated, never auto-applied.
+A node is **ready** iff `status ∉ {done, dropped, escalated, in-progress}` **and** every
+`id` in its `after:` is `done`. The loop picks the highest-priority ready node (topmost
+first). Denylist and trust-level gates still apply **on top** of readiness — a ready node
+whose fix would touch a denylist path is escalated, never auto-applied.
+
+**Stale `in-progress` recovery:** `in-progress` means "dispatched this iteration" and
+normally resolves to `done`/`escalated` in the same iteration. A node still `in-progress`
+at the *start* of a later iteration means the prior run was interrupted (crash / timeout /
+budget exhaustion) — it is stale. The re-plan step MUST resolve it (reset it to `ready`
+or `blocked` per its current `after:` deps, with a note) before it can be selected again;
+never dispatch a leftover `in-progress` node as-is (it may be mid-flight or orphaned).
 
 ## No action without a node
 Every L2/L3 dispatch (`loop-iteration.js` `args.items`) MUST be ready nodes from this
@@ -48,6 +55,14 @@ to bootstrap, so an empty plan never deadlocks:
   this run's *confirmed* findings, then dispatch acts on the now-ready nodes. If triage
   + re-plan yield zero ready nodes, the loop **self-stops** (empty-watchlist rule in
   `loop.md`) — it does not invent work.
+- **Cascading drop / escalation** (a dependency never reaching `done`): since readiness
+  requires every `after:` id to be `done`, a node whose dependency becomes `dropped` or
+  `escalated` can never become ready and would sit `blocked` forever. The re-plan step
+  MUST resolve such a node the same iteration — never leave it silently stuck:
+  - dependency **`dropped`** → drop the dependent too (`origin: cascade from <id>`) if now
+    obsolete, or re-point its `after:` to a live node;
+  - dependency **`escalated`** → do **not** re-wire to un-block it (its prerequisite work
+    is unresolved) — set the dependent `escalated` too, with a note.
 
 ## Example (illustrative — not a live row)
 ```

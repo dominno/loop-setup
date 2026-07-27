@@ -32,8 +32,10 @@ The plan is the concrete realization of "the watchlist" referenced throughout th
    *Budget & limits*) before doing anything; stop and escalate if it is already
    exhausted. **If no per-run cap was declared, default to 25 turns and record that you
    used the default** in the run-log entry.
-2. **Orient on the plan:** note its current ready nodes (ready = all `after:` deps
-   `done`; see the plan's ready-node rule). Node *selection* is deferred to step 10
+2. **Orient on the plan:** note its current ready nodes (shorthand: `status` not
+   done/dropped/escalated/in-progress AND all `after:` deps `done` — illustrative only;
+   always defer to the plan's ready-node rule for the exact formula). Node *selection*
+   is deferred to step 10
    (after re-plan) so dispatch always consults the freshest DAG — never act on a raw
    finding here.
 3. Check git status and changed files.
@@ -52,9 +54,13 @@ The plan is the concrete realization of "the watchlist" referenced throughout th
    `done` (unblocking their dependents), **add new nodes** for this run's confirmed
    findings (with `after:` deps + `origin`), re-order by priority, `drop` obsolete
    nodes, and recompute which nodes are `ready`. New evidence may re-shape the DAG here
-   — that is the point. Node creation is the *only* loop action exempt from "no action
-   without a node"; it is the sanctioned bootstrap, so an empty/first-iteration plan is
-   populated here rather than deadlocking. Record the re-plan delta in the run-log entry.
+   — that is the point. Also **repair broken states** (see the plan's rules): reset any
+   stale `in-progress` node left by an interrupted prior run, and **cascade-resolve** any
+   node whose `after:` dep became `dropped`/`escalated` (drop, re-point, or escalate it)
+   so nothing is left silently `blocked`. Node creation is the *only* loop action exempt
+   from "no action without a node"; it is the sanctioned bootstrap, so an
+   empty/first-iteration plan is populated here rather than deadlocking. Record the
+   re-plan delta in the run-log entry.
 10. **Select & act — only within the trust level** (**if no level was explicitly
     declared for this run, treat it as L1 — never infer L2/L3 from context**). Pick the
     highest-priority **ready node(s)** from the just-updated plan:
@@ -101,7 +107,7 @@ Notify only when action is needed — do not ping on a no-op run.
   a token ceiling — and record remaining budget in every run-log entry; stop and
   escalate when reached.
 - Max iterations per item per run: small (e.g. 3). Max auto-PRs per day: small.
-- A loop with an empty watchlist should self-stop, not spin.
+- A loop with an empty watchlist **MUST** self-stop, not spin.
 
 ## Stop when
 - No blockers remain, browser verification passes, relevant tests pass, and the
