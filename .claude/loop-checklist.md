@@ -36,6 +36,10 @@ this repo from the "loop engineering" loop-design checklist
 - [ ] Run state documented (`.claude/memory/loop-run-log.md`)
 - [ ] Prior state read at every iteration start
 - [ ] Outcomes + timestamps written; resolved items pruned; human overrides recorded
+- [ ] Durable **plan/DAG** (`.claude/memory/loop-plan.md`) read at iteration start; every
+      L2/L3 action traces to a **ready node** (no action without a node)
+- [ ] **Re-plan is an explicit step run before dispatch**; the empty/first-iteration plan
+      bootstraps a node rather than deadlocking
 
 **6. Human handoff**
 - [ ] Escalation triggers explicit (max attempts, risk paths, ambiguity)

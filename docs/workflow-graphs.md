@@ -121,7 +121,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  items([triaged, denylist-cleared items]) --> budget{budget floor?}
+  items([ready plan nodes — triaged, denylist-cleared]) --> budget{budget floor?}
   budget -- "under floor" --> esc0[▫️ escalate all]
   budget -- ok --> P
   subgraph P["pipeline — per item, independent"]

@@ -4,7 +4,10 @@ The **always-loaded catalog** of the project knowledge wiki (Andrej Karpathy's
 "LLM wiki" pattern). `CLAUDE.md` imports **only this file**, so it loads every
 session and must stay small. Detailed knowledge lives in topic pages under
 `.claude/memory/topics/` and is read **on demand** — never all at once. History
-lives in `.claude/memory/log.md`.
+lives in `.claude/memory/log.md`. Loop **state** (not knowledge) lives beside it:
+`loop-plan.md` is the loop's current plan/DAG (the mutable watchlist every loop action
+traces to) and `loop-run-log.md` is the append-only run history — neither is a topic
+page; both are read only by a running `/loop`.
 
 > Links below are plain markdown (not `@imports`), so topic pages are NOT
 > auto-loaded. Open the ones relevant to the current task.

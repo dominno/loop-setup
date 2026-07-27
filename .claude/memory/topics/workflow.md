@@ -15,6 +15,16 @@
   `.claude/memory/loop-run-log.md`, and obeys the denylist + red-flag stop
   conditions in `.claude/loop.md`. Raise a level only after `.claude/loop-checklist.md`
   passes. The verifier pass is always separate from the implementer (no self-approve).
+- **The loop is HTDAG-disciplined:** it traces every action to a durable plan/DAG in
+  `.claude/memory/loop-plan.md` — typed nodes with `after:` dependency edges and a
+  `ready` rule (deps `done`). Three disciplines: (1) **persistent plan** the loop reads
+  at iteration start (step 1) and rewrites in the re-plan step; (2) **re-plan is a
+  first-class node** that runs *before* dispatch (step 9) so the loop consults the fresh
+  DAG every iteration; (3) **no action without a node** — every L2/L3 dispatch is a ready
+  plan node, and node creation is the *only* action exempt (the sanctioned bootstrap, so
+  an empty plan populates rather than deadlocks). Readiness never bypasses the denylist
+  or trust level — those gates stay on top. `loop-plan.md` = current mutable plan;
+  `loop-run-log.md` = append-only history — keep them distinct.
 - Custom commands live in `.claude/commands/` (each with a `description` for
   routing); the grouped "when to use" catalog is `.claude/skills-index.md`. A
   catalog file must NOT live in `.claude/commands/` — anything there auto-registers
