@@ -24,7 +24,11 @@
   plan node, and node creation is the *only* action exempt (the sanctioned bootstrap, so
   an empty plan populates rather than deadlocks). Readiness never bypasses the denylist
   or trust level — those gates stay on top. `loop-plan.md` = current mutable plan;
-  `loop-run-log.md` = append-only history — keep them distinct.
+  `loop-run-log.md` = append-only history — keep them distinct. **DAG-contract lesson**
+  (from the checker round): a deterministic readiness rule must classify *every* persisted
+  status (exclude `in-progress`, or a crash-orphaned node re-reads as ready → duplicate
+  dispatch) and resolve *every* non-`done` terminal dep-state (a `dropped`/`escalated`
+  dependency must cascade-resolve, else its dependents strand silently `blocked`).
 - Custom commands live in `.claude/commands/` (each with a `description` for
   routing); the grouped "when to use" catalog is `.claude/skills-index.md`. A
   catalog file must NOT live in `.claude/commands/` — anything there auto-registers
