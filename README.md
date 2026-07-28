@@ -259,12 +259,13 @@ Toolchain: Next 16, React 19, TypeScript 6, ESLint 9 (flat config via
 {
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build && node scripts/check-bundle-size.mjs",
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "check:bundle": "node scripts/check-bundle-size.mjs",
     "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e"
   }
 }

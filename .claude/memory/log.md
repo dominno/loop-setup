@@ -229,3 +229,21 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
   while later work merged ~2026-07-27/28. Left intact — the 06-29 cluster is 7 entries
   mostly from genuine prior sessions, so rewriting dates risked corrupting correct history
   more than it fixed. Reported for the record; no rewrite without a clear per-entry basis.
+
+## [2026-07-28] ingest | Objective a11y/perf quality bar (Gauntlet "the bar")
+- Evaluated Matt Shumer's "Gauntlet Loop" against the repo (via our own critic machinery):
+  we already have most of it (fresh-context subagents, maker/checker, evidence-gated
+  stopping). The one adoption worth it for spec-driven dev: give the Accessibility &
+  Performance critics a concrete EXTERNAL bar, wired as a gate. Skipped the rest
+  (aesthetic reference bar, blind A/B, forever-looping) as misfits — recorded in the eval.
+- Added `.claude/memory/topics/quality-bar.md` (WCAG 2.1 AA contrast + first-load JS budget
+  190 KB gzip via a machine-readable `perf-budget-kb-gzip` marker = single source of truth),
+  index row, an axe e2e gate (`e2e/a11y.spec.ts`), and `scripts/check-bundle-size.mjs`
+  wired into `pnpm verify`. Pointed the two critic lenses at the bar.
+- Durable gotcha (also filed in topics/remote-env.md): CI uses pnpm 10; the web env's
+  corepack pnpm 11 errors `ERR_PNPM_IGNORED_BUILDS`. Fixed the never-completed
+  `pnpm-workspace.yaml` build-approval placeholder and regenerated the lockfile with
+  pnpm 10 to match CI.
+- Maker/checker: `/improve-skills` over the prompt surface returned 0 blockers + 4 real
+  consistency fixes (all applied — incl. a "placeholders exempt" a11y loophole and a stale
+  verify-chain doc); a separate critic-panel round over the implementation was also run.
