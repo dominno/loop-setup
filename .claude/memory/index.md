@@ -28,6 +28,7 @@ page; both are read only by a running `/loop`.
 | Code organization | where routes/api/domain/components live | [topics/code-organization.md](./topics/code-organization.md) |
 | Remote env (web) | pre-provisioned Chromium, Playwright pin, MCP limits | [topics/remote-env.md](./topics/remote-env.md) |
 | Workflow & docs | /dream, doc-scanner, PRD source of record | [topics/workflow.md](./topics/workflow.md) |
+| Quality bar | objective a11y (WCAG AA) + perf (JS budget) targets & gates | [topics/quality-bar.md](./topics/quality-bar.md) |
 
 ## Wiki rules
 - **Raw source** for ingests is the session + git history (ephemeral); there is no
