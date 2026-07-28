@@ -18,30 +18,43 @@ just critic opinion.
   never be a field's only label. (Our fields carry a persistent visible `<label>`, so an
   example-format placeholder is supplementary — a sub-4.5:1 hint is acceptable *only*
   because that visible label exists.)
-- **Zero `serious` or `critical` axe violations** on the main flow (initial load, the
-  validation-error state, and the greeting/remembered state) — in particular
-  `color-contrast`, `label`, `aria-*`, and `region` rules.
-- Interactive controls keep a visible focus indicator (already: `:focus-visible` styles).
+- **Zero `serious` or `critical` axe violations** (WCAG 2.1 A/AA) on the main flow (initial
+  load, the validation-error state, and the greeting/remembered state) — in particular
+  `color-contrast`, `label`, and `aria-*` rules.
+- **Landmark structure:** zero `region` / `landmark-one-main` violations. These are axe
+  *best-practice* rules (not in the WCAG-AA tag set and often below serious/critical), so
+  the gate checks them **explicitly** (a separate `withRules` scan), not via the tag filter.
+- **Keyboard-operable happy path:** the flow is completable with the keyboard alone (Tab to
+  the field, type, Tab to the submit button, Enter → greeting) — smoke-tested in the a11y
+  spec. Interactive controls keep a visible focus indicator (`:focus-visible` styles).
+- **Not covered by this gate** (stays with the qualitative Designer / Artistic lenses):
+  mobile-viewport layout and tap-target sizing (`target-size` is WCAG 2.2 AA, outside this
+  desktop WCAG-2.1-AA scan). Don't read "zero violations" as a mobile/touch guarantee.
 
 ## Performance target (client JS budget)
-<!-- perf-budget-kb-gzip: 190 --> (machine-readable single source of truth; the enforcing
+<!-- perf-budget-kb-gzip: 155 --> (machine-readable single source of truth; the enforcing
 script `scripts/check-bundle-size.mjs` reads THIS marker — edit the number here, nowhere else.)
-- **First-load client JS ≤ 190 KB gzipped.**
+- **First-load client JS ≤ 155 KB gzipped.**
 - **Metric (deterministic, CI-checkable without a browser):** sum of the **per-file**
-  gzipped sizes of **all** `.next/static/chunks/**/*.js` after `next build` (exactly what
-  `scripts/check-bundle-size.mjs` computes — per-file, not gzip-of-concatenation). For this
-  **single-route** app that whole-directory total *is* the first-load set; if routes are
-  added later, narrow the metric to the `/` route's chunks so "first-load" stays literal.
-- **Baseline measured 2026-07-28:** 181.9 KB gzip (614.5 KB raw). The 190 KB budget is
-  the baseline **+ ~4.5% headroom** — a ratchet, not aspirational: it passes today and
-  catches an unintended dependency/bundle regression.
+  gzipped sizes of `.next/static/chunks/**/*.js` after `next build`, **excluding the legacy
+  noModule polyfill chunk(s)** (read from `.next/build-manifest.json` `polyfillFiles`) that
+  modern module-supporting browsers never download — so the number is the JS a modern
+  browser actually loads. Per-file gzip, not gzip-of-concatenation. For this **single-route**
+  app the total *is* the first-load set; if routes are added, narrow it to the `/` route's
+  chunks so "first-load" stays literal.
+- **Baseline measured 2026-07-28:** 143.2 KB gzip (polyfill excluded). The 155 KB budget is
+  the baseline **+ ~8% headroom** — a ratchet, not aspirational: it passes today and catches
+  an unintended dependency/bundle regression.
 - Most of the bundle is the shared React/Next framework; the app's own code is a few KB.
 
 ## How the targets are enforced
-- **a11y:** a Playwright + axe check over the main flow runs in `pnpm test:e2e` (part of
-  `pnpm verify`). A `serious`/`critical` violation fails the suite.
-- **perf:** a bundle-size assertion (sum the gzipped `.next/static/chunks/*.js`, compare
-  to the budget) runs in `pnpm verify`.
+- **a11y:** `e2e/a11y.spec.ts` (Playwright + axe) covers the main flow's three states, an
+  explicit landmark scan, and a keyboard-path test. It runs in `pnpm test:e2e`, which is
+  part of `pnpm verify` **and** the CI `e2e` job — so a11y is enforced on every PR.
+- **perf:** `scripts/check-bundle-size.mjs` (`pnpm check:bundle`) runs in `pnpm verify`
+  after `build`. **CI note:** CI runs the per-script matrix + `e2e`, not `pnpm verify`, so
+  `check:bundle` must be added to the CI workflow explicitly for the perf budget to be
+  enforced on PRs (see the CI wiring for the perf job).
 - **critics:** the Accessibility and Performance lenses in `.claude/workflows/critic-panel.js`
   judge the current UI against these numbers, not vague "is it accessible / fast".
 

@@ -1,6 +1,3 @@
-allowBuilds:
-  sharp: set this to true or false
-  unrs-resolver: set this to true or false
 # Approve build scripts for these native deps so `pnpm install` is deterministic
 # (pnpm 11 otherwise errors with ERR_PNPM_IGNORED_BUILDS). sharp = Next image
 # optimization; unrs-resolver = eslint-config-next's module resolver.

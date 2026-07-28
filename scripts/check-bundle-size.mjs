@@ -4,10 +4,11 @@
 // .claude/memory/topics/quality-bar.md (single source of truth). Run after `next build`.
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { gzipSync } from "node:zlib";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 const BAR = ".claude/memory/topics/quality-bar.md";
 const CHUNKS = ".next/static/chunks";
+const MANIFEST = ".next/build-manifest.json";
 
 const marker = readFileSync(BAR, "utf8").match(/perf-budget-kb-gzip:\s*(\d+(?:\.\d+)?)/);
 if (!marker) {
@@ -21,12 +22,23 @@ if (!existsSync(CHUNKS)) {
   process.exit(2);
 }
 
+// Exclude the legacy noModule polyfill chunk(s): modern (module-supporting) browsers
+// never download them, so counting them would overstate real first-load JS.
+const polyfills = new Set();
+if (existsSync(MANIFEST)) {
+  for (const f of JSON.parse(readFileSync(MANIFEST, "utf8")).polyfillFiles || []) {
+    polyfills.add(basename(f));
+  }
+}
+
 let totalGz = 0;
 const walk = (dir) => {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const p = join(dir, entry.name);
     if (entry.isDirectory()) walk(p);
-    else if (entry.name.endsWith(".js")) totalGz += gzipSync(readFileSync(p)).length;
+    else if (entry.name.endsWith(".js") && !polyfills.has(entry.name)) {
+      totalGz += gzipSync(readFileSync(p)).length;
+    }
   }
 };
 walk(CHUNKS);
