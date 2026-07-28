@@ -51,10 +51,11 @@ script `scripts/check-bundle-size.mjs` reads THIS marker — edit the number her
 - **a11y:** `e2e/a11y.spec.ts` (Playwright + axe) covers the main flow's three states, an
   explicit landmark scan, and a keyboard-path test. It runs in `pnpm test:e2e`, which is
   part of `pnpm verify` **and** the CI `e2e` job — so a11y is enforced on every PR.
-- **perf:** `scripts/check-bundle-size.mjs` (`pnpm check:bundle`) runs in `pnpm verify`
-  after `build`. **CI note:** CI runs the per-script matrix + `e2e`, not `pnpm verify`, so
-  `check:bundle` must be added to the CI workflow explicitly for the perf budget to be
-  enforced on PRs (see the CI wiring for the perf job).
+- **perf:** `scripts/check-bundle-size.mjs` runs as part of **`pnpm build`**
+  (`next build && node scripts/check-bundle-size.mjs`). Because CI runs the per-script
+  matrix (incl. `build`) + `e2e` rather than `pnpm verify`, attaching the check to `build`
+  is what enforces the budget on **every PR** (the CI `build` job fails if it's over).
+  `pnpm check:bundle` runs it standalone against an existing `.next`.
 - **critics:** the Accessibility and Performance lenses in `.claude/workflows/critic-panel.js`
   judge the current UI against these numbers, not vague "is it accessible / fast".
 
