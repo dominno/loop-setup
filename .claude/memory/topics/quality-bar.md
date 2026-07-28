@@ -13,7 +13,11 @@ just critic opinion.
 
 ## Accessibility target (WCAG 2.1 AA)
 - **Text contrast ≥ 4.5:1** for normal text, **≥ 3:1** for large text (≥ 24px, or ≥ 18.66px
-  bold). (Placeholders and disabled controls are exempt per WCAG.)
+  bold). Disabled/inactive controls are exempt per WCAG 1.4.3. Placeholder text is **not**
+  blanket-exempt: when it conveys information it should meet the same targets, and it must
+  never be a field's only label. (Our fields carry a persistent visible `<label>`, so an
+  example-format placeholder is supplementary — a sub-4.5:1 hint is acceptable *only*
+  because that visible label exists.)
 - **Zero `serious` or `critical` axe violations** on the main flow (initial load, the
   validation-error state, and the greeting/remembered state) — in particular
   `color-contrast`, `label`, `aria-*`, and `region` rules.
@@ -24,8 +28,10 @@ just critic opinion.
 script `scripts/check-bundle-size.mjs` reads THIS marker — edit the number here, nowhere else.)
 - **First-load client JS ≤ 190 KB gzipped.**
 - **Metric (deterministic, CI-checkable without a browser):** sum of the **per-file**
-  gzipped sizes of `.next/static/chunks/**/*.js` after `next build` (this is exactly what
-  `scripts/check-bundle-size.mjs` computes — per-file, not gzip-of-concatenation).
+  gzipped sizes of **all** `.next/static/chunks/**/*.js` after `next build` (exactly what
+  `scripts/check-bundle-size.mjs` computes — per-file, not gzip-of-concatenation). For this
+  **single-route** app that whole-directory total *is* the first-load set; if routes are
+  added later, narrow the metric to the `/` route's chunks so "first-load" stays literal.
 - **Baseline measured 2026-07-28:** 181.9 KB gzip (614.5 KB raw). The 190 KB budget is
   the baseline **+ ~4.5% headroom** — a ratchet, not aspirational: it passes today and
   catches an unintended dependency/bundle regression.
