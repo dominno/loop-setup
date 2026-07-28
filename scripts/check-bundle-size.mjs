@@ -29,6 +29,11 @@ if (existsSync(MANIFEST)) {
   for (const f of JSON.parse(readFileSync(MANIFEST, "utf8")).polyfillFiles || []) {
     polyfills.add(basename(f));
   }
+} else {
+  console.warn(
+    `check-bundle-size: ${MANIFEST} not found — cannot exclude polyfill chunks, so the ` +
+      `reported total may be inflated (a Next.js manifest move could cause this).`,
+  );
 }
 
 let totalGz = 0;
