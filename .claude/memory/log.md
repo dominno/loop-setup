@@ -195,3 +195,37 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
 - Lesson: a deterministic gate is only as trustworthy as the input it reads — derive the
   checked paths from the artifact that is actually applied (the diff), never from a
   parallel self-report. The maker/checker "real artifact" rule extends to code gates.
+
+## [2026-07-28] ingest | HTDAG loop discipline (persistent plan/DAG, re-plan node, no action without a node)
+- Applied the three HTDAG planning disciplines to the loop meta-layer (not the 2-story
+  product backlog — that's a deliberate workflow test-stub; the machinery is the real DAG):
+  (1) a durable plan `.claude/memory/loop-plan.md` (typed nodes, `after:` edges, `ready`
+  rule) the loop reads at iteration start and rewrites; (2) **re-plan as a first-class
+  step run BEFORE dispatch** (loop.md step 9) so the loop consults the fresh DAG each
+  iteration; (3) **no action without a node** — every L2/L3 dispatch is a ready plan node,
+  node creation the only exempt bootstrap. Layered on top of the denylist + trust levels,
+  never replacing them. No `.js` engine touched. Filed the discipline in topics/workflow.md.
+- Maker/checker: `/improve-skills` (24 agents) confirmed **0 blockers** (no gate weakened)
+  + 14 important real+safe, all applied. It caught genuine DAG-contract holes in the first
+  draft — `in-progress` not excluded from the ready rule (crash-orphan → duplicate
+  dispatch), and no cascade when an `after:` dep is `dropped`/`escalated` (dependents
+  strand silently `blocked`). Filed the general "classify every persisted status + resolve
+  every non-`done` terminal dep-state" lesson in topics/workflow.md.
+- Shipped as PR #13 (merged). Wired loop-plan.md into CLAUDE.md, index.md, skills-index.md,
+  loop-checklist.md §5, and the run-log format (`node:`/`re-plan:` lines).
+
+## [2026-07-28] lint | Post-3-PR health-check — wiki clean, one flag left as-is
+- Wiki in sync: 7/7 topic pages resolve from index.md, no orphans, no broken cross-links,
+  no contradictions (all surfaces consistently name loop-plan.md after the HTDAG change).
+- Skills index complete: 12/12 commands have a `description` and a routing row; no dead
+  rows, no near-duplicates.
+- Diagram drift check (`docs/workflow-graphs.md` vs `.claude/workflows/*.js`): node counts
+  match — critic-panel 10 critics, improve-skills 6 lenses, gap-analysis 7 dimensions,
+  e2e-design 5 categories; model tiers (🟢 fan-out / 🔵 gate) match FANOUT_MODEL/JUDGE_MODEL.
+- Product/tooling topic pages (tooling, build-and-verify, testing, client-react,
+  code-organization, remote-env) reviewed — all evergreen, nothing stale.
+- log.md 215 lines (< 500) — no rotation.
+- **Flagged, not fixed (append-only history):** several recent entries carry `[2026-06-29]`
+  while later work merged ~2026-07-27/28. Left intact — the 06-29 cluster is 7 entries
+  mostly from genuine prior sessions, so rewriting dates risked corrupting correct history
+  more than it fixed. Reported for the record; no rewrite without a clear per-entry basis.
