@@ -12,6 +12,24 @@ The workflow starts with critique, not coding — and ends with proof, not confi
 > verification commands, and how to adapt the memory wiki and story map (covers
 > both a fresh start and dropping the workflow into an existing codebase).
 
+## How it works at a glance
+
+**1. The task cycle** — from intent to proof, looping until there are zero blockers.
+
+![Task cycle: intent, /write-goal, pre-critique, plan, TDD implementation, verify, post-critique, 0 blockers?, /qa-pass, /dream](docs/infographic-1-task-cycle.png)
+
+**2. The multi-agent workflows** — each node is a subagent with its own context.
+
+![The six multi-agent workflows: critic-panel, scan-docs, gap-analysis, e2e-design, loop-iteration, improve-skills](docs/infographic-2-multi-agent-workflows.png)
+
+**3. The components** — four layers of files, and the evidence-based story statuses.
+
+![Components in four layers: contract, machinery, memory, evidence; story status ladder from Not started to Done](docs/infographic-3-components.png)
+
+**4. `/loop` and adoption** — trust levels, the denylist, one loop iteration, and the six adoption steps.
+
+![/loop trust levels L0-L3, denylist, loop iteration, and six adoption steps with the first-session commands](docs/infographic-4-loop-and-adoption.png)
+
 ## What's in this setup
 
 ```txt
