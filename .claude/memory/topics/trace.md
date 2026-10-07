@@ -10,7 +10,7 @@ repair; consumers act only on records. We adopt that **contract** for our own ma
 declared policy, **not** objective truth: gates verify field consistency, not field
 truth (paper §7.2).
 
-<!-- trace-policy-version: 1 -->
+<!-- trace-policy-version: 2 -->
 (machine-readable; `scripts/trace/lib.mjs` stamps it on every record and refuses records
 written under a newer policy — bump it whenever the tables below change.)
 
@@ -30,12 +30,18 @@ written under a newer policy — bump it whenever the tables below change.)
 
 A missing/unknown verdict from a checker is **`defer`** (missing: "a verdict"), never
 accept and never reject — an unreadable verdict is neither evidence for nor against.
+Likewise a reviewer agent that dies is reported (`failedReviewers`), never read as "no
+findings".
 
 ## Evidence standard per claim type (the evidence gate)
-A checker's `accept` is downgraded deterministically when its cited evidence is weaker
-than the claim type demands (TRACE's rung discipline, generalized: *no claim stronger
-than its evidence*). `reading` (code reading without a reproducible pointer) never
-satisfies `accept`.
+A checker's **licensing** verdict (`accept`, and since policy v2 also `qualify`) is
+downgraded deterministically when its cited evidence is weaker than the claim type
+demands (TRACE's rung discipline, generalized: *no claim stronger than its evidence*). A
+checker cannot dodge the floor by self-demoting to `qualify`: only causal and predictive
+claims, whose fallback *is* qualify, may qualify on weaker evidence. `reading` (code
+reading without a reproducible pointer) never satisfies the floor. **Re-typing never
+lowers the bar:** when the checker re-types the maker's claim, the gate runs under both
+types and keeps the stricter outcome (`retyped_from` records the original type).
 
 | claim_type | example | accept needs evidence kind | on fail |
 |---|---|---|---|
@@ -44,7 +50,7 @@ satisfies `accept`.
 | causal | "this change causes a regression" | command, browser, measurement | qualify |
 | predictive | "first-time users will miss the button" | browser, human | qualify |
 | normative | "this violates the DRY rule in CLAUDE.md" | rule, human | defer |
-| practical | "apply this diff" (loop-iteration, improve-skills edits) | diff | defer |
+| practical | "apply this diff" (loop-iteration) | diff | defer |
 
 The canonical code is the `<trace-evidence-gate>` block in `scripts/trace/lib.mjs`;
 workflows inline a byte-identical copy (they cannot import) and `scripts/trace/lib.test.mjs`
@@ -53,40 +59,76 @@ fails on drift — including drift between this table and the code.
 ## Consumer actions (record-consumer contract)
 | action | allowed on | used by |
 |---|---|---|
-| CLEAR | accept, qualify | loop (node → done), multi-agent-dev / qa-pass (finding fixed), improve-skills (edit applied) |
+| CLEAR | accept, qualify | loop (node → done), multi-agent-dev (finding fixed), improve-skills (edit applied) |
 | COMMIT | accept | dream (fact filed) |
 | COMMIT_QUALIFIED | accept, qualify | dream (fact filed with its qualifier) |
 | QUARANTINE | qualify, revise, defer | dream (held in `.claude/memory/quarantine.md` until `missing` arrives) |
-| HOLD | any | loop (node deferred/escalated), any consumer withholding |
+| HOLD | any | loop (node deferred/escalated), critic-round (review-only), any consumer withholding |
 | REJECT | any | dream (not filed), improve-skills (edit declined) |
 | REUSE | any | critic-panel (prior verdict reused on an identical working tree — `pnpm trace tree-id`) |
 | REAUDIT | any | dream lint (evidence file changed since the record's commit) |
 
-**Fail closed:** CLEAR/COMMIT/COMMIT_QUALIFIED are refused on a non-licensing verdict and
-on a superseded record (act on the latest revision). **Authority separation:** a verdict
-is advice about *warrant*, not a grant of *authority* — a consumer may HOLD an accepted
-claim (e.g. a denylist path still needs a human).
+**Fail closed:** CLEAR/COMMIT/COMMIT_QUALIFIED are refused on a non-licensing verdict, on
+a superseded record, and on any record that is no longer the newest for its `claim_id`
+(act on the latest verdict). **Authority separation:** a verdict is advice about
+*warrant*, not a grant of *authority* — a consumer may HOLD an accepted claim (e.g. a
+denylist path still needs a human).
+
+## Consumer protocol (every command follows this — don't restate it, cite it)
+- **Writing a workflow's records:** save the workflow result JSON to a scratchpad file
+  (Write tool), then `pnpm trace write <file>` (reads `traceRecords`) and, if present,
+  `pnpm trace act --from <file>` (reads `reuseActions`). If the writer rejects a draft
+  (`stored: false`), report the violations and act on **no** finding from that batch —
+  never hand-edit a draft to force it through. `write --then-act ACTION --consumer NAME
+  --note …` records one decision on every stored record (e.g. `HOLD` for a review-only round).
+- **`accept`** → act. **`qualify`** → act only at the qualified strength and carry the
+  qualifier forward (node notes, report, wiki bullet). Unattended (L3), only `accept` is
+  auto-applied; a `qualify` waits for a human.
+- **`defer`** → never act. Resolve it by supplying the named `missing` evidence and
+  re-adjudicating with a **separate** checker (re-run the workflow that produced it, with
+  the evidence as `priorEvidence`); the new verdict is a new record that `revises` the
+  defer, and you act on that. A defer whose `missing` is a human decision (denylist,
+  ambiguity) is resolved only by that human.
+- **`revise`** → the claim as stated is not licensed; its `repair` is a *new* claim —
+  adjudicate it (new record that `revises`) before acting, or HOLD.
+- **`reject`** → nothing to fix; HOLD/REJECT. In a plan node, `missing` becomes
+  "a human decision on: <reason>".
+- **"Fixed"** = a `CLEAR` on the finding's latest licensing record, written only after the
+  separate checker (post-implementation round / loop verifier + the post-apply check)
+  shows it resolved; `--note` says what showed it.
+- **Completion:** a blocker that is confirmed, deferred or revised keeps the task open
+  until it is fixed, re-adjudicated, or the user explicitly accepts the risk. Diminishing
+  returns ends the *re-running*, not the task — report the open blockers and ask.
 
 ## The discipline — no durable state change without a record
 | boundary | record writer | consumer action |
 |---|---|---|
 | loop-plan node → `done` / `deferred` / `escalated` | `loop-iteration` (+ Lead for post-apply checks) | CLEAR / HOLD |
 | fact → memory wiki (`/dream ingest`) | `dream` (Lead) | COMMIT / COMMIT_QUALIFIED / QUARANTINE / REJECT |
-| story status change (`/scan-project-docs`, `/sync-story-status`) | `scan-docs` | COMMIT |
+| story status change (`/scan-project-docs`, `/sync-story-status`) | `scan-docs` (Lead for Browser verified/Done, citing the post-scan critic round) | COMMIT / COMMIT_QUALIFIED |
 | critic finding acted on (`/multi-agent-dev`, `/qa-pass`, `/loop`) | `critic-panel` | CLEAR (fixed) / HOLD |
 | prompt edit applied (`/improve-skills`) | `improve-skills` | CLEAR / REJECT |
 
 Read-only rounds (`/critic-round`) still write their verdict records (memory, not code) —
-that is what verdict reuse reads. `gap-analysis` and `e2e-design` write no records: they
-propose, they do not adjudicate, and no durable state changes on their output.
+that is what verdict reuse reads — and record their decision not to act (`HOLD`, note
+"review-only round"). `gap-analysis` and `e2e-design` write no records: they propose,
+they do not adjudicate, and no durable state changes on their output.
 
 ## Record guarantees ↔ how this repo enforces them
-- **Immutability** — append-only store; duplicate ids rejected; corrections via `revises`.
+- **Immutability** — append-only store; ids are content hashes, so `pnpm trace lint` detects
+  any line edited in place; corrections via `revises`. Writing the same draft twice is
+  refused (content idempotency); duplicate consumer actions too.
+- **No secrets, no bench answers** — the writer refuses drafts that look like they carry a
+  key/token/private key, or a bench fixture id/defect text. If a secret ever lands anyway:
+  rotate it — removing it means rewriting git history, a human decision.
+- **Merges** — `.gitattributes` merges `records.jsonl` as a union (both branches' appends
+  survive); `pnpm trace lint` (in `pnpm test`) is the post-merge check. Rotation runs only
+  on the default branch (a union of two rotations would duplicate records).
 - **Version legibility** — `schema_version` const + `policy_version` stamp; a reader refuses
   records from a newer policy (`pnpm trace lint`).
 - **Self-containment** — verdict, failed gates, missing, repair live in the record.
-- **Provenance** — `writer_id` + `provenance.commit/workflow`; the writer fails closed
-  without a commit.
+- **Provenance** — `writer_id` + `provenance.commit/workflow` (+ `provenance.tree`, the
+  working-tree fingerprint); the writer fails closed without a commit.
 - **Integrity gate in CI** — a vitest test replays the committed store (`pnpm test`).
 
 ## Debate-ness (D1–D4) of our critic panel, and the consensus rule
@@ -99,9 +141,18 @@ therefore counts corroboration only when another critic brings *different* evide
 passes that evidence to the verifier; agreement alone never upgrades a finding.
 
 ## Stop conditions (paper §5.4) — used by `/loop` and `/multi-agent-dev`
-Stop when every claim is (1) a qualified proposal (accept/qualify, acted on), (2) rejected,
-(3) deferred with named `missing`, or (4) **diminishing returns**: a re-run produced no new
-evidence (no new record, no verdict change) — report the defers instead of spinning.
+Stop *re-running* when every claim is (1) a qualified proposal (accept/qualify, acted on),
+(2) rejected, (3) deferred with named `missing`, or (4) **diminishing returns**: a re-run
+left the set of open blockers (by `claim_id`) and their verdicts unchanged — report them
+and ask instead of spinning. Stopping is not completing (see the consumer protocol).
+
+## Verdict reuse (critic-panel)
+A finding that re-raises a prior claim reuses the prior verdict without a new skeptic only
+when **all** hold: it is deterministically the same claim (same lens, normalized title and
+claim type — the critic's `revisits` link alone is never trusted), the prior verdict is
+licensing (`accept`/`qualify` — defers and rejects are always re-adjudicated), and the
+working tree is identical (`pnpm trace tree-id`: HEAD + uncommitted changes, excluding the
+record store and loop/wiki bookkeeping files).
 
 ## Measurement & pre-registered falsification (TRACE-Bench-lite)
 `/bench-checkers` runs `.claude/workflows/trace-bench.js` over seeded-defect fixtures
@@ -111,12 +162,14 @@ the live store. Pre-registered — results that count **against** our design:
   rate → the fan-out is unjustified on this bench.
 - **F2** the evidence gate never changes a verdict → it is decorative (informational).
 - **F3** procedural invariance < 0.8 across identical re-runs → single-run verdicts are noise.
-- **F4** WrongAcceptRate of the loop verifier > 0 on bad fixtures not caught by the
-  denylist → the checker licenses bad diffs; tighten before raising a loop above L2.
-- **F5** store `consumerCoverage` < 0.5 after real use → records are an archive, not an
-  instrument; cut fields.
-- **F0** (validity precondition) any bench agent's transcript contains ground truth →
-  those runs are excluded; a run with F0 is not a clean measurement.
+- **F4** the loop verifier licensed any bad fixture the denylist does not catch → the
+  checker licenses bad diffs; keep loops at ≤ L2 and tighten it (emitted by `bench-score`).
+- **F5** `consumerCoverage` < 0.5 over ≥ 10 current claims → records are an archive, not
+  an instrument; cut fields (emitted by `pnpm trace metrics`; only decision actions count —
+  REUSE/REAUDIT are bookkeeping).
+- **F0** (validity precondition) a bench agent's transcript contains ground truth, or an
+  agent returned no verdict → those runs are excluded, and the measurement record is
+  `qualify`, not `accept`. F1 needs the `panel` arm; F3 needs `repeat ≥ 2`.
 
 **Contamination rule (learned the hard way — the first bench run was contaminated):**
 bench agents run inside this repo and grep it, so fixture ground truth must never be
@@ -135,11 +188,14 @@ debate stage (critic panel + skeptic already is one).
 
 ## Gotchas
 - Workflow scripts cannot `import`; shared deterministic blocks (`<trace-evidence-gate>`,
-  `<loop-denylist>`) are duplicated byte-for-byte and parity-tested — edit the canonical
-  copy, paste into every marked block, run `pnpm test`.
-- The store lives under `.claude/`, which the `loop-iteration` denylist already blocks for
-  implementer diffs — records are written only by checkers/the Lead via `pnpm trace`.
-- `claim_id` must be stable across rounds for reuse/recurrence metrics to work; critics set
-  `revisits: <record_id>` when re-raising a prior claim so the chain is kept.
+  `<loop-denylist>`, `<loop-verifier>`, `<critic-roster>`) are duplicated byte-for-byte
+  and parity-tested — edit the canonical copy, paste into every marked block, run
+  `pnpm test`. `scripts/trace/workflows.test.mjs` also runs the real workflow bodies with
+  stub agents, so a deleted gate call or a broken reuse key fails a test.
+- The store lives under `.claude/`, and the TRACE gate code under `scripts/trace/`; the
+  `loop-iteration` denylist blocks both for implementer diffs — records are written only by
+  checkers/the Lead via `pnpm trace`.
+- `claim_id` must be stable across rounds for reuse/recurrence metrics to work; a reworded
+  re-raise gets a new `claim_id` (fail-safe: it is re-verified, not reused).
 
 Related: [workflow](./workflow.md) · [quality-bar](./quality-bar.md) · [testing](./testing.md)

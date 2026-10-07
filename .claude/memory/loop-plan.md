@@ -33,8 +33,10 @@ One row per node in the table below:
   record names what is `missing` (a check it could not see, a dependency landing, a
   re-verify). **Resolvable by the loop itself** — see *Deferred nodes* below.
 - `done` — implemented **and** verified by the separate checker; deps unblock. Requires a
-  `record` whose verdict is `accept`/`qualify` **and** a `CLEAR` action on it (no durable
-  state change without a record — `.claude/memory/topics/trace.md`).
+  `record` written by the **loop-iteration verifier for this node** (`claim_id
+  loop:<node id>`) whose verdict is `accept`/`qualify`, **and** a `CLEAR` action on it
+  citing the post-apply check (no durable state change without a record —
+  `.claude/memory/topics/trace.md`). Re-plan never sets `done` by itself.
 - `escalated` — handed to a human (denylist hit, max attempts, ambiguity, a `reject`/
   `revise` verdict); its `missing` names the human decision needed.
 - `dropped` — obsoleted by re-plan; kept as a row for the decision trail.
@@ -55,7 +57,10 @@ never dispatch a leftover `in-progress` node as-is (it may be mid-flight or orph
 **Deferred nodes (TRACE "defer is prospective memory"):** a `deferred` node is not
 dispatchable, but it is not a dead end either. In each re-plan step, check its `missing`
 against the new evidence (fresh records, a dependency now `done`, a check that now runs):
-if satisfied, reset it to `ready` (note which evidence arrived); if not, leave it. Each
+if satisfied, reset it to `ready` and cite the evidence that arrived (a record id or check
+output) in its notes — no citation, no reset; if not, leave it. A defer whose `missing` is
+a human decision (approval, product call) is never reset by the loop: such a node is
+`escalated`, and only that human's answer moves it. Each
 defer counts as one attempt toward the >3-attempts red flag — a node deferred for the
 fourth time becomes `escalated`. A `deferred` dependency keeps its dependents computed
 `blocked` (not dropped, not escalated — the dependency is resolvable); if the deferred

@@ -73,8 +73,12 @@ function applyEvidenceGate(v) {
   if (!EVIDENCE_POLICY[src.claimType]) out.failedGates.push(`claim-type-unknown:${src.claimType}`);
   const kinds = new Set(out.evidenceChecked.map((e) => e.kind));
   const rule = EVIDENCE_POLICY[out.claimType];
-  if (out.verdict === "accept" && !rule.acceptNeeds.some((k) => kinds.has(k))) {
-    out.failedGates.push(`evidence-gate:${out.claimType}:accept-needs-${rule.acceptNeeds.join("|")}`);
+  // Both licensing verdicts face the floor: a checker cannot dodge it by self-demoting
+  // to qualify. Only types whose fallback IS qualify (causal, predictive) may qualify on
+  // weaker evidence; for the rest a qualify without the needed kind becomes defer.
+  const licensing = out.verdict === "accept" || out.verdict === "qualify";
+  if (licensing && !rule.acceptNeeds.some((k) => kinds.has(k)) && (out.verdict === "accept" || rule.onFail !== "qualify")) {
+    out.failedGates.push(`evidence-gate:${out.claimType}:${out.verdict}-needs-${rule.acceptNeeds.join("|")}`);
     out.verdict = rule.onFail;
     if (rule.onFail === "qualify") out.qualifier = out.qualifier || rule.qualifier;
     else out.missing.push(rule.missing);
@@ -94,6 +98,14 @@ function applyEvidenceGate(v) {
     out.repair = "unspecified — the checker asked for a revision without stating it";
   }
   return out;
+}
+// Re-typing must never lower the bar: gate the verdict under every candidate type (the
+// maker's and the checker's) and keep the most conservative outcome.
+function applyEvidenceGateStrict(v, claimTypes) {
+  const types = (claimTypes || []).filter((t, i, all) => EVIDENCE_POLICY[t] && all.indexOf(t) === i);
+  if (types.length < 2) return applyEvidenceGate(types.length ? { ...(v || {}), claimType: types[0] } : v);
+  const rank = (r) => (r.verdict === "accept" ? 2 : r.verdict === "qualify" ? 1 : 0);
+  return types.map((t) => applyEvidenceGate({ ...(v || {}), claimType: t })).reduce((a, b) => (rank(b) < rank(a) ? b : a));
 }
 // </trace-evidence-gate>
 const LICENSING = ['accept', 'qualify']
@@ -193,8 +205,10 @@ const VERDICT_SCHEMA = {
   },
 }
 
+// Newest first: once the store grows, critics must still see the most recent verdicts.
 const priorDigest = priorRecords.length
-  ? priorRecords
+  ? [...priorRecords]
+      .sort((x, y) => String(y.created_at || '').localeCompare(String(x.created_at || '')))
       .slice(0, 40)
       .map((r) => `- ${r.record_id} [${r.final_status}] (${r.claim_type}) ${r.claim_text}${r.missing && r.missing.length ? ` — missing: ${r.missing.join('; ')}` : ''}`)
       .join('\n')
@@ -206,11 +220,15 @@ phase('Review')
 const reviews = await parallel(
   CRITICS.map((c, i) => () =>
     agent(
-      `You are the **${c.label}** for this project. Read CLAUDE.md and the relevant memory topic page(s), inspect ${focus} (read the code; if a localhost flow is in scope, drive it via Playwright/Chrome MCP and check console + network), then review strictly through your lens:\n${c.lens}\n${priorEvidence ? `\nEvidence already gathered by the Lead — verify against it instead of re-deriving from scratch:\n${typeof priorEvidence === 'string' ? priorEvidence : JSON.stringify(priorEvidence)}\n` : ''}\nType every finding with a claimType and never state it stronger than your evidence — a separate skeptic holds each type to this standard:\n${claimTypeGuide}\n${priorDigest ? `\nThese claims were already adjudicated (TRACE records). Do NOT re-raise a rejected claim unless you bring NEW evidence. If a finding of yours matches one of them, set revisits to its record_id and revisitReason to "still-present" (the same issue persists, nothing new) or "new-evidence" (put the new evidence first):\n${priorDigest}\n` : ''}\nReturn only findings you can back with concrete evidence. An empty list is a valid, honest answer.`,
+      `You are the **${c.label}** for this project. This is a READ-ONLY review: do not create, edit or delete any file in the repo (scratch copies outside it are fine). Read CLAUDE.md and the relevant memory topic page(s), inspect ${focus} (read the code; if a localhost flow is in scope, drive it via Playwright/Chrome MCP and check console + network), then review strictly through your lens:\n${c.lens}\n${priorEvidence ? `\nEvidence already gathered by the Lead — verify against it instead of re-deriving from scratch:\n${typeof priorEvidence === 'string' ? priorEvidence : JSON.stringify(priorEvidence)}\n` : ''}\nType every finding with a claimType and never state it stronger than your evidence — a separate skeptic holds each type to this standard:\n${claimTypeGuide}\n${priorDigest ? `\nThese claims were already adjudicated (TRACE records). Do NOT re-raise a rejected claim unless you bring NEW evidence. If a finding of yours matches one of them, set revisits to its record_id and revisitReason to "still-present" (the same issue persists, nothing new) or "new-evidence" (put the new evidence first):\n${priorDigest}\n` : ''}\nReturn only findings you can back with concrete evidence. An empty list is a valid, honest answer.`,
       { label: `critic:${c.key}-${i}`, phase: 'Review', schema: FINDINGS_SCHEMA, model: FANOUT_MODEL },
-    ).then((r) => ({ critic: c.key, label: c.label, findings: (r && r.findings) || [] })),
+    ).then((r) => ({ critic: c.key, label: c.label, findings: (r && r.findings) || [], failed: !r })),
   ),
 )
+// A critic that died returned nothing — that is NOT "no findings". Surface it so a round
+// with a silent lens is never mistaken for a clean pass.
+const failedReviewers = reviews.filter((r) => !r || r.failed).map((r, i) => (r ? r.critic : `critic-${i}`))
+if (failedReviewers.length) log(`WARNING: ${failedReviewers.length} critic(s) returned no result: ${failedReviewers.join(', ')} — the round is incomplete`)
 
 // Flatten, then dedup on (severity + exact normalized title). On a collision, MERGE
 // rather than drop. Agreement is NOT a stronger signal by itself: every critic is the
@@ -243,6 +261,16 @@ log(`${deduped.length} findings from ${CRITICS.length} critics (${all.length} be
 
 const criticByKey = new Map(ALL_CRITICS.map((c) => [c.key, c]))
 const sameTree = (t) => !!(treeId && t && t === treeId)
+const slug = (s) => norm(s).replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'untitled'
+const ownClaimId = (f) => `critic:${f.critic}:${slug(f.title)}`
+// A critic's `revisits` link is an LLM assertion, never trusted on its own: it binds only
+// when the prior record is deterministically the SAME claim (same lens, same normalized
+// title, same claim type). Otherwise the link is dropped entirely — no reuse, no
+// inherited claim_id, no `revises` — and the finding is adjudicated as a new claim.
+const linkedPrior = (f) => {
+  const prior = f.revisits ? priorById.get(f.revisits) : null
+  return prior && prior.claim_id === ownClaimId(f) && prior.claim_type === f.claimType ? prior : null
+}
 
 // Phase 2 — adjudicate each blocker/important finding with a SEPARATE skeptic (the
 // reviewer never confirms its own finding), unless it revisits a prior record as
@@ -252,8 +280,11 @@ phase('Verify')
 const toVerify = deduped.filter((f) => f.severity === 'blocker' || f.severity === 'important')
 const settledAll = await parallel(
   toVerify.map((f, i) => () => {
-    const prior = f.revisits ? priorById.get(f.revisits) : null
-    if (prior && f.revisitReason === 'still-present' && sameTree(prior.provenance && prior.provenance.tree)) {
+    const prior = linkedPrior(f)
+    if (f.revisits && !prior) log(`dropped unverifiable revisits link ${f.revisits} on "${f.title}" (not the same claim)`)
+    // Only licensing verdicts are reused: a defer may be resolvable by evidence gathered
+    // outside the tree, and a reject must not silently bury a re-raised blocker.
+    if (prior && f.revisitReason === 'still-present' && ['accept', 'qualify'].includes(prior.final_status) && sameTree(prior.provenance && prior.provenance.tree)) {
       return Promise.resolve({
         ...f,
         verdict: prior.final_status,
@@ -277,12 +308,15 @@ const settledAll = await parallel(
     ).then((v) => {
       // Fail safe: a missing/failed verdict becomes defer (never confirmed, never
       // "refuted" — an unreadable verdict is evidence of nothing). The deterministic
-      // evidence gate then caps any accept the cited evidence cannot carry.
-      const g = applyEvidenceGate(v ? { ...v, claimType: v.claimType || t } : { claimType: t })
+      // evidence gate then caps any licensing verdict the cited evidence cannot carry —
+      // under BOTH the critic's and the skeptic's claim type, so re-typing a claim can
+      // never lower its bar.
+      const g = applyEvidenceGateStrict(v || {}, [v && v.claimType, t])
       return {
         ...f,
         verdict: g.verdict,
         claimType: g.claimType,
+        ...(v && v.claimType && v.claimType !== t ? { retypedFrom: t } : {}),
         qualifier: g.qualifier,
         missing: g.missing,
         repair: g.repair,
@@ -306,16 +340,16 @@ const niceToHaves = deduped.filter((f) => f.severity === 'nice-to-have')
 
 // TRACE-lite record drafts for every NEWLY adjudicated finding (the Lead appends them
 // with `pnpm trace write`); reused verdicts get a REUSE action instead of a new record.
-const slug = (s) => norm(s).replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'untitled'
 const traceRecords = settled
   .filter((o) => !o.reused)
   .map((o, i) => {
     const prior = o.revises ? priorById.get(o.revises) : null
     return {
       writer_id: `critic-panel/verify:${o.critic}-${i}`,
-      claim_id: prior ? prior.claim_id : `critic:${o.critic}:${slug(o.title)}`,
+      claim_id: prior ? prior.claim_id : ownClaimId(o),
       claim_text: String(o.title || 'untitled finding'),
       claim_type: o.claimType,
+      ...(o.retypedFrom ? { retyped_from: o.retypedFrom } : {}),
       severity: o.severity,
       subject: String(focus).slice(0, 200),
       evidence: [
@@ -340,8 +374,10 @@ const reuseActions = settled
 return {
   focus,
   treeId,
+  failedReviewers, // critics that returned nothing — the round is incomplete if non-empty
   counts: {
     critics: CRITICS.length,
+    failedReviewers: failedReviewers.length,
     confirmedBlockers: confirmed.filter((f) => f.severity === 'blocker').length,
     confirmedImportant: confirmed.filter((f) => f.severity === 'important').length,
     qualified: confirmed.filter((f) => f.verdict === 'qualify').length,

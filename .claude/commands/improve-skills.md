@@ -52,10 +52,14 @@ $ARGUMENTS
    before applying.
 6. When an edit changes a command or workflow, keep `.claude/skills-index.md` and any
    affected memory wiki page in sync (additive index updates need no confirmation).
-7. **Record the outcome:** append the run's `traceRecords` (`pnpm trace write -`),
-   then one consumer action per adjudicated finding — `CLEAR` for an edit you applied
-   after confirmation, `REJECT` for one the user declined or you did not apply (with a
-   note why). `CLEAR` is refused on anything but `accept` (fail closed).
+7. **Verify, then record the outcome.** After applying approved edits, run `pnpm test`
+   (the contract tests catch a broken workflow, a drifted shared block or policy table)
+   before calling anything applied. Then record the run per the consumer protocol in
+   `.claude/memory/topics/trace.md` (scratchpad file → `pnpm trace write <file>`) and one
+   consumer action per adjudicated finding: `CLEAR` for an `accept` edit you applied (note
+   the passing `pnpm test`), `REJECT` for an `accept` edit the user declined, `HOLD` for a
+   `revise` (needs a designed fix) or a `defer` (unverified) — never `REJECT` a finding
+   nobody adjudicated. `CLEAR` is refused on anything but a licensing verdict (fail closed).
 8. End the task with `/dream` so any durable lesson from this pass is filed into the
    wiki.
 

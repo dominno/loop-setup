@@ -30,7 +30,8 @@ this repo from the "loop engineering" loop-design checklist
 **4. Maker/checker split**
 - [ ] Implementer and verifier are separate passes
 - [ ] Implementer cannot mark its own work "done"
-- [ ] Verifier runs tests in isolation before approving
+- [ ] Checks run in isolation (the implementer's worktree) and again by the Lead after the
+      patch is applied, before any `CLEAR`; the verifier judges the real diff
 - [ ] Verifier returns a **typed TRACE verdict** (accept/qualify/revise/defer/reject); a
       missing verdict defers — never confirms, never counts as a refutation
 
@@ -71,9 +72,12 @@ this repo from the "loop engineering" loop-design checklist
 - [ ] No auto-merge without an explicit allowlist
 - [ ] Secrets/env in denylist
 - [ ] Flakes handled by root-cause, not retry-only
-- [ ] **Measured checker (L3 only):** a recent `/trace-bench` run shows the loop
-      verifier's WrongAcceptRate = 0 on bad fixtures the denylist does not catch (F4) and
-      procedural invariance ≥ 0.8 (F3) — see `.claude/memory/topics/trace.md`
+- [ ] **Measured checker (L3 only):** the latest `bench:trace-bench-lite` record
+      (`pnpm trace query --latest --claim-id bench:trace-bench-lite`) is `accept` (not
+      `qualify` — no excluded runs), was written after the last change to the
+      `<loop-verifier>` block in `.claude/workflows/loop-iteration.js`, came from a
+      `/bench-checkers` run with `repeat ≥ 2`, and its `failed_gates` contain no F0, F3 or
+      F4 — see `.claude/memory/topics/trace.md`
 
 ## Red flags (stop & fix before raising the level)
 - Same PR/issue with >3 automated fix attempts without progress.

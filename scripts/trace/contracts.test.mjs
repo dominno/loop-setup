@@ -17,7 +17,9 @@ import {
   benchArgs,
   contaminatedRuns,
   encodeBench,
+  leakMarkers,
   loadWorkflowBlock,
+  CODE_PATHS,
   manifestViolations,
   markContaminated,
   opaqueFixtureId,
@@ -56,7 +58,7 @@ describe("workflow scripts", () => {
     const canonical = block(lib, "trace-evidence-gate");
     expect(canonical).not.toBeNull();
     const carriers = workflows.filter((w) => w.text.includes("// <trace-evidence-gate>"));
-    expect(carriers.map((w) => w.name).sort()).toEqual(["critic-panel.js", "loop-iteration.js", "trace-bench.js"]);
+    expect(carriers.map((w) => w.name).sort()).toEqual(["critic-panel.js", "improve-skills.js", "loop-iteration.js", "scan-docs.js", "trace-bench.js"]);
     for (const w of carriers) expect(block(w.text, "trace-evidence-gate"), w.name).toBe(canonical);
   });
 
@@ -135,7 +137,13 @@ describe("TRACE-Bench-lite fixtures", () => {
     const tracked = execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], { cwd: ROOT, encoding: "utf8" })
       .split("\0")
       .filter((p) => p && !p.endsWith(".bundle") && !p.startsWith("node_modules/"));
-    const markers = manifest.fixtures.flatMap((f) => [f.id, ...(f.defect ? [f.defect.slice(0, 60)] : [])]);
+    const product = execFileSync("git", ["ls-files", "-z", "--", ...CODE_PATHS], { cwd: ROOT, encoding: "utf8" })
+      .split("\0")
+      .filter(Boolean)
+      .map((p) => readFileSync(join(ROOT, p), "utf8"))
+      .join("\n");
+    const markers = leakMarkers(manifest, product);
+    expect(markers.length).toBeGreaterThan(manifest.fixtures.length); // patch-only tokens are included
     const leakyFiles = new Set();
     for (const p of tracked) {
       let text;
@@ -149,17 +157,9 @@ describe("TRACE-Bench-lite fixtures", () => {
     expect([...leakyFiles]).toEqual([]);
   });
 
-  it("every fixture patch applies cleanly to the current tree", () => {
-    const failing = manifest.fixtures.filter((f) => {
-      try {
-        execFileSync("git", ["apply", "--check", "-"], { cwd: ROOT, input: f.patch, stdio: ["pipe", "pipe", "pipe"] });
-        return false;
-      } catch {
-        return true;
-      }
-    });
-    expect(failing.map((f) => opaqueFixtureId(f.id))).toEqual([]);
-  });
+  // Whether each patch still APPLIES is deliberately not checked here: product edits near
+  // a fixture hunk would turn `pnpm test` red for unrelated work. `pnpm trace bench-args`
+  // and `bench-judge` refuse to run on stale fixtures instead.
 
   it("bench args leak no ground truth to the agents (ids, class, defect, judge)", () => {
     const args = benchArgs(manifest, {});

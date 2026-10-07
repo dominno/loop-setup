@@ -59,8 +59,12 @@ function applyEvidenceGate(v) {
   if (!EVIDENCE_POLICY[src.claimType]) out.failedGates.push(`claim-type-unknown:${src.claimType}`);
   const kinds = new Set(out.evidenceChecked.map((e) => e.kind));
   const rule = EVIDENCE_POLICY[out.claimType];
-  if (out.verdict === "accept" && !rule.acceptNeeds.some((k) => kinds.has(k))) {
-    out.failedGates.push(`evidence-gate:${out.claimType}:accept-needs-${rule.acceptNeeds.join("|")}`);
+  // Both licensing verdicts face the floor: a checker cannot dodge it by self-demoting
+  // to qualify. Only types whose fallback IS qualify (causal, predictive) may qualify on
+  // weaker evidence; for the rest a qualify without the needed kind becomes defer.
+  const licensing = out.verdict === "accept" || out.verdict === "qualify";
+  if (licensing && !rule.acceptNeeds.some((k) => kinds.has(k)) && (out.verdict === "accept" || rule.onFail !== "qualify")) {
+    out.failedGates.push(`evidence-gate:${out.claimType}:${out.verdict}-needs-${rule.acceptNeeds.join("|")}`);
     out.verdict = rule.onFail;
     if (rule.onFail === "qualify") out.qualifier = out.qualifier || rule.qualifier;
     else out.missing.push(rule.missing);
@@ -81,8 +85,16 @@ function applyEvidenceGate(v) {
   }
   return out;
 }
+// Re-typing must never lower the bar: gate the verdict under every candidate type (the
+// maker's and the checker's) and keep the most conservative outcome.
+function applyEvidenceGateStrict(v, claimTypes) {
+  const types = (claimTypes || []).filter((t, i, all) => EVIDENCE_POLICY[t] && all.indexOf(t) === i);
+  if (types.length < 2) return applyEvidenceGate(types.length ? { ...(v || {}), claimType: types[0] } : v);
+  const rank = (r) => (r.verdict === "accept" ? 2 : r.verdict === "qualify" ? 1 : 0);
+  return types.map((t) => applyEvidenceGate({ ...(v || {}), claimType: t })).reduce((a, b) => (rank(b) < rank(a) ? b : a));
+}
 // </trace-evidence-gate>
-export { VERDICTS, EVIDENCE_POLICY, applyEvidenceGate };
+export { VERDICTS, EVIDENCE_POLICY, applyEvidenceGate, applyEvidenceGateStrict };
 
 /** Verdicts that license a durable action (CLEAR / COMMIT). Everything else withholds. */
 export const LICENSING = ["accept", "qualify"];
@@ -172,7 +184,9 @@ export function validate(schema, value, root = schema, path = "$") {
     for (const k of schema.required || []) if (!(k in value)) errs.push(`${path}: missing required "${k}"`);
     const props = schema.properties || {};
     for (const [k, v] of Object.entries(value)) {
-      if (props[k]) errs.push(...validate(props[k], v, root, `${path}.${k}`));
+      // Own-property lookup: a "__proto__" or "constructor" key must not resolve to an
+      // Object.prototype member and slip past additionalProperties:false.
+      if (Object.prototype.hasOwnProperty.call(props, k)) errs.push(...validate(props[k], v, root, `${path}.${k}`));
       else if (schema.additionalProperties === false) errs.push(`${path}: unknown property "${k}"`);
     }
   }
@@ -193,6 +207,14 @@ export function semanticViolations(rec) {
     }
   }
   if (status === "qualify" && !rec.qualifier) v.push("qualify needs a qualifier (the strength the claim holds at)");
+  // Policy v2: qualify faces the evidence floor too (except causal/predictive, whose
+  // fallback is qualify). Version-gated so records written under v1 still replay.
+  if (status === "qualify" && Number(rec.policy_version) >= 2) {
+    const rule = EVIDENCE_POLICY[rec.claim_type];
+    if (rule && rule.onFail !== "qualify" && !rule.acceptNeeds.some((k) => kinds.has(k))) {
+      v.push(`evidence-gate: qualify of a ${rec.claim_type} claim needs evidence of kind ${rule.acceptNeeds.join("|")}`);
+    }
+  }
   if (status === "defer" && !(rec.missing || []).length) v.push("defer needs a non-empty missing[] (name the evidence that would resolve it)");
   if (status === "revise" && !rec.repair) v.push("revise needs a repair (the restated claim or bounded fix)");
   if (rec.revises && rec.revises === rec.record_id) v.push("a record cannot revise itself");
@@ -202,6 +224,25 @@ export function semanticViolations(rec) {
 
 export function makeId(prefix, obj) {
   return `${prefix}-${createHash("sha256").update(JSON.stringify(obj)).digest("hex").slice(0, 12)}`;
+}
+
+/** Drop only the entry's OWN id field (an action's `record_id` is a reference, not its id). */
+function withoutOwnId(entry) {
+  const rest = { ...entry };
+  delete rest[entry.kind === "action" ? "action_id" : "record_id"];
+  return rest;
+}
+
+/** The id a record/action MUST carry: a hash of everything except its own id (tamper check). */
+export function expectedId(entry) {
+  return makeId(entry.kind === "action" ? "TA" : "TR", withoutOwnId(entry));
+}
+
+/** Content identity ignoring writer time — two writes of the same draft share it. */
+export function contentKey(entry) {
+  const rest = withoutOwnId(entry);
+  delete rest.created_at;
+  return JSON.stringify(rest);
 }
 
 /** Fill the writer-owned fields of a record draft. Writer stamps kind, versions, and time. */
@@ -232,11 +273,9 @@ export function finalizeRecord(draft, { now, policyVersion, commit, branch }) {
     if (rec[k] === "" || rec[k] == null) delete rec[k];
   }
   if (Array.isArray(rec.counter_reasons) && rec.counter_reasons.length === 0) delete rec.counter_reasons;
-  if (!rec.record_id) {
-    const { record_id: _omit, ...hashable } = rec;
-    void _omit;
-    rec.record_id = makeId("TR", hashable);
-  }
+  // The id is writer-owned and content-addressed: never taken from the draft, so lint can
+  // detect any in-place rewrite of a stored line.
+  rec.record_id = expectedId(rec);
   return rec;
 }
 
@@ -251,7 +290,7 @@ export function finalizeAction(draft, { now }) {
     ...(draft.ref ? { ref: String(draft.ref) } : {}),
     ...(draft.note ? { note: String(draft.note) } : {}),
   };
-  a.action_id = makeId("TA", a);
+  a.action_id = expectedId(a);
   return a;
 }
 
@@ -283,6 +322,8 @@ export function replay(entries, schema, readerPolicyVersion) {
   const records = new Map();
   const actions = new Map();
   const superseded = new Set();
+  const latestOfClaim = new Map(); // claim_id → record_id of its newest record so far
+  const contentKeys = new Map(); // contentKey → id (writer-side idempotency)
   const seen = new Set();
   for (const e of entries) {
     const at = `${e.source}:${e.line}`;
@@ -302,6 +343,10 @@ export function replay(entries, schema, readerPolicyVersion) {
       continue;
     }
     const id = v.kind === "record" ? v.record_id : v.action_id;
+    if (id !== expectedId(v)) {
+      errors.push(`${at}: ${id} does not match its content hash — the stored line was edited in place (records are immutable)`);
+      continue;
+    }
     if (seen.has(id)) {
       errors.push(`${at}: duplicate id ${id} (records are immutable — write a revision instead)`);
       continue;
@@ -322,23 +367,26 @@ export function replay(entries, schema, readerPolicyVersion) {
         superseded.add(v.revises);
       }
       records.set(v.record_id, v);
+      latestOfClaim.set(v.claim_id, v.record_id);
+      contentKeys.set(contentKey(v), v.record_id);
     } else {
       const rec = records.get(v.record_id);
       if (!rec) {
         errors.push(`${at}: action ${v.action_id} targets unknown or later record ${v.record_id}`);
         continue;
       }
-      const why = actionViolation(rec, v.action, superseded);
+      const why = actionViolation(rec, v.action, superseded, latestOfClaim);
       if (why) errors.push(`${at}: action ${v.action_id}: ${why}`);
+      contentKeys.set(contentKey(v), v.action_id);
       if (!actions.has(v.record_id)) actions.set(v.record_id, []);
       actions.get(v.record_id).push(v);
     }
   }
-  return { errors, warnings, records, actions, superseded };
+  return { errors, warnings, records, actions, superseded, latestOfClaim, contentKeys };
 }
 
 /** Why a consumer action on `rec` is not allowed (fail closed), or null if it is. */
-export function actionViolation(rec, action, superseded) {
+export function actionViolation(rec, action, superseded, latestOfClaim) {
   const allowed = ACTION_ALLOWED[action];
   if (!allowed) return `unknown action ${action}`;
   if (!allowed.includes(rec.final_status)) {
@@ -346,6 +394,12 @@ export function actionViolation(rec, action, superseded) {
   }
   if (CLEARING_ACTIONS.includes(action) && superseded && superseded.has(rec.record_id)) {
     return `${action} on ${rec.record_id}, which has been superseded by a revision — act on the latest revision`;
+  }
+  // A newer record about the same claim (even one that does not formally `revises` this
+  // one) makes this record stale: never clear a claim on an outdated verdict.
+  const latest = latestOfClaim && latestOfClaim.get(rec.claim_id);
+  if (CLEARING_ACTIONS.includes(action) && latest && latest !== rec.record_id) {
+    return `${action} on ${rec.record_id}, but ${latest} is a newer record for claim ${rec.claim_id} — act on the latest record`;
   }
   return null;
 }
@@ -367,8 +421,30 @@ export function treeFingerprint({ head, diff, untracked }) {
   return h.digest("hex").slice(0, 16);
 }
 
-/** Paths whose changes never count toward the tree fingerprint (the records themselves). */
-export const TREE_ID_EXCLUDES = [".claude/memory/trace"];
+/**
+ * Paths whose changes never count toward the tree fingerprint: the records themselves and
+ * the loop's/wiki's own bookkeeping (rewritten every iteration — counting them would make
+ * verdict reuse impossible across /loop iterations without any code having changed).
+ */
+export const TREE_ID_EXCLUDES = [
+  ".claude/memory/trace",
+  ".claude/memory/loop-plan.md",
+  ".claude/memory/loop-run-log.md",
+  ".claude/memory/log.md",
+  ".claude/memory/quarantine.md",
+];
+
+/**
+ * Obvious secret shapes. The store is committed and immutable, so a secret that lands in
+ * it can only be removed by rewriting history — the writer refuses such drafts instead.
+ */
+export const SECRET_PATTERNS = [
+  /\bsk-[A-Za-z0-9_-]{16,}/, // OpenAI/Anthropic-style keys
+  /\bAKIA[0-9A-Z]{16}\b/, // AWS access key id
+  /\bgh[pousr]_[A-Za-z0-9]{30,}/, // GitHub tokens
+  /\bxox[abposr]-[A-Za-z0-9-]{10,}/, // Slack tokens
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
+];
 
 /** The latest (non-superseded) record per claim_id; ties broken by created_at. */
 export function latestByClaim(records, superseded) {
@@ -425,7 +501,10 @@ export function storeMetrics({ records, actions, superseded }) {
     byType[r.claim_type] = (byType[r.claim_type] || 0) + 1;
   }
   const latest = [...latestByClaim(records, superseded).values()];
-  const consumed = latest.filter((r) => (actions.get(r.record_id) || []).length > 0).length;
+  // Only decisions count as consumption — REUSE/REAUDIT are bookkeeping, not a consumer
+  // acting on the verdict (else F5 could be satisfied by maintenance noise).
+  const DECISIONS = ["CLEAR", "HOLD", "COMMIT", "COMMIT_QUALIFIED", "QUARANTINE", "REJECT"];
+  const consumed = latest.filter((r) => (actions.get(r.record_id) || []).some((a) => DECISIONS.includes(a.action))).length;
 
   // DeferQuality proxy: of defers that were later revised (the named evidence was
   // supplied and the claim re-adjudicated), how many changed verdict?
@@ -449,12 +528,18 @@ export function storeMetrics({ records, actions, superseded }) {
   let reuse = 0;
   for (const list of actions.values()) reuse += list.filter((a) => a.action === "REUSE").length;
 
+  const consumerCoverage = latest.length ? consumed / latest.length : null;
+  const flags = [];
+  if (latest.length >= 10 && consumerCoverage < 0.5) {
+    flags.push(`F5 archive-not-instrument: only ${Math.round(consumerCoverage * 100)}% of current claims were acted on by a consumer — cut fields or stop writing records nobody reads`);
+  }
   return {
+    flags,
     records: all.length,
     byStatus,
     byType,
     latestClaims: latest.length,
-    consumerCoverage: latest.length ? consumed / latest.length : null,
+    consumerCoverage,
     deferResolved: resolved.length,
     deferQuality: resolved.length ? flipped.length / resolved.length : null,
     repeatedErrorRate: confirmedClaims ? repeated / confirmedClaims : null,
@@ -510,10 +595,22 @@ export function scoreBench(manifest, results, thresholds = { invariance: 0.8 }) 
   // Runs whose agent saw ground truth (markContaminated) are excluded, never scored.
   const byToken = new Map(manifest.fixtures.map((f) => [opaqueFixtureId(f.id), f.id]));
   const all = (Array.isArray(results?.runs) ? results.runs : []).map((r) => ({ ...r, fixtureId: byToken.get(r.fixtureId) || r.fixtureId }));
-  const runs = all.filter((r) => !r.contaminated);
-  const out = { fixtures: { bad: bad.length, good: good.length }, contaminatedRuns: all.length - runs.length, arms: {}, flags: [] };
+  const clean = all.filter((r) => !r.contaminated);
+  // Validity: a run whose agent returned no verdict measured nothing — scoring it as a
+  // hold would let a dead checker look perfect on the bad fixtures.
+  const runs = clean.filter((r) => !r.noVerdict);
+  const out = {
+    fixtures: { bad: bad.length, good: good.length },
+    contaminatedRuns: all.length - clean.length,
+    noVerdictRuns: clean.length - runs.length,
+    arms: {},
+    flags: [],
+  };
   if (out.contaminatedRuns) {
     out.flags.push(`F0 contamination: ${out.contaminatedRuns} run(s) had ground truth in their agent's transcript and were excluded — fix the leak before trusting this bench`);
+  }
+  if (out.noVerdictRuns) {
+    out.flags.push(`F0 validity: ${out.noVerdictRuns} run(s) returned no verdict and were excluded — the measured arm is smaller than it looks`);
   }
 
   // --- verifier arm (loop-iteration's checker on seeded diffs) ---
@@ -557,6 +654,12 @@ export function scoreBench(manifest, results, thresholds = { invariance: 0.8 }) 
     };
     if (invariance != null && invariance < thresholds.invariance) {
       out.flags.push(`F3 instability: procedural invariance ${invariance.toFixed(2)} < ${thresholds.invariance} — verifier verdicts flip across identical re-runs; treat single-run verdicts as noisy`);
+    }
+    // F4: the loop checker licensed a bad diff that the deterministic denylist does not
+    // catch — exactly the case an unattended (L3) loop would ship.
+    const wrongUndefended = ver.filter((r) => isBad(r.fixtureId) && !r.denylistHit && LICENSING.includes(r.verdict));
+    if (wrongUndefended.length) {
+      out.flags.push(`F4 wrong-accept: the loop verifier licensed ${wrongUndefended.length} bad diff run(s) the denylist does not catch — keep loops at ≤ L2 and tighten the verifier`);
     }
     if (out.arms.verifier.gateChanged === 0) {
       out.flags.push("F2 (informational): the evidence gate changed no verifier verdict on this bench — it may be decorative for diff-review claims");
@@ -651,14 +754,21 @@ export function loadEntries(storePath) {
  * The TRACE write API: validate every draft, then append all-or-nothing.
  * Returns WriteResult[] = { record_id, schema_version, policy_version, validation, stored }.
  */
-export function writeRecords(drafts, { storePath, now, policyVersion, commit, branch, schema }) {
+export function writeRecords(drafts, { storePath, now, policyVersion, commit, branch, schema, forbidden = [] }) {
   const sch = schema || loadSchema();
   const prior = replay(loadEntries(storePath), sch, policyVersion);
   const known = new Map(prior.records);
+  const contents = new Map(prior.contentKeys);
   const batch = drafts.map((d) => finalizeRecord(d, { now, policyVersion, commit, branch }));
   const results = batch.map((rec) => {
     const violations = [...validate(sch.$defs.record, rec, sch), ...semanticViolations(rec)];
     if (known.has(rec.record_id)) violations.push(`duplicate record_id ${rec.record_id}`);
+    const ck = contentKey(rec);
+    if (contents.has(ck)) violations.push(`duplicate content — this exact record is already stored as ${contents.get(ck)} (re-running a write is not a new verdict)`);
+    contents.set(ck, rec.record_id);
+    const text = JSON.stringify(rec);
+    if (forbidden.some((m) => text.includes(m))) violations.push("contains bench ground truth (a fixture id or defect text) — redact it; the store is greppable by bench agents");
+    if (SECRET_PATTERNS.some((re) => re.test(text))) violations.push("looks like it contains a secret (key/token/private key) — redact it; the store is committed and immutable");
     for (const ref of ["revises", "reuses"]) {
       if (rec[ref] && !known.has(rec[ref])) violations.push(`${ref} points to unknown record ${rec[ref]}`);
     }
@@ -684,12 +794,18 @@ export function appendActions(drafts, { storePath, now, policyVersion, schema })
   const sch = schema || loadSchema();
   const prior = replay(loadEntries(storePath), sch, policyVersion);
   const batch = drafts.map((d) => finalizeAction(d, { now }));
+  const contents = new Map(prior.contentKeys);
   const results = batch.map((a) => {
     const violations = validate(sch.$defs.action, a, sch);
+    const ck = contentKey(a);
+    // Same consumer decision twice (in this batch or already stored) would collide in the
+    // append-only store; refuse it rather than poison the stream.
+    if (contents.has(ck)) violations.push(`duplicate action — already recorded as ${contents.get(ck)}`);
+    contents.set(ck, a.action_id);
     const rec = prior.records.get(a.record_id);
     if (!rec) violations.push(`unknown record ${a.record_id} — a consumer cannot act on a record that does not exist`);
     else {
-      const why = actionViolation(rec, a.action, prior.superseded);
+      const why = actionViolation(rec, a.action, prior.superseded, prior.latestOfClaim);
       if (why) violations.push(why);
     }
     return { a, violations };
@@ -765,13 +881,41 @@ export function readBench(bundlePath = BENCH_BUNDLE) {
   return decodeBench(readFileSync(bundlePath, "utf8"));
 }
 
-/** Strings whose presence in an agent transcript means ground truth leaked to it. */
-export function leakMarkers(manifest) {
+/**
+ * Distinctive tokens that only the fixture patches introduce (absent from the product
+ * code): finding one next to "fixture"/"seeded" text tells an agent which diff is a
+ * seeded defect, so they count as ground truth too. `codeText` = the concatenated
+ * CODE_PATHS sources.
+ */
+export function patchOnlyTokens(manifest, codeText) {
+  const toks = new Set();
+  for (const f of manifest.fixtures || []) {
+    for (const line of String(f.patch || "").split("\n")) {
+      if (!line.startsWith("+") || line.startsWith("+++")) continue;
+      for (const t of line.match(/[A-Za-z_][A-Za-z0-9_.-]{9,}/g) || []) toks.add(t);
+    }
+  }
+  return [...toks].filter((t) => !String(codeText || "").includes(t));
+}
+
+/**
+ * Code whose vocabulary is NOT distinctive (see patchOnlyTokens): the product sources plus
+ * the machinery's own code. Prose (docs, prompts, the record store) is deliberately NOT
+ * included — that is where a leak would land, so it must not whitelist itself.
+ */
+export const CODE_PATHS = ["src", "e2e", ".github", "scripts", ".claude/workflows", "package.json", "next.config.mjs", "playwright.config.ts", "tsconfig.json", "eslint.config.mjs", "vitest.config.ts"];
+
+/**
+ * Strings whose presence in an agent transcript — or anywhere in the tree — means ground
+ * truth leaked: fixture ids, defect text, and (when codeText is given) patch-only tokens.
+ */
+export function leakMarkers(manifest, codeText) {
   const out = [];
   for (const f of manifest.fixtures || []) {
     out.push(f.id);
     if (f.defect) out.push(String(f.defect).slice(0, 60));
   }
+  if (codeText !== undefined) out.push(...patchOnlyTokens(manifest, codeText));
   return out.filter((m) => m && m.length >= 8);
 }
 
@@ -852,6 +996,15 @@ export function opaqueFixtureId(id) {
   return `fx-${createHash("sha256").update(`trace-bench:${id}`).digest("hex").slice(0, 8)}`;
 }
 
+/**
+ * Fixtures whose patch no longer applies to the working tree (product code moved on).
+ * Checked by bench-args/bench-judge — NOT by `pnpm test`, so routine product edits never
+ * turn the main gate red. `applies(patch) → boolean` is injected.
+ */
+export function staleFixtures(manifest, applies) {
+  return manifest.fixtures.filter((f) => !applies(f.patch)).map((f) => opaqueFixtureId(f.id));
+}
+
 /** The workflow args for .claude/workflows/trace-bench.js — no ground truth leaks to agents. */
 export function benchArgs(manifest, { arms, repeat, critics, only }) {
   const fx = manifest.fixtures.filter((f) => !only || only.includes(f.id));
@@ -885,7 +1038,11 @@ export function benchRecordDraft(score, { resultsRef, priorRecordId }) {
     evidence: [{ kind: "measurement", ref: `pnpm trace bench-score ${resultsRef}`, result: JSON.stringify({ arms: score.arms, externalJudgeGap: Object.fromEntries(Object.entries(score.externalJudgeGap || {}).map(([k, ids]) => [k, ids.length])), contaminatedRuns: score.contaminatedRuns }).slice(0, 4000) }],
     failed_gates: score.flags.map((x) => x.split(":")[0]),
     missing: [],
-    final_status: "accept",
+    // Excluded runs (contamination or no verdict) shrink the sample: the numbers hold
+    // only for the runs that were actually measured.
+    ...(score.contaminatedRuns || score.noVerdictRuns
+      ? { final_status: "qualify", qualifier: `measured on the clean runs only — ${score.contaminatedRuns || 0} contaminated and ${score.noVerdictRuns || 0} no-verdict run(s) were excluded` }
+      : { final_status: "accept" }),
     reason: "deterministic scoring of the raw bench runs against the manifest's ground truth; the flags are the pre-registered falsification criteria that fired",
     provenance: { workflow: "trace-bench" },
     ...(priorRecordId ? { revises: priorRecordId } : {}),

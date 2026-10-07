@@ -31,11 +31,15 @@ $ARGUMENTS
    Show a `qualify` verdict with its qualifier (the strength the claim actually holds
    at). List `deferred` findings with their `missing` evidence and `revised` ones with
    their `repair` — neither is actionable as stated. Note `refuted` findings so they
-   are not actioned.
-5. **Record the verdicts** (memory, not code): pipe the workflow result into
-   `pnpm trace write -` (it reads `traceRecords`) and `pnpm trace act --from -` (it reads
-   `reuseActions`). These records are what the next round reuses. Do **not** edit any
-   other file — this is review only.
+   are not actioned. If `failedReviewers` is non-empty, say which lenses are missing —
+   the round is incomplete.
+5. **Record the verdicts** (memory, not code), per the consumer protocol in
+   `.claude/memory/topics/trace.md`: save the workflow result JSON to a scratchpad file,
+   then `pnpm trace write <file> --then-act HOLD --consumer critic-round --note
+   "review-only round"` (records the verdicts and that this round acted on none of them)
+   and `pnpm trace act --from <file>` (its `reuseActions`). If the writer rejects the
+   batch, report the violations and do not hand-edit drafts. These records are what the
+   next round reuses. Do **not** edit any other file — this is review only.
 
 ## Notes
 - This is the heavier, deterministic path (the workflow spawns ~10 critic agents +

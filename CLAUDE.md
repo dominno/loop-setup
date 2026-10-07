@@ -211,8 +211,9 @@ A task is complete only when:
 - lint passes
 - unit tests pass when relevant
 - build passes when relevant
-- post-implementation critic review has no confirmed blockers, and every deferred
-  blocker names its missing evidence
+- post-implementation critic review has no blockers — none confirmed, and none deferred or
+  revised: an open defer/revise blocker keeps the task incomplete until its missing
+  evidence is supplied and re-adjudicated, or the user explicitly accepts the risk
 - the critic rounds' TRACE-lite records are appended (`pnpm trace lint` passes)
 - Artistic Direction Critic confirms the UI has an intentional look and feel when the task touches UI or product experience
 - changed files and remaining risks are reported
@@ -233,10 +234,11 @@ Do not fix:
 
 ## Output format after every critic round
 
-Use this table:
+Use this table (Verdict = the skeptic's typed TRACE verdict; show a `qualify` with its
+qualifier, and list `deferred` findings with their missing evidence below the table):
 
-| Critic | Severity | Finding | Evidence | Recommended action |
-|---|---|---|---|---|
+| Critic | Severity | Verdict | Finding | Evidence | Recommended action |
+|---|---|---|---|---|---|
 
 ## Final response format
 

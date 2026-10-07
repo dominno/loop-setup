@@ -25,13 +25,17 @@ Procedure:
    `args: { "focus": "$ARGUMENTS (current behavior + changed files)", "priorRecords": <pnpm -s trace query --latest --writer critic-panel --json>, "treeId": "<pnpm -s trace tree-id>" }`.
    Render the returned `confirmed` findings (verdict `accept`/`qualify`) as the critic
    matrix with their verdicts; list `deferred` (with `missing`) and `revised` (with
-   `repair`); record `niceToHaves`; ignore `refuted`. Append the verdicts with
-   `pnpm trace write -` / `pnpm trace act --from -` (TRACE records — see
-   `.claude/memory/topics/trace.md`).
+   `repair`); record `niceToHaves`; ignore `refuted`; if `failedReviewers` is non-empty,
+   say the round is incomplete and re-run it. Record the verdicts exactly as the
+   **consumer protocol** in `.claude/memory/topics/trace.md` says (save the result to a
+   scratchpad file → `pnpm trace write <file>` → `pnpm trace act --from <file>`).
 5. As Lead Agent, choose the smallest safe plan from the confirmed blockers +
-   directly-related important findings. Act on a `qualify` finding only at its
-   qualified strength; for a `deferred` blocker, first gather its `missing` evidence
-   (run the check, reproduce in the browser) rather than fixing blind.
+   directly-related important findings. Act on a `qualify` finding only at its qualified
+   strength (state the qualifier in your plan). A `deferred` or `revised` blocker is
+   handled per the consumer protocol: gather its `missing` evidence (run the check,
+   reproduce in the browser) or restate it per its `repair`, then re-adjudicate it in the
+   next critic round (pass the evidence as `priorEvidence`) — never fix blind and never
+   act on the defer itself.
 6. Implement only those. Keep the **maker/checker split**: implementation is your
    pass; the post-implementation workflow below is the independent checker.
 7. Run the smallest relevant automated checks first.
@@ -42,13 +46,15 @@ Procedure:
     `args.focus` set to the changed flow and `args.priorEvidence` set to what you
     already gathered (git diff summary + test/lint/build results + browser/console
     findings) so the critics verify against it instead of re-running everything.
-    Pass `priorRecords` + a fresh `treeId` again (reuse only fires on an identical tree). Fix any
-    remaining confirmed blockers and re-run until none remain — **but stop on
-    diminishing returns**: if a re-run produces no new evidence (no new record, no
-    verdict change), stop re-running and report the remaining blockers as `defer` with
-    their `missing` instead of spinning. For every finding you fixed, append
-    `pnpm trace act <record> multi-agent-dev CLEAR`; for one you deliberately left,
-    `HOLD` with a note.
+    Pass `priorRecords` + a fresh `treeId` again (reuse only fires on an identical tree).
+    Fix any remaining blockers and re-run — at most **3** post-implementation rounds.
+    **Stop re-running on diminishing returns:** when a round leaves the set of open
+    blockers (by `claim_id`, confirmed + deferred + revised) and their verdicts unchanged,
+    stop and report them **as they are** — never relabel a confirmed blocker as `defer` —
+    and ask the user; the task stays incomplete. For every finding the latest round no
+    longer confirms *and* whose relevant check passes, append
+    `pnpm trace act <record> multi-agent-dev CLEAR --note "<what showed it fixed>"` on its
+    latest licensing record; for one you deliberately left, `HOLD` with a note.
 12. Report final evidence.
 
 Never mark complete unless:
@@ -57,8 +63,10 @@ Never mark complete unless:
 - no blocking console errors remain
 - typecheck, lint, and unit tests pass (build passes when the change warrants it)
 - relevant E2E tests pass
-- post-implementation critic round has no confirmed blockers (and every remaining
-  `deferred` blocker names its `missing` evidence in the report)
+- post-implementation critic round has no blockers — none confirmed, deferred or revised
+  (an open defer/revise blocker keeps the task incomplete until it is re-adjudicated or
+  the user explicitly accepts the risk)
+- no reviewer failed in the final round (`failedReviewers` is empty)
 - the round's TRACE records are appended (`pnpm trace lint` passes)
 - files changed are reported
 - remaining risks are listed

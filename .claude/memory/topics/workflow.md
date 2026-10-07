@@ -46,7 +46,8 @@
   `gap-analysis` (per-dimension gaps → synth order), `e2e-design` (per-category
   cases → dedup), `loop-iteration` (worktree implementer → separate verifier),
   `improve-skills` (per-lens meta-critic over our OWN prompts/workflows → proposed
-  edits, confirmation-gated). Commands invoke them via the Workflow tool (the
+  edits, confirmation-gated), `trace-bench` (measures the checkers on seeded-defect
+  fixtures, `/bench-checkers`). Commands invoke them via the Workflow tool (the
   sanctioned opt-in). Name a workflow
   distinctly from any command (e.g. `critic-panel` vs the `/critic-round` command) to
   avoid a duplicate skills-list entry. Don't force non-fan-out commands
@@ -92,7 +93,8 @@
   and a loop never stops). Hard-stop pattern: if `budget.total && budget.remaining()
   < FLOOR`, skip the expensive stage instead of failing mid-run — `loop-iteration`
   escalates all items (`budgetStopped`), `improve-skills` skips the verify fan-out and
-  routes findings to `needsDesign` (unverified ⇒ never auto-applied). Keep the fail-safe
+  returns the findings as `deferred` (TRACE `defer`: unverified ⇒ never auto-applied,
+  never counted as refuted). Keep the fail-safe
   direction: a budget stop must never *approve* unverified work.
 - **Diagram-first:** every workflow's node/edge graph is drawn in
   `docs/workflow-graphs.md` (Mermaid), with the model tier per node. Update the diagram

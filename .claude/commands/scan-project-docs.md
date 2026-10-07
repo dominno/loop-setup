@@ -47,12 +47,20 @@ Procedure:
    agent judging every story in a single context. (Invoking Workflow here is expected.)
 9. Use the returned `records` as the source of truth for status; do browser
    verification yourself where it raises a status to `Browser verified`/`Done`.
-   **No status change without a TRACE record:** append the returned `traceRecords`
-   (`pnpm trace write -`), cite each story's `record_id` next to its "Final status" in
-   `docs/stories/US-*.md`, then `pnpm trace act <id> story-status COMMIT --ref US-<id>`
-   (or `COMMIT_QUALIFIED` for a `qualify` — the verifier downgraded the proposed status).
-   A `defer` (no verifier verdict) keeps the conservative cap and lists its `missing` as
-   the story's next action.
+   **No status change without a licensing TRACE record** (consumer protocol in
+   `.claude/memory/topics/trace.md`): record the workflow's `traceRecords` (scratchpad
+   file → `pnpm trace write <file>`), then per story:
+   - `accept` → write the verified status, cite the `record_id` beside "Final status",
+     `pnpm trace act <id> story-status COMMIT --ref US-<id>`;
+   - `qualify` (the verifier held it at a lower status) → write that lower status,
+     `COMMIT_QUALIFIED`;
+   - `revise` or `defer` → **leave the story's current status unchanged**, `HOLD` the
+     record, and put its `repair`/`missing` in the story's "Next action" (a defer is
+     resolved by supplying the missing evidence and re-running this workflow for the story).
+   Raising a story to `Browser verified`/`Done` is the Lead's own claim: only after the
+   post-scan critic round below has no blockers, write a record (writer_id `lead`,
+   claim_id `story:<id>:status`, `revises` the story's latest record, evidence = the
+   `browser` observation + the critic round's record ids as `record`), then COMMIT it.
 10. Start or reuse localhost when browser verification is possible.
 11. Open relevant pages using Chrome or Playwright MCP.
 12. Verify implemented user flows in browser when possible.
@@ -64,7 +72,10 @@ Procedure:
     - `docs/e2e-coverage-map.md`
     - `docs/story-verification-log.md`
     - `docs/gaps-and-risks.md`
-15. Run a post-scan critic review.
+15. Run a post-scan critic review as the **critic-panel Workflow** (`scriptPath:
+    .claude/workflows/critic-panel.js`, `args.focus` = the scanned stories' flows and
+    the updated docs/stories files) and record it per the consumer protocol. It must
+    have no blockers before any story is raised to `Done` (step 9).
 16. If the scan surfaced a durable engineering learning (a convention or gotcha,
     not a story-specific note), run `/dream` to file it into the memory wiki.
 17. Do not change product code unless explicitly asked.

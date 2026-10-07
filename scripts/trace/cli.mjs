@@ -12,8 +12,11 @@ import {
   benchRecordDraft,
   contaminatedRuns,
   encodeBench,
+  leakMarkers,
   markContaminated,
+  CODE_PATHS,
   readBench,
+  staleFixtures,
   DEFAULT_STORE,
   latestByClaim,
   loadEntries,
@@ -33,7 +36,9 @@ import {
 
 const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (policy: .claude/memory/topics/trace.md)
 
-  pnpm trace write <file|->            validate + append record drafts (object, array, or a workflow result with traceRecords:[...]) — all-or-nothing
+  pnpm trace write <file|-> [--then-act ACTION --consumer NAME [--note N]]
+                                       validate + append record drafts (object, array, or a workflow result with
+                                       traceRecords:[...]); --then-act also appends ACTION on every stored record — all-or-nothing
   pnpm trace act <record_id> <consumer> <ACTION> [--ref X] [--note Y]
   pnpm trace act --from <file|->       append consumer actions ([{record_id, consumer, action, ref?, note?}], {actions:[...]}, or a critic-panel result's reuseActions)
   pnpm trace tree-id                   fingerprint of HEAD + uncommitted changes (verdict reuse / provenance.tree)
@@ -86,6 +91,20 @@ function git(args) {
   }
 }
 
+/** Concatenated product sources (see CODE_PATHS / patchOnlyTokens). */
+function codeText() {
+  const files = (git(["ls-files", "-z", "--", ...CODE_PATHS]) || "").split("\0").filter(Boolean);
+  return files
+    .map((p) => {
+      try {
+        return readFileSync(join(ROOT, p), "utf8");
+      } catch {
+        return "";
+      }
+    })
+    .join("\n");
+}
+
 function changedSince(commit, path) {
   // Compare the record's commit to the working tree; an unknown commit counts as
   // changed (fail closed: re-audit rather than trust stale evidence).
@@ -116,7 +135,15 @@ async function main() {
     const pathspec = [".", ...TREE_ID_EXCLUDES.map((p) => `:(exclude)${p}`)];
     const diff = execFileSync("git", ["diff", "HEAD", "--binary", "--", ...pathspec], { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 28 });
     const untrackedPaths = (git(["ls-files", "--others", "--exclude-standard", "-z", "--", ...pathspec]) || "").split("\0").filter(Boolean);
-    const untracked = untrackedPaths.map((p) => ({ path: p, content: readFileSync(join(ROOT, p)) }));
+    // Unreadable entries (a nested checkout listed as a directory, a broken symlink) are
+    // fingerprinted by path only rather than crashing the command.
+    const untracked = untrackedPaths.map((p) => {
+      try {
+        return { path: p, content: readFileSync(join(ROOT, p)) };
+      } catch {
+        return { path: p, content: "<unreadable>" };
+      }
+    });
     process.stdout.write(treeFingerprint({ head, diff, untracked }) + "\n");
     return 0;
   }
@@ -137,9 +164,30 @@ async function main() {
     // (unless the draft carries its own commit).
     const commit = git(["rev-parse", "--short=12", "HEAD"]) || undefined;
     const branch = git(["rev-parse", "--abbrev-ref", "HEAD"]) || undefined;
-    const results = writeRecords(drafts, { storePath, now, policyVersion, commit, branch, schema });
+    // Leak guard: the store is in the tree bench agents grep, so a draft naming a bench
+    // fixture or its defect is refused (fail closed) — redact it and write again.
+    let forbidden = [];
+    try {
+      forbidden = leakMarkers(readBench(), codeText());
+    } catch {
+      /* no bundle → nothing to guard */
+    }
+    const results = writeRecords(drafts, { storePath, now, policyVersion, commit, branch, schema, forbidden });
     out(results, true);
-    return results.every((r) => r.stored) ? 0 : 1;
+    if (!results.every((r) => r.stored)) return 1;
+    if (flags["then-act"]) {
+      if (!flags.consumer) {
+        out("--then-act needs --consumer <name>");
+        return 2;
+      }
+      const acts = appendActions(
+        results.map((r) => ({ record_id: r.record_id, consumer: flags.consumer, action: String(flags["then-act"]).toUpperCase(), note: flags.note })),
+        { storePath, now: new Date().toISOString(), policyVersion, schema },
+      );
+      out(acts, true);
+      return acts.every((a) => a.stored) ? 0 : 1;
+    }
+    return 0;
   }
 
   if (cmd === "act") {
@@ -216,7 +264,11 @@ async function main() {
     return 0;
   }
 
-  if (cmd === "metrics") return out(storeMetrics(state), true), 0;
+  if (cmd === "metrics") {
+    const m = storeMetrics(state);
+    for (const f of m.flags) process.stderr.write(`flag: ${f}\n`);
+    return out(m, true), 0;
+  }
 
   if (cmd === "rotate") {
     const res = rotateStore(storePath, { max: Number(flags.max || 500), keep: Number(flags.keep || 200) });
@@ -255,6 +307,22 @@ async function main() {
       return 1;
     }
     const list = (x) => (typeof x === "string" ? x.split(",").map((s) => s.trim()).filter(Boolean) : undefined);
+    if (cmd === "bench-args" || cmd === "bench-judge") {
+      // Precondition (kept out of `pnpm test` so product edits never redden the main gate):
+      // every fixture must still apply, else the bench would measure a broken setup.
+      const stale = staleFixtures(manifest, (patch) => {
+        try {
+          execFileSync("git", ["apply", "--check", "-"], { cwd: ROOT, input: patch, stdio: ["pipe", "pipe", "pipe"] });
+          return true;
+        } catch {
+          return false;
+        }
+      });
+      if (stale.length) {
+        out({ error: "stale fixtures — their patches no longer apply to the working tree; regenerate them (bench-unpack → edit → bench-pack)", stale }, true);
+        return 1;
+      }
+    }
     if (cmd === "bench-args") {
       const args = benchArgs(manifest, {
         arms: list(flags.arms),

@@ -38,6 +38,7 @@
         "claim_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9:._/-]*$", "description": "stable fingerprint shared by every revision of the same claim" },
         "claim_text": { "type": "string", "minLength": 1 },
         "claim_type": { "type": "string", "enum": ["factual", "measured", "causal", "predictive", "normative", "practical"] },
+        "retyped_from": { "type": "string", "enum": ["factual", "measured", "causal", "predictive", "normative", "practical"], "description": "the maker's claim type when the checker re-typed the claim (the gate held it to the stricter of the two)" },
         "severity": { "type": "string", "enum": ["blocker", "important", "nice-to-have"] },
         "subject": { "type": "string", "description": "what the claim is about: a file, a story id, a plan node id, a wiki page" },
         "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidenceItem" } },

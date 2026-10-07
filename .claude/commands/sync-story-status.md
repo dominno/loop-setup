@@ -23,11 +23,14 @@ Procedure:
 8. Update each story's status in its own `docs/stories/US-*.md` file using the
    strict status model, and reflect it in the `docs/user-stories.md` index table
    and the `docs/implementation-status.md` dashboard row.
-9. Record evidence in `docs/story-verification-log.md`, and the status claim itself as
-   a TRACE-lite record (`pnpm trace write -`, claim_id `story:<id>:status`, `revises` the
-   story's previous record) followed by `pnpm trace act <id> story-status COMMIT --ref
-   US-<id>`; cite the `record_id` beside the story's "Final status". No status change
-   without a record (`.claude/memory/topics/trace.md`).
+9. Record evidence in `docs/story-verification-log.md`. The status itself must not be
+   self-adjudicated (maker ≠ checker): run the **scan-docs Workflow** for the in-scope
+   stories (`scriptPath: .claude/workflows/scan-docs.js`, `args.stories` = those
+   stories) so a separate status verifier issues the verdicts, then apply them exactly as
+   `/scan-project-docs` step 9 does (accept → COMMIT, qualify → COMMIT_QUALIFIED at the
+   lower status, revise/defer → status unchanged + HOLD; Lead-raised `Browser verified`/
+   `Done` only with its own record citing the browser observation and a no-blocker critic
+   round). No status change without a licensing record (`.claude/memory/topics/trace.md`).
 10. Update `docs/e2e-coverage-map.md`.
 11. Update `docs/gaps-and-risks.md`.
 

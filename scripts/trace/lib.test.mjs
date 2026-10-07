@@ -7,6 +7,8 @@ import {
   EVIDENCE_POLICY,
   VERDICTS,
   applyEvidenceGate,
+  applyEvidenceGateStrict,
+  staleFixtures,
   appendActions,
   effectivePanelSize,
   latestByClaim,
@@ -301,5 +303,111 @@ describe("bench metrics", () => {
     expect(s.arms.panel.effectivePanelSize).toBeCloseTo(1);
     expect(s.flags.some((f) => f.startsWith("F1"))).toBe(true);
     expect(s.flags.some((f) => f.startsWith("F3"))).toBe(true);
+  });
+});
+
+describe("checker-round hardening (policy v2)", () => {
+  it("a qualify on reading-only evidence is deferred for factual/measured/normative/practical, kept for causal/predictive", () => {
+    const q = (claimType) => applyEvidenceGate({ verdict: "qualify", qualifier: "weaker", claimType, evidenceChecked: [{ kind: "reading", ref: "x" }] }).verdict;
+    expect(["factual", "measured", "normative", "practical"].map(q)).toEqual(["defer", "defer", "defer", "defer"]);
+    expect(["causal", "predictive"].map(q)).toEqual(["qualify", "qualify"]);
+  });
+
+  it("the strict gate keeps the most conservative outcome across claim types", () => {
+    const v = { verdict: "accept", evidenceChecked: [{ kind: "file_line", ref: "a.ts:1" }] };
+    expect(applyEvidenceGateStrict(v, ["factual"]).verdict).toBe("accept");
+    expect(applyEvidenceGateStrict(v, ["factual", "measured"]).verdict).toBe("defer");
+    expect(applyEvidenceGateStrict(v, ["factual", "causal"]).verdict).toBe("qualify");
+  });
+
+  it("semantic rules are policy-versioned: the v2 qualify floor does not retroactively break v1 records", () => {
+    const rec = { final_status: "qualify", qualifier: "weaker", claim_type: "factual", evidence: [{ kind: "reading", ref: "x" }], missing: [] };
+    expect(semanticViolations({ ...rec, policy_version: "1" })).toEqual([]);
+    expect(semanticViolations({ ...rec, policy_version: "2" }).join()).toMatch(/qualify of a factual claim/);
+  });
+
+  it("writing the same draft twice (different time) is refused as duplicate content", () => {
+    writeRecords([draft()], ctx());
+    const [again] = writeRecords([draft()], { ...ctx(), now: "2026-10-07T13:00:00.000Z" });
+    expect(again.stored).toBe(false);
+    expect(again.validation.fail.join()).toMatch(/duplicate content/);
+  });
+
+  it("the same action on DIFFERENT records gets distinct ids and is stored (an action's record_id is part of its identity)", () => {
+    const res = writeRecords([draft({ claim_id: "c:a" }), draft({ claim_id: "c:b" })], ctx());
+    const acts = appendActions(res.map((r) => ({ record_id: r.record_id, consumer: "loop", action: "HOLD", note: "same note" })), ctx());
+    expect(acts.every((a) => a.stored)).toBe(true);
+    expect(new Set(acts.map((a) => a.action_id)).size).toBe(2);
+    expect(replay(loadEntries(store), schema, POLICY).errors).toEqual([]);
+  });
+
+  it("duplicate actions in one batch are refused instead of poisoning the store", () => {
+    const [a] = writeRecords([draft()], ctx());
+    const res = appendActions([{ record_id: a.record_id, consumer: "loop", action: "HOLD" }, { record_id: a.record_id, consumer: "loop", action: "HOLD" }], ctx());
+    expect(res.every((r) => r.stored === false)).toBe(true);
+    expect(replay(loadEntries(store), schema, POLICY).errors).toEqual([]);
+  });
+
+  it("CLEAR is refused on an older record once a newer record exists for the same claim (no revises link needed)", () => {
+    const [older] = writeRecords([draft()], ctx());
+    writeRecords([draft({ final_status: "reject", reason: "refuted later", evidence: [] })], { ...ctx(), now: "2026-10-07T13:00:00.000Z" });
+    const res = appendActions([{ record_id: older.record_id, consumer: "loop", action: "CLEAR" }], ctx());
+    expect(res[0].validation.fail.join()).toMatch(/newer record for claim/);
+  });
+
+  it("lint detects a record edited in place (ids are content hashes)", () => {
+    writeRecords([draft()], ctx());
+    const line = readFileSync(store, "utf8").replace("The cleared-name path", "Some other path");
+    writeFileSync(store, line);
+    expect(replay(loadEntries(store), schema, POLICY).errors.join()).toMatch(/edited in place/);
+  });
+
+  it("the writer refuses drafts that would leak bench ground truth into the store", () => {
+    const [res] = writeRecords([draft({ claim_text: "B99-secret-fixture escapes tests" })], { ...ctx(), forbidden: ["B99-secret-fixture"] });
+    expect(res.stored).toBe(false);
+    expect(res.validation.fail.join()).toMatch(/bench ground truth/);
+  });
+
+  it("validate() does not let __proto__ keys slip past additionalProperties:false", () => {
+    const rec = JSON.parse('{"__proto__": {"x": 1}}');
+    expect(validate(schema.$defs.action, rec, schema).join()).toMatch(/unknown property "__proto__"/);
+  });
+
+  it("staleFixtures reports patches that no longer apply (by opaque token only)", () => {
+    const manifest = { fixtures: [{ id: "B01-a", patch: "p1" }, { id: "G01-b", patch: "p2" }] };
+    const stale = staleFixtures(manifest, (p) => p === "p1");
+    expect(stale).toHaveLength(1);
+    expect(stale[0]).toMatch(/^fx-[0-9a-f]{8}$/);
+  });
+
+  it("bench scoring excludes no-verdict runs, raises F4 on an undefended wrong accept, and drafts a qualified record", async () => {
+    const { benchRecordDraft } = await import("./lib.mjs");
+    const manifest = { fixtures: [{ id: "B1", kind: "bad" }, { id: "G1", kind: "good" }] };
+    const runs = [
+      { arm: "verifier", repeat: 0, fixtureId: "B1", verdict: "accept", preGateVerdict: "accept" },
+      { arm: "verifier", repeat: 0, fixtureId: "G1", verdict: "defer", noVerdict: true },
+    ];
+    const s = scoreBench(manifest, { runs });
+    expect(s.noVerdictRuns).toBe(1);
+    expect(s.flags.some((f) => f.startsWith("F4"))).toBe(true);
+    expect(s.arms.verifier.falseHoldRate).toBeNull();
+    expect(benchRecordDraft(s, { resultsRef: "r.json" }).final_status).toBe("qualify");
+  });
+
+  it("storeMetrics raises F5 when most current claims were never acted on (REUSE/REAUDIT do not count)", () => {
+    const drafts = Array.from({ length: 10 }, (_, i) => draft({ claim_id: `c:${i}` }));
+    const res = writeRecords(drafts, ctx());
+    appendActions([{ record_id: res[0].record_id, consumer: "critic-panel", action: "REUSE" }], ctx());
+    const m = storeMetrics(replay(loadEntries(store), schema, POLICY));
+    expect(m.consumerCoverage).toBe(0);
+    expect(m.flags.some((f) => f.startsWith("F5"))).toBe(true);
+  });
+});
+
+describe("secrets never enter the store", () => {
+  it("the writer refuses a draft that looks like it carries a secret", () => {
+    const [res] = writeRecords([draft({ claim_text: "key is sk-ant-abcdefghijklmnopqrstuvwx" })], ctx());
+    expect(res.stored).toBe(false);
+    expect(res.validation.fail.join()).toMatch(/secret/);
   });
 });
