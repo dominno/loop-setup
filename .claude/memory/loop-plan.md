@@ -21,14 +21,16 @@ One row per node in the table below:
 | `after` | Comma-separated `id`s this node depends on; empty = no deps. |
 | `status` | `ready` · `blocked` · `in-progress` · `deferred` · `done` · `escalated` · `dropped`. |
 | `record` | The TRACE-lite `record_id` behind the node's latest status change (`pnpm trace show <id>`); empty only while `ready`/`blocked` with no verdict yet. |
-| `missing` | For `deferred`/`escalated`: the evidence or decision that would unblock it (copied from the record's `missing`). |
+| `missing` | For `deferred`/`escalated`: the evidence or decision that would unblock it — the record's `missing`, else its `repair`, else "a human decision on: <its reason>". Never empty. |
 | `origin` | Where it came from: a confirmed critic finding (cite its record id), a re-plan, or a human. |
 | `notes` | Evidence / decision trail (attempt count, escalation reason). |
 
 **Status meaning**
 - `ready` — all `after:` deps are `done`; eligible for dispatch this iteration.
 - `blocked` — has an unmet `after:` dep (compute, don't hand-set, when deps are open).
-- `in-progress` — dispatched to the loop-iteration Workflow this iteration.
+- `in-progress` — dispatched to the loop-iteration Workflow this iteration. If the
+  workflow returns `error`/`budgetStopped` (no verdict exists), the node reverts to `ready`
+  in the same iteration — never `escalated`.
 - `deferred` — the checker returned TRACE `defer`: the fix could not be judged yet, and the
   record names what is `missing` (a check it could not see, a dependency landing, a
   re-verify). **Resolvable by the loop itself** — see *Deferred nodes* below.
@@ -38,7 +40,9 @@ One row per node in the table below:
   citing the post-apply check (no durable state change without a record —
   `.claude/memory/topics/trace.md`). Re-plan never sets `done` by itself.
 - `escalated` — handed to a human (denylist hit, max attempts, ambiguity, a `reject`/
-  `revise` verdict); its `missing` names the human decision needed.
+  `revise` verdict, or a `defer` whose `missing` is a human approval — the loop cannot
+  resolve those, so they are escalated, not deferred); its `missing` names the human
+  decision needed.
 - `dropped` — obsoleted by re-plan; kept as a row for the decision trail.
 
 ## Ready-node rule (what the loop dispatches next)

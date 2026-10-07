@@ -48,5 +48,5 @@ $ARGUMENTS
 - Agreement between critics is **not** extra evidence (they share a model); only a
   critic bringing *different* evidence corroborates. Verdict semantics, the evidence
   standard per claim type, and the consumer actions: `.claude/memory/topics/trace.md`.
-- Other commands (`/multi-agent-dev`, `/multi-agent-e2e`, `/qa-pass`) reuse this same
+- Other commands (`/multi-agent-dev`, `/qa-pass`, `/loop`) reuse this same
   workflow for their critic rounds.

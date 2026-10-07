@@ -35,7 +35,7 @@ flowchart LR
     c10[Regression]
   end
   R --> dedup[▫️ merge-dedup<br/>agreement ≠ evidence; keep only<br/>independent evidence]
-  dedup --> reuse{▫️ revisits a prior record,<br/>still-present, identical tree?}
+  dedup --> reuse{▫️ same claim (lens+title+type),<br/>licensing verdict, still-present,<br/>identical tree?}
   reuse -- yes --> reused[▫️ reuse prior verdict<br/>→ REUSE action]
   reuse -- no --> V
   subgraph V["Verify — one skeptic per blocker/important · 🔵 Opus"]
@@ -43,8 +43,8 @@ flowchart LR
     v2[typed verdict #2]
     vn[typed verdict #N]
   end
-  V --> gate[▫️ evidence gate<br/>cap accept by claim type]
-  gate --> out([confirmed accept/qualify · deferred · revised · refuted<br/>+ traceRecords + reuseActions])
+  V --> gate[▫️ strict evidence gate<br/>accept+qualify floor, under critic AND skeptic type]
+  gate --> out([confirmed accept/qualify · deferred · revised · refuted<br/>+ failedReviewers + traceRecords + reuseActions])
   reused --> out
 ```
 
@@ -76,7 +76,7 @@ flowchart LR
   subgraph V["Verify — 2-axis skeptic per finding · 🔵 Opus"]
     v1[real? + editSafe? + saferEdit]
   end
-  V --> map[▫️ two axes → TRACE verdict<br/>accept · revise · defer · reject]
+  V --> map[▫️ two axes → TRACE verdict<br/>then evidence gate (normative: cited rule)]
   map --> out([applyReady + needsDesign + deferred + refuted<br/>+ traceRecords])
   skip --> out
 ```
@@ -87,9 +87,11 @@ flowchart LR
 flowchart LR
   stories([stories]) --> P
   subgraph P["pipeline — per story, independent"]
-    e[🟢 gather code+test evidence] --> v[🔵 strict status verifier<br/>fail-closed cap + missing]
+    e[🟢 gather code+test evidence] --> nr{▫️ report returned?}
+    nr -- no --> d0[defer: status unchanged]
+    nr -- yes --> v[🔵 strict status verifier<br/>cites evidenceChecked + missing]
   end
-  P --> map[▫️ proposed vs verified status →<br/>accept · qualify · revise · defer]
+  P --> map[▫️ proposed vs verified status →<br/>verdict, then evidence gate (factual)]
   map --> out([per-story status records + traceRecords])
 ```
 
@@ -131,16 +133,18 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  items([ready plan nodes — triaged, denylist-cleared]) --> budget{budget floor?}
+  items([ready plan nodes — triaged, denylist-cleared]) --> lvl{▫️ level L2/L3?}
+  lvl -- no --> err[▫️ refuse: L1 is report-only]
+  lvl -- yes --> budget{budget floor?}
   budget -- "under floor" --> esc0[▫️ escalate all]
   budget -- ok --> P
   subgraph P["pipeline — per item, independent"]
-    impl[⚪ implementer<br/>isolated worktree, real git diff] --> dl{▫️ denylist gate<br/>.claude / CLAUDE.md / auth / secrets…}
+    impl[⚪ implementer<br/>isolated worktree, real git diff] --> dl{▫️ denylist gate<br/>.claude / CLAUDE.md / scripts/trace / auth / secrets…<br/>or unparsable diff paths}
     dl -- hit --> escd[escalated-denylist<br/>defer: human approval]
     dl -- clear --> nd{▫️ diff returned?}
     nd -- no --> dfr[deferred: no diff]
     nd -- yes --> ver[🔵 verifier: typed verdict on the real diff]
-    ver --> eg[▫️ evidence gate<br/>practical: accept needs the diff]
+    ver --> eg[▫️ evidence gate<br/>practical: accept/qualify need the diff]
   end
   P --> out([applied + deferred + rejected + escalate<br/>+ traceRecords])
   esc0 --> out
