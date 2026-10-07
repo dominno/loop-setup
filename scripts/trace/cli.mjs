@@ -4,7 +4,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { readdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   appendActions,
   BENCH_BUNDLE,
@@ -13,6 +13,7 @@ import {
   contaminatedRuns,
   encodeBench,
   leakMarkers,
+  loadWorkflowBlock,
   markContaminated,
   CODE_PATHS,
   readBench,
@@ -38,12 +39,16 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
 
   pnpm trace write <file|-> [--then-act ACTION --consumer NAME [--note N]]
                                        validate + append record drafts (object, array, or a workflow result with
-                                       traceRecords:[...]); --then-act also appends ACTION on every stored record — all-or-nothing
+                                       traceRecords:[...]); --then-act then appends ACTION on every stored record
+                                       (records are stored first — if the action batch is refused, act again) — all-or-nothing
   pnpm trace act <record_id> <consumer> <ACTION> [--ref X] [--note Y]
   pnpm trace act --from <file|->       append consumer actions ([{record_id, consumer, action, ref?, note?}], {actions:[...]}, or a critic-panel result's reuseActions)
   pnpm trace tree-id                   fingerprint of HEAD + uncommitted changes (verdict reuse / provenance.tree)
   pnpm trace show <record_id>          a record, its consumer actions, and its revision chain
-  pnpm trace query [--claim-id ID] [--status S] [--writer PREFIX] [--subject S] [--latest] [--json]
+  pnpm trace query [--claim-id ID] [--status S] [--writer PREFIX] [--subject S] [--latest] [--json] [--brief]
+                                       --brief: compact JSON (newest 40, only the fields critic-panel reads) for args.priorRecords
+  pnpm trace denylist-check            run the loop's production denylist over the paths git reports as changed
+                                       (tracked diff vs HEAD, renames/copies included, plus untracked) — exit 1 on a hit
   pnpm trace lint                      replay the whole store and check every contract invariant (exit 1 on error)
   pnpm trace reaudit [--act]           licensing records whose file evidence changed since their commit
   pnpm trace metrics                   store-level consumer-value metrics
@@ -55,7 +60,8 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
                                        leaked ground truth (contaminated runs excluded, F0); --record writes the record
   pnpm trace bench-unpack <dir>        decode the fixture bundle into <dir> (outside the repo!) for editing
   pnpm trace bench-pack <dir>          re-encode <dir>/fixtures.json (patches inline) into the bundle
-  pnpm trace bench-judge [--only ids] [--skip-e2e]   verify each fixture's judge.catches by running its deterministic check
+  pnpm trace bench-judge [--only ids] [--skip-e2e] [--recover]   verify each fixture's judge.catches by running its
+                                       deterministic check; --recover reverses fixture patches left applied by a killed run
 
   --store <path>  use another store (default .claude/memory/trace/records.jsonl; env TRACE_STORE)
   Actions: CLEAR HOLD COMMIT COMMIT_QUALIFIED QUARANTINE REJECT REUSE REAUDIT`;
@@ -151,6 +157,28 @@ async function main() {
   const schema = loadSchema();
   const policyVersion = readPolicyVersion();
 
+  const benchForbidden = () => {
+    try {
+      return leakMarkers(readBench(), codeText());
+    } catch {
+      return []; // no bundle → nothing to guard
+    }
+  };
+
+  if (cmd === "denylist-check") {
+    const { hitsDenylist } = loadWorkflowBlock("loop-iteration.js", "loop-denylist", ["hitsDenylist"]);
+    // Paths from git itself (renames/copies resolved), not from parsing patch text.
+    const changed = (git(["diff", "HEAD", "--name-status", "-z", "-M", "-C"]) || "").split("\0").filter(Boolean).filter((x) => !/^[A-Z]\d*$/.test(x));
+    const untracked = (git(["ls-files", "--others", "--exclude-standard", "-z"]) || "").split("\0").filter(Boolean);
+    // The loop's own state files (plan, run-log, record store) are written by the Lead every
+    // iteration and are not part of an implementer's patch — exclude them.
+    const isState = (p) => TREE_ID_EXCLUDES.some((x) => p === x || p.startsWith(`${x}/`));
+    const paths = [...new Set([...changed, ...untracked])].filter((p) => !isState(p));
+    const hits = paths.filter((p) => hitsDenylist([p]));
+    out({ ok: hits.length === 0, checked: paths.length, hits }, true);
+    return hits.length ? 1 : 0;
+  }
+
   if (cmd === "write") {
     const input = readJsonInput(pos[0]);
     const drafts = Array.isArray(input)
@@ -166,12 +194,7 @@ async function main() {
     const branch = git(["rev-parse", "--abbrev-ref", "HEAD"]) || undefined;
     // Leak guard: the store is in the tree bench agents grep, so a draft naming a bench
     // fixture or its defect is refused (fail closed) — redact it and write again.
-    let forbidden = [];
-    try {
-      forbidden = leakMarkers(readBench(), codeText());
-    } catch {
-      /* no bundle → nothing to guard */
-    }
+    const forbidden = benchForbidden();
     const results = writeRecords(drafts, { storePath, now, policyVersion, commit, branch, schema, forbidden });
     out(results, true);
     if (!results.every((r) => r.stored)) return 1;
@@ -182,7 +205,7 @@ async function main() {
       }
       const acts = appendActions(
         results.map((r) => ({ record_id: r.record_id, consumer: flags.consumer, action: String(flags["then-act"]).toUpperCase(), note: flags.note })),
-        { storePath, now: new Date().toISOString(), policyVersion, schema },
+        { storePath, now: new Date().toISOString(), policyVersion, schema, forbidden },
       );
       out(acts, true);
       return acts.every((a) => a.stored) ? 0 : 1;
@@ -203,7 +226,11 @@ async function main() {
       }
       drafts = [{ record_id, consumer, action: String(action).toUpperCase(), ref: flags.ref, note: flags.note }];
     }
-    const results = appendActions(drafts, { storePath, now, policyVersion, schema });
+    if (!drafts.length) {
+      out("no actions found in the input (expected an array, {actions:[...]} or a result with reuseActions)");
+      return 1;
+    }
+    const results = appendActions(drafts, { storePath, now, policyVersion, schema, forbidden: benchForbidden() });
     out(results, true);
     return results.every((r) => r.stored) ? 0 : 1;
   }
@@ -242,6 +269,18 @@ async function main() {
     if (flags.status) recs = recs.filter((r) => r.final_status === flags.status);
     if (flags.writer) recs = recs.filter((r) => r.writer_id.startsWith(flags.writer));
     if (flags.subject) recs = recs.filter((r) => r.subject === flags.subject);
+    if (flags.brief) {
+      const brief = [...recs]
+        .sort((x, y) => String(y.created_at).localeCompare(String(x.created_at)))
+        .slice(0, 40)
+        .map((r) => ({
+          record_id: r.record_id, claim_id: r.claim_id, claim_text: r.claim_text, claim_type: r.claim_type,
+          final_status: r.final_status, missing: r.missing, reason: String(r.reason).slice(0, 200),
+          provenance: { tree: r.provenance.tree }, created_at: r.created_at,
+        }));
+      process.stdout.write(JSON.stringify(brief) + "\n");
+      return 0;
+    }
     if (flags.json) return out(recs, true), 0;
     if (!recs.length) return out("(no matching records)"), 0;
     for (const r of recs) {
@@ -259,6 +298,7 @@ async function main() {
         { storePath, now, policyVersion, schema },
       );
       out(res, true);
+      if (!res.every((r) => r.stored)) return 1;
     }
     out(cands, true);
     return 0;
@@ -290,7 +330,7 @@ async function main() {
   if (cmd === "bench-unpack") {
     const dir = pos[0];
     if (!dir) return out("usage: pnpm trace bench-unpack <dir outside the repo>"), 2;
-    if (join(dir, "/").startsWith(join(ROOT, "/"))) {
+    if (join(resolve(dir), "/").startsWith(join(ROOT, "/"))) {
       out("refusing to unpack inside the repo — plain-text fixtures there would contaminate the next bench run");
       return 1;
     }
@@ -334,8 +374,12 @@ async function main() {
       return 0;
     }
     if (cmd === "bench-judge") {
-      const { runBenchJudge } = await import("./bench-judge.mjs");
-      const results = runBenchJudge(manifest, { only: list(flags.only), skipE2e: !!flags["skip-e2e"] });
+      const { runBenchJudge, recoverApplied } = await import("./bench-judge.mjs");
+      if (flags.recover) {
+        out({ reversed: recoverApplied(manifest) }, true);
+        return 0;
+      }
+      const results = await runBenchJudge(manifest, { only: list(flags.only), skipE2e: !!flags["skip-e2e"] });
       out(results, true);
       return results.every((r) => r.ok !== false) ? 0 : 1;
     }
@@ -366,9 +410,19 @@ async function main() {
           return { label, text: readFileSync(join(d, f), "utf8") };
         }),
     );
-    runs = markContaminated(runs, contaminatedRuns(transcripts, manifest));
-    const score = scoreBench(manifest, { runs });
+    if (flags.record && transcripts.length === 0) {
+      out("--record: the transcript dir holds no agent transcripts — an unscanned run cannot be recorded (fail closed)");
+      return 1;
+    }
+    const keys = contaminatedRuns(transcripts, manifest);
+    runs = markContaminated(runs, keys);
+    const score = scoreBench(manifest, { runs, unattributedLeaks: keys.filter((k) => k.arm === "unknown").length });
     score.transcriptsScanned = transcripts.length;
+    if (flags.record && score.unattributedLeaks) {
+      out(score, true);
+      out("--record refused: ground truth leaked into a transcript that cannot be tied to a run (F0)");
+      return 1;
+    }
     out(score, true);
     if (flags.record) {
       const prior = latestByClaim(state.records, state.superseded).get("bench:trace-bench-lite");

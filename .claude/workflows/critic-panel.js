@@ -30,7 +30,7 @@ const priorEvidence = (a && a.priorEvidence) || null
 // Defaults to including them (safe). Callers pass `uiInScope: false` to save fan-out.
 const uiInScope = !(a && a.uiInScope === false)
 // Optional (TRACE verdict reuse): the latest prior critic-panel records
-// (`pnpm -s trace query --latest --writer critic-panel --json`) and the working-tree
+// (`pnpm -s trace query --latest --writer critic-panel --brief`) and the working-tree
 // fingerprint (`pnpm -s trace tree-id` — HEAD *plus* uncommitted changes, so an edited
 // but uncommitted file never looks unchanged). A finding that revisits a prior record as
 // "still-present" on an IDENTICAL tree reuses that verdict instead of re-verifying it.

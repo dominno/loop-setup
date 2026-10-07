@@ -163,7 +163,7 @@ describe("loop-iteration (real body, stub agents)", () => {
 
   it("escalates a diff that touches a denylisted path even when changedFiles under-reports it — the verifier never runs", async () => {
     const sneaky = impl({ diff: "diff --git a/.claude/loop.md b/.claude/loop.md\n--- a/.claude/loop.md\n+++ b/.claude/loop.md\n@@ -1 +1 @@\n-a\n+b\n" });
-    const { result, calls } = await runWorkflow("loop-iteration.js", { items, treeId: TREE }, (label) => (label.startsWith("impl:") ? sneaky : verdict({ claimType: undefined })));
+    const { result, calls } = await runWorkflow("loop-iteration.js", { items, treeId: TREE, level: "L2" }, (label) => (label.startsWith("impl:") ? sneaky : verdict({ claimType: undefined })));
     expect(calls.some((c) => c.label.startsWith("verify:"))).toBe(false);
     expect(result.applied).toHaveLength(0);
     expect(result.rejected[0].status).toBe("escalated-denylist");
@@ -172,14 +172,14 @@ describe("loop-iteration (real body, stub agents)", () => {
   });
 
   it("a missing verifier verdict defers the item — never applied", async () => {
-    const { result } = await runWorkflow("loop-iteration.js", { items }, (label) => (label.startsWith("impl:") ? impl() : null));
+    const { result } = await runWorkflow("loop-iteration.js", { items, level: "L2" }, (label) => (label.startsWith("impl:") ? impl() : null));
     expect(result.applied).toHaveLength(0);
     expect(result.deferred).toHaveLength(1);
     expectWritable(result.traceRecords);
   });
 
   it("a qualify citing only reading evidence does not license applying the diff", async () => {
-    const { result } = await runWorkflow("loop-iteration.js", { items }, (label) =>
+    const { result } = await runWorkflow("loop-iteration.js", { items, level: "L2" }, (label) =>
       label.startsWith("impl:") ? impl() : verdict({ verdict: "qualify", qualifier: "looks fine", evidenceChecked: [{ kind: "reading", ref: "skimmed" }] }),
     );
     expect(result.applied).toHaveLength(0);
@@ -187,7 +187,7 @@ describe("loop-iteration (real body, stub agents)", () => {
   });
 
   it("an accept that cites the real diff is applied and recorded", async () => {
-    const { result } = await runWorkflow("loop-iteration.js", { items, treeId: TREE }, (label) =>
+    const { result } = await runWorkflow("loop-iteration.js", { items, treeId: TREE, level: "L2" }, (label) =>
       label.startsWith("impl:") ? impl() : verdict({ evidenceChecked: [{ kind: "diff", ref: "src/components/GreetingForm.tsx" }] }),
     );
     expect(result.applied).toHaveLength(1);
@@ -199,22 +199,40 @@ describe("loop-iteration (real body, stub agents)", () => {
 describe("loop-iteration fail-closed paths", () => {
   const items = [{ id: "LP-002", description: "x", priorRecordId: "TR-bbbbbbbbbbbb" }];
   const diff = "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-a\n+b\n";
-  it("refuses to dispatch at L1 or an unknown level", async () => {
-    for (const level of ["L1", "L9"]) {
+  it("refuses to dispatch at L1, an unknown level, or an OMITTED level (fail closed)", async () => {
+    for (const level of ["L1", "L9", undefined]) {
       const { result, calls } = await runWorkflow("loop-iteration.js", { items, level }, () => null);
       expect(result.error).toMatch(/may not dispatch/);
       expect(calls).toHaveLength(0);
     }
   });
   it("escalates a non-empty diff whose paths cannot be parsed", async () => {
-    const { result, calls } = await runWorkflow("loop-iteration.js", { items }, (label) =>
+    const { result, calls } = await runWorkflow("loop-iteration.js", { items, level: "L2" }, (label) =>
       label.startsWith("impl:") ? { changedFiles: [], diff: "garbage that is not a git diff", checksPassed: true, notes: "" } : verdict(),
     );
     expect(calls.some((c) => c.label.startsWith("verify:"))).toBe(false);
     expect(result.rejected[0].status).toBe("escalated-denylist");
   });
+  it("at L3 a qualify is held for a human, not applied (at L2 it is applied)", async () => {
+    const q = (label) => (label.startsWith("impl:") ? { changedFiles: ["src/a.ts"], diff, checksPassed: true, notes: "" } : verdict({ verdict: "qualify", qualifier: "caveat", evidenceChecked: [{ kind: "diff", ref: "src/a.ts" }] }));
+    const l3 = await runWorkflow("loop-iteration.js", { items, level: "L3" }, q);
+    expect(l3.result.applied).toHaveLength(0);
+    expect(l3.result.held).toHaveLength(1);
+    expect(l3.result.escalate).toEqual(["LP-002"]);
+    const l2 = await runWorkflow("loop-iteration.js", { items, level: "L2" }, q);
+    expect(l2.result.applied).toHaveLength(1);
+  });
+
+  it("a rename-only patch into a denylisted path is caught by the gate", async () => {
+    const rename = "diff --git a/docs/x.md b/docs/y.md\nsimilarity index 100%\nrename from docs/x.md\nrename to .claude/loop.md\n";
+    const { result } = await runWorkflow("loop-iteration.js", { items, level: "L2" }, (label) =>
+      label.startsWith("impl:") ? { changedFiles: ["docs/x.md"], diff: rename, checksPassed: true, notes: "" } : verdict(),
+    );
+    expect(result.rejected[0].status).toBe("escalated-denylist");
+  });
+
   it("a re-dispatched node's new record revises its previous one", async () => {
-    const { result } = await runWorkflow("loop-iteration.js", { items }, (label) =>
+    const { result } = await runWorkflow("loop-iteration.js", { items, level: "L2" }, (label) =>
       label.startsWith("impl:") ? { changedFiles: ["src/a.ts"], diff, checksPassed: true, notes: "" } : verdict({ evidenceChecked: [{ kind: "diff", ref: "src/a.ts" }] }),
     );
     expect(result.traceRecords[0].revises).toBe("TR-bbbbbbbbbbbb");
@@ -226,6 +244,14 @@ describe("critic-panel round integrity", () => {
     const { result } = await runWorkflow("critic-panel.js", { focus: "x", uiInScope: false }, (label) => (label.startsWith("critic:security") ? null : { findings: [] }));
     expect(result.failedReviewers).toEqual(["security"]);
   });
+  it("a prior of a DIFFERENT claim type is not reused even with the same title", async () => {
+    const prior = { record_id: "TR-dddddddddddd", claim_id: "critic:security:input-has-no-accessible-name", claim_type: "measured", claim_text: "x", final_status: "accept", missing: [], reason: "r", provenance: { commit: "abc1234", workflow: "critic-panel", tree: TREE } };
+    const { calls } = await runWorkflow("critic-panel.js", { focus: "x", uiInScope: false, priorRecords: [prior], treeId: TREE }, (label) =>
+      label.startsWith("critic:") ? onlySecurity([finding({ revisits: prior.record_id, revisitReason: "still-present" })])(label) : verdict(),
+    );
+    expect(calls.filter((c) => c.label.startsWith("verify:"))).toHaveLength(1);
+  });
+
   it("a prior defer is never reused — it is re-adjudicated", async () => {
     const prior = { record_id: "TR-cccccccccccc", claim_id: "critic:security:input-has-no-accessible-name", claim_type: "factual", claim_text: "x", final_status: "defer", missing: ["m"], reason: "r", provenance: { commit: "abc1234", workflow: "critic-panel", tree: TREE } };
     const { calls } = await runWorkflow("critic-panel.js", { focus: "x", uiInScope: false, priorRecords: [prior], treeId: TREE }, (label) =>
@@ -245,6 +271,20 @@ describe("improve-skills and scan-docs face the evidence gate too", () => {
     );
     expect(result.applyReady).toHaveLength(0);
     expect(result.deferred).toHaveLength(1);
+    expectWritable(result.traceRecords);
+  });
+
+  it("improve-skills: real but NOT edit-safe is needsDesign (revise) with a safer edit as repair", async () => {
+    const { result } = await runWorkflow("improve-skills.js", { targets: ["CLAUDE.md"] }, (label) =>
+      label.startsWith("meta:safety")
+        ? { findings: [meta] }
+        : label.startsWith("meta:")
+          ? { findings: [] }
+          : skeptic({ editSafe: false, saferEdit: "narrower edit", evidenceChecked: [{ kind: "rule", ref: "CLAUDE.md rule" }] }),
+    );
+    expect(result.applyReady).toHaveLength(0);
+    expect(result.needsDesign).toHaveLength(1);
+    expect(result.needsDesign[0].repair).toBe("narrower edit");
     expectWritable(result.traceRecords);
   });
 

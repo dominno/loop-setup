@@ -22,9 +22,9 @@ if (typeof a === 'string') {
 // triaged and denylist-cleared. A re-dispatched node carries its previous record id and
 // the `missing` evidence it was held for (both reach the implementer and the verifier).
 const items = (a && a.items) || []
-// The trust level is enforced, not decorative: only L2/L3 may dispatch fixes (L1 is
-// report-only), and an unknown value fails closed.
-const level = (a && a.level) || 'L2'
+// The trust level is enforced, not decorative: only an EXPLICIT L2/L3 may dispatch fixes.
+// Omitted or unknown → L1 (report-only), matching loop.md's "unstated level = L1".
+const level = (a && a.level) || 'L1'
 // Working-tree fingerprint (`pnpm -s trace tree-id`) stamped on the records' provenance.
 const treeId = (a && typeof a.treeId === 'string' && /^[0-9a-f]{16}$/.test(a.treeId) && a.treeId) || null
 
@@ -192,6 +192,8 @@ function parseDiffPaths(diff) {
   for (const m of s.matchAll(/^diff --git "a\/(.+?)" "b\/(.+?)"$/gm)) { paths.push(m[1], m[2]) }
   for (const m of s.matchAll(/^\+\+\+ b\/(.+)$/gm)) { if (m[1] !== '/dev/null') paths.push(m[1]) }
   for (const m of s.matchAll(/^--- a\/(.+)$/gm)) { if (m[1] !== '/dev/null') paths.push(m[1]) }
+  // Rename/copy-only patches carry their paths in extended headers, not in ---/+++ lines.
+  for (const m of s.matchAll(/^(?:rename|copy) (?:from|to) (.+)$/gm)) { paths.push(m[1]) }
   return paths
 }
 // </loop-denylist>
@@ -242,11 +244,14 @@ const outcomes = await pipeline(
       // Fail safe: no verdict / verifier died → defer (not applied). The evidence gate
       // also defers an accept that does not cite the real diff.
       const g = applyEvidenceGate(v ? { ...v, claimType: 'practical' } : { claimType: 'practical' })
-      const licensed = LICENSING.includes(g.verdict)
+      // Unattended (L3) only an `accept` is applied; a `qualify` waits for a human to accept
+      // its caveat (status 'held'). At L2 a human is watching, so qualify is applied.
+      const held = level === 'L3' && g.verdict === 'qualify'
+      const licensed = LICENSING.includes(g.verdict) && !held
       return {
         ...base,
         applied: licensed,
-        status: licensed ? 'applied' : g.verdict === 'defer' ? 'deferred' : 'rejected',
+        status: licensed ? 'applied' : held ? 'held' : g.verdict === 'defer' ? 'deferred' : 'rejected',
         verdict: g.verdict,
         preGateVerdict: (v && v.verdict) || null,
         failedGates: g.failedGates, missing: g.missing, repair: g.repair, qualifier: g.qualifier,
@@ -260,6 +265,7 @@ const outcomes = await pipeline(
 const settled = outcomes.filter(Boolean)
 const applied = settled.filter((o) => o.applied)
 const deferred = settled.filter((o) => o.status === 'deferred')
+const held = settled.filter((o) => o.status === 'held') // L3 qualify — needs a human to accept the qualifier
 const rejected = settled.filter((o) => o.status === 'rejected' || o.status === 'escalated-denylist')
 
 // TRACE-lite record drafts — one per item (the Lead appends them with `pnpm trace
@@ -292,4 +298,4 @@ const traceRecords = settled.map((o, i) => ({
 // ephemeral), re-runs the smallest relevant checks, then CLEARs the record and marks
 // the node done. Deferred items are HELD (node → deferred, with `missing`); rejected
 // and denylist items are HELD and escalated.
-return { level, applied, deferred, rejected, escalate: rejected.map((o) => o.id), traceRecords }
+return { level, applied, deferred, held, rejected, escalate: [...rejected, ...held].map((o) => o.id), traceRecords }

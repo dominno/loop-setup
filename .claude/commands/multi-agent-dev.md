@@ -22,7 +22,7 @@ Procedure:
    Playwright MCP) and observe current behavior.
 4. **Pre-implementation critic round** — invoke the Workflow tool with
    `scriptPath: .claude/workflows/critic-panel.js`,
-   `args: { "focus": "$ARGUMENTS (current behavior + changed files)", "priorRecords": <pnpm -s trace query --latest --writer critic-panel --json>, "treeId": "<pnpm -s trace tree-id>" }`.
+   `args: { "focus": "$ARGUMENTS (current behavior + changed files)", "priorRecords": <pnpm -s trace query --latest --writer critic-panel --brief>, "treeId": "<pnpm -s trace tree-id>" }`.
    Render the returned `confirmed` findings (verdict `accept`/`qualify`) as the critic
    matrix with their verdicts; list `deferred` (with `missing`) and `revised` (with
    `repair`); record `niceToHaves`; ignore `refuted`; if `failedReviewers` is non-empty,

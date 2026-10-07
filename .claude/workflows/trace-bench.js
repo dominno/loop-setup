@@ -128,6 +128,8 @@ function parseDiffPaths(diff) {
   for (const m of s.matchAll(/^diff --git "a\/(.+?)" "b\/(.+?)"$/gm)) { paths.push(m[1], m[2]) }
   for (const m of s.matchAll(/^\+\+\+ b\/(.+)$/gm)) { if (m[1] !== '/dev/null') paths.push(m[1]) }
   for (const m of s.matchAll(/^--- a\/(.+)$/gm)) { if (m[1] !== '/dev/null') paths.push(m[1]) }
+  // Rename/copy-only patches carry their paths in extended headers, not in ---/+++ lines.
+  for (const m of s.matchAll(/^(?:rename|copy) (?:from|to) (.+)$/gm)) { paths.push(m[1]) }
   return paths
 }
 // </loop-denylist>

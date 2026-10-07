@@ -341,11 +341,53 @@ describe("checker-round hardening (policy v2)", () => {
     expect(replay(loadEntries(store), schema, POLICY).errors).toEqual([]);
   });
 
-  it("duplicate actions in one batch are refused instead of poisoning the store", () => {
+  it("a duplicate decision is an idempotent no-op — never a batch failure, never a poisoned store", () => {
     const [a] = writeRecords([draft()], ctx());
     const res = appendActions([{ record_id: a.record_id, consumer: "loop", action: "HOLD" }, { record_id: a.record_id, consumer: "loop", action: "HOLD" }], ctx());
-    expect(res.every((r) => r.stored === false)).toBe(true);
+    expect(res.every((r) => r.stored)).toBe(true);
+    expect(res[1].noop).toBe(true);
+    const again = appendActions([{ record_id: a.record_id, consumer: "loop", action: "HOLD" }], { ...ctx(), now: "2026-10-07T14:00:00.000Z" });
+    expect(again[0].noop).toBe(true);
+    expect(loadEntries(store).filter((e) => e.value.kind === "action")).toHaveLength(1);
     expect(replay(loadEntries(store), schema, POLICY).errors).toEqual([]);
+  });
+
+  it("REUSE / REAUDIT are events: the same one at a later time is stored again", () => {
+    const [a] = writeRecords([draft()], ctx());
+    appendActions([{ record_id: a.record_id, consumer: "critic-panel", action: "REUSE", note: "same" }], ctx());
+    const second = appendActions([{ record_id: a.record_id, consumer: "critic-panel", action: "REUSE", note: "same" }], { ...ctx(), now: "2026-10-07T15:00:00.000Z" });
+    expect(second[0].stored).toBe(true);
+    expect(second[0].noop).toBeUndefined();
+    expect(loadEntries(store).filter((e) => e.value.kind === "action")).toHaveLength(2);
+  });
+
+  it("a union-merged store replays without errors (order-dependent checks are warnings on replay)", () => {
+    // Common base: r1. Branch A adds a newer record r2 for the same claim; branch B CLEARs r1.
+    const [r1] = writeRecords([draft()], ctx());
+    const base = readFileSync(store, "utf8");
+    writeRecords([draft({ reason: "branch a revisited it" })], { ...ctx(), now: "2026-10-07T13:00:00.000Z" });
+    const a = readFileSync(store, "utf8").slice(base.length);
+    writeFileSync(store, base);
+    appendActions([{ record_id: r1.record_id, consumer: "loop", action: "CLEAR" }], ctx());
+    const b = readFileSync(store, "utf8").slice(base.length);
+    writeFileSync(store, base + a + b); // what merge=union produces: base, then ours, then theirs
+    const state = replay(loadEntries(store), schema, POLICY);
+    expect(state.errors).toEqual([]);
+    expect(state.warnings.join()).toMatch(/order-dependent/);
+  });
+
+  it("action notes are screened for secrets and bench ground truth like records", () => {
+    const [a] = writeRecords([draft()], ctx());
+    const res = appendActions([{ record_id: a.record_id, consumer: "loop", action: "HOLD", note: "key sk-ant-abcdefghijklmnopqrstuvwx" }], ctx());
+    expect(res[0].stored).toBe(false);
+    const res2 = appendActions([{ record_id: a.record_id, consumer: "loop", action: "HOLD", note: "see B99-secret-fixture" }], { ...ctx(), forbidden: ["B99-secret-fixture"] });
+    expect(res2[0].stored).toBe(false);
+  });
+
+  it("a draft with a prototype-polluting key is refused, not stored", () => {
+    const [res] = writeRecords([JSON.parse(`{"__proto__":{"x":1},${JSON.stringify(draft()).slice(1)}`)], ctx());
+    expect(res.stored).toBe(false);
+    expect(res.validation.fail.join()).toMatch(/prototype-polluting/);
   });
 
   it("CLEAR is refused on an older record once a newer record exists for the same claim (no revises link needed)", () => {
@@ -409,5 +451,12 @@ describe("secrets never enter the store", () => {
     const [res] = writeRecords([draft({ claim_text: "key is sk-ant-abcdefghijklmnopqrstuvwx" })], ctx());
     expect(res.stored).toBe(false);
     expect(res.validation.fail.join()).toMatch(/secret/);
+  });
+});
+
+describe("bench scoring fails closed on unattributable leaks", () => {
+  it("raises F0 when a leak cannot be tied to a run", () => {
+    const s = scoreBench({ fixtures: [{ id: "B1", kind: "bad" }, { id: "G1", kind: "good" }] }, { runs: [], unattributedLeaks: 1 });
+    expect(s.flags.some((f) => f.startsWith("F0 contamination") && f.includes("could not be tied"))).toBe(true);
   });
 });

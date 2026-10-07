@@ -16,7 +16,10 @@ $ARGUMENTS
    patch have no local changes, and (for E2E judges) nothing is listening on port 3000.
    Run `pnpm trace bench-judge` (or `--skip-e2e` for a quick pass). It first runs every
    judge command on the clean tree (a judge that already fails there aborts the run),
-   then refuses stale fixtures (patches that no longer apply). Every row must be
+   then refuses stale fixtures (patches that no longer apply). It refuses to start while
+   a fixture patch is still applied from a killed run — `pnpm trace bench-judge --recover`
+   reverses those. Ctrl+C / SIGTERM / SIGHUP stop it after the current patch is
+   reversed. Every row must be
    `ok: true` — with `--skip-e2e`, the skipped E2E rows show `ok: null` and are the only
    acceptable exception. A row that is `ok: false` means the manifest is stale; fix it
    before benchmarking.

@@ -61,7 +61,7 @@ instructions — the self-modification guard below still applies to everything e
 6. Check browser console errors and failed network requests.
 7. Run the critic round as the **critic-panel Workflow**
    (`.claude/workflows/critic-panel.js`, `args.focus` = the current task/flow,
-   `args.priorRecords` = `pnpm -s trace query --latest --writer critic-panel --json`,
+   `args.priorRecords` = `pnpm -s trace query --latest --writer critic-panel --brief`,
    `args.treeId` = `pnpm -s trace tree-id`): critics fan out as parallel
    subagents, each finding gets a typed verdict from a separate skeptic, and unchanged
    prior verdicts are reused instead of re-verified. Render the returned `confirmed`
@@ -105,14 +105,18 @@ instructions — the self-modification guard below still applies to everything e
       exists: reset the nodes to `ready`, write no records, log it, and stop (budget
       exhausted → escalate). Otherwise record its `traceRecords` per the consumer
       protocol — **before** moving any node. Then, per item:
-      - **`applied`** (accept/qualify): at **L3 only an `accept` is applied** — a `qualify`
-        is HELD for a human. Apply the `diff` patch and re-run the smallest relevant
-        check. If it passes, `pnpm trace act <that node's loop-iteration record> loop CLEAR
+      - **`applied`** (accept, or qualify at L2): apply the `diff` patch, then run
+        `pnpm trace denylist-check` (the production denylist over the paths git itself
+        reports changed — catches anything the patch-text parser missed); a hit → revert,
+        `HOLD`, escalate. Then re-run the smallest relevant check. If it passes, `pnpm trace act <that node's loop-iteration record> loop CLEAR
         --ref <node> --note "<check that passed; qualifier if any>"` and mark the node
         `done` with that `record` (copy a qualifier into the node's notes). If no relevant
         automated check exists, do not CLEAR: `HOLD` and escalate. If the check fails,
         revert the patch, write a `revise` record (`revises` the first, `repair` = what
         failed), `HOLD` it, and leave the node `ready` with the attempt counted.
+      - **`held`** (a `qualify` at L3 — the workflow never auto-applies one unattended):
+        `HOLD`, set the node `escalated` with `missing` = "human approval of the qualifier:
+        <qualifier>".
       - **`deferred`** (defer): `HOLD`, set the node `deferred`, copy the record's
         `missing` into the node (a denylist defer — `missing` = human approval — makes the
         node `escalated` instead).

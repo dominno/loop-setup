@@ -146,7 +146,7 @@ flowchart LR
     nd -- yes --> ver[🔵 verifier: typed verdict on the real diff]
     ver --> eg[▫️ evidence gate<br/>practical: accept/qualify need the diff]
   end
-  P --> out([applied + deferred + rejected + escalate<br/>+ traceRecords])
+  P --> out([applied + deferred + held L3-qualify + rejected + escalate<br/>+ traceRecords])
   esc0 --> out
 ```
 

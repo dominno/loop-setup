@@ -26,7 +26,7 @@ Checklist:
     - keyboard navigation works for critical flow
 12. Run a **post-implementation critic round as a Workflow** — invoke the Workflow
     tool with `scriptPath: .claude/workflows/critic-panel.js` and
-    `args: { "focus": "the changed flows for $ARGUMENTS", "priorEvidence": "<git diff summary + the typecheck/lint/unit/build/E2E results + a11y/browser findings from steps 2-11>", "priorRecords": <pnpm -s trace query --latest --writer critic-panel --json>, "treeId": "<pnpm -s trace tree-id>" }`.
+    `args: { "focus": "the changed flows for $ARGUMENTS", "priorEvidence": "<git diff summary + the typecheck/lint/unit/build/E2E results + a11y/browser findings from steps 2-11>", "priorRecords": <pnpm -s trace query --latest --writer critic-panel --brief>, "treeId": "<pnpm -s trace tree-id>" }`.
     The critics run as parallel subagents and verify against that evidence; each
     blocker/important finding gets a typed verdict from a separate skeptic (no single
     agent simulating the panel). Record the verdicts per the **consumer protocol** in

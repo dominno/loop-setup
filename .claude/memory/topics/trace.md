@@ -83,7 +83,8 @@ denylist path still needs a human).
   --note …` records one decision on every stored record (e.g. `HOLD` for a review-only round).
 - **`accept`** → act. **`qualify`** → act only at the qualified strength and carry the
   qualifier forward (node notes, report, wiki bullet). Unattended (L3), only `accept` is
-  auto-applied; a `qualify` waits for a human.
+  auto-applied — `loop-iteration` itself returns an L3 `qualify` as `held` (enforced in
+  code, not just prose); an omitted trust level is L1 and dispatches nothing.
 - **`defer`** → never act. Resolve it by supplying the named `missing` evidence and
   re-adjudicating with a **separate** checker (re-run the workflow that produced it, with
   the evidence as `priorEvidence`); the new verdict is a new record that `revises` the
@@ -122,8 +123,16 @@ they do not adjudicate, and no durable state changes on their output.
   key/token/private key, or a bench fixture id/defect text. If a secret ever lands anyway:
   rotate it — removing it means rewriting git history, a human decision.
 - **Merges** — `.gitattributes` merges `records.jsonl` as a union (both branches' appends
-  survive); `pnpm trace lint` (in `pnpm test`) is the post-merge check. Rotation runs only
-  on the default branch (a union of two rotations would duplicate records).
+  survive); `pnpm trace lint` (in `pnpm test`) is the post-merge check. Replay errors only
+  on merge-invariant violations (schema, content-hash ids, unknown targets, verdict vs
+  action); "this CLEAR was on a no-longer-newest record" depends on line order a union can
+  interleave, so on replay it is a warning — the writer still refuses it at append time.
+  Rotation runs only on the default branch (a union of two rotations would duplicate
+  records).
+- **Idempotent decisions, repeatable events** — re-recording an identical decision is a
+  no-op (reported `noop`), never a batch failure; `REUSE`/`REAUDIT` are events and are
+  stored each time they happen. Action notes/refs are screened for secrets and bench
+  ground truth exactly like records.
 - **Version legibility** — `schema_version` const + `policy_version` stamp; a reader refuses
   records from a newer policy (`pnpm trace lint`).
 - **Self-containment** — verdict, failed gates, missing, repair live in the record.

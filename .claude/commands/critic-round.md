@@ -13,7 +13,7 @@ $ARGUMENTS
 ## Procedure
 1. Make sure context exists for the critics: confirm `CLAUDE.md` and (if a UI flow
    is in scope) that localhost is running for the browser-driven critics.
-2. **Gather the reuse inputs:** `pnpm -s trace query --latest --writer critic-panel --json`
+2. **Gather the reuse inputs:** `pnpm -s trace query --latest --writer critic-panel --brief`
    (prior verdicts) and `pnpm -s trace tree-id` (HEAD + uncommitted changes — reuse only
    fires when the code is identical).
 3. **Invoke the Workflow tool** with the predefined critic-panel workflow:

@@ -375,8 +375,16 @@ export function replay(entries, schema, readerPolicyVersion) {
         errors.push(`${at}: action ${v.action_id} targets unknown or later record ${v.record_id}`);
         continue;
       }
-      const why = actionViolation(rec, v.action, superseded, latestOfClaim);
-      if (why) errors.push(`${at}: action ${v.action_id}: ${why}`);
+      // Verdict-vs-action compatibility is merge-invariant → an error. "Was this the newest
+      // record for its claim / already superseded?" depends on line ORDER, which a union
+      // merge of two branches can interleave — so on replay it is only a warning; the
+      // writer (appendActions) still enforces it strictly at append time.
+      const hard = actionViolation(rec, v.action, null, null);
+      if (hard) errors.push(`${at}: action ${v.action_id}: ${hard}`);
+      else {
+        const soft = actionViolation(rec, v.action, superseded, latestOfClaim);
+        if (soft) warnings.push(`${at}: action ${v.action_id}: ${soft} (order-dependent — e.g. after a union merge)`);
+      }
       contentKeys.set(contentKey(v), v.action_id);
       if (!actions.has(v.record_id)) actions.set(v.record_id, []);
       actions.get(v.record_id).push(v);
@@ -609,6 +617,12 @@ export function scoreBench(manifest, results, thresholds = { invariance: 0.8 }) 
   if (out.contaminatedRuns) {
     out.flags.push(`F0 contamination: ${out.contaminatedRuns} run(s) had ground truth in their agent's transcript and were excluded — fix the leak before trusting this bench`);
   }
+  // A leak in a transcript that cannot be attributed to a run can contaminate any run:
+  // the measurement is not trustworthy at all (fail closed).
+  out.unattributedLeaks = Number(results?.unattributedLeaks || 0);
+  if (out.unattributedLeaks) {
+    out.flags.push(`F0 contamination: ${out.unattributedLeaks} agent transcript(s) leaked ground truth but could not be tied to a run — this bench run is not a measurement`);
+  }
   if (out.noVerdictRuns) {
     out.flags.push(`F0 validity: ${out.noVerdictRuns} run(s) returned no verdict and were excluded — the measured arm is smaller than it looks`);
   }
@@ -754,21 +768,41 @@ export function loadEntries(storePath) {
  * The TRACE write API: validate every draft, then append all-or-nothing.
  * Returns WriteResult[] = { record_id, schema_version, policy_version, validation, stored }.
  */
+/** Own keys that would rewrite the prototype instead of becoming data. */
+const DANGEROUS_KEYS = ["__proto__", "constructor", "prototype"];
+function dangerousKeys(obj, path = "$") {
+  if (!obj || typeof obj !== "object") return [];
+  const out = [];
+  for (const k of Object.keys(obj)) {
+    if (DANGEROUS_KEYS.includes(k)) out.push(`${path}.${k}`);
+    else out.push(...dangerousKeys(obj[k], `${path}.${k}`));
+  }
+  return out;
+}
+
+/** Screening shared by records AND actions (a note or ref lands in the same store). */
+function screenText(text, forbidden) {
+  const v = [];
+  if (forbidden.some((m) => text.includes(m))) v.push("contains bench ground truth (a fixture id, defect text or patch-only token) — redact it; the store is greppable by bench agents");
+  if (SECRET_PATTERNS.some((re) => re.test(text))) v.push("looks like it contains a secret (key/token/private key) — redact it; the store is committed and immutable");
+  return v;
+}
+
 export function writeRecords(drafts, { storePath, now, policyVersion, commit, branch, schema, forbidden = [] }) {
   const sch = schema || loadSchema();
   const prior = replay(loadEntries(storePath), sch, policyVersion);
   const known = new Map(prior.records);
   const contents = new Map(prior.contentKeys);
-  const batch = drafts.map((d) => finalizeRecord(d, { now, policyVersion, commit, branch }));
-  const results = batch.map((rec) => {
+  const unsafe = drafts.map((d) => dangerousKeys(d));
+  const batch = drafts.map((d, i) => (unsafe[i].length ? { kind: "record", record_id: "(refused)" } : finalizeRecord(d, { now, policyVersion, commit, branch })));
+  const results = batch.map((rec, i) => {
+    if (unsafe[i].length) return { rec, violations: [`draft carries prototype-polluting key(s): ${unsafe[i].join(", ")}`] };
     const violations = [...validate(sch.$defs.record, rec, sch), ...semanticViolations(rec)];
     if (known.has(rec.record_id)) violations.push(`duplicate record_id ${rec.record_id}`);
     const ck = contentKey(rec);
     if (contents.has(ck)) violations.push(`duplicate content — this exact record is already stored as ${contents.get(ck)} (re-running a write is not a new verdict)`);
     contents.set(ck, rec.record_id);
-    const text = JSON.stringify(rec);
-    if (forbidden.some((m) => text.includes(m))) violations.push("contains bench ground truth (a fixture id or defect text) — redact it; the store is greppable by bench agents");
-    if (SECRET_PATTERNS.some((re) => re.test(text))) violations.push("looks like it contains a secret (key/token/private key) — redact it; the store is committed and immutable");
+    violations.push(...screenText(JSON.stringify(rec), forbidden));
     for (const ref of ["revises", "reuses"]) {
       if (rec[ref] && !known.has(rec[ref])) violations.push(`${ref} points to unknown record ${rec[ref]}`);
     }
@@ -790,18 +824,27 @@ export function writeRecords(drafts, { storePath, now, policyVersion, commit, br
 }
 
 /** Append consumer actions all-or-nothing, enforcing the action matrix (fail closed). */
-export function appendActions(drafts, { storePath, now, policyVersion, schema }) {
+/** Bookkeeping events that legitimately repeat (each reuse / re-audit is a new event). */
+export const EVENT_ACTIONS = ["REUSE", "REAUDIT"];
+
+export function appendActions(drafts, { storePath, now, policyVersion, schema, forbidden = [] }) {
   const sch = schema || loadSchema();
   const prior = replay(loadEntries(storePath), sch, policyVersion);
   const batch = drafts.map((d) => finalizeAction(d, { now }));
   const contents = new Map(prior.contentKeys);
+  const seenIds = new Set();
   const results = batch.map((a) => {
-    const violations = validate(sch.$defs.action, a, sch);
+    // Idempotency without poisoning: an identical decision that is already recorded (or
+    // repeated in this batch) is a no-op, not a batch-failing error. Event actions are
+    // de-duplicated only against an identical id (same content AND same time).
     const ck = contentKey(a);
-    // Same consumer decision twice (in this batch or already stored) would collide in the
-    // append-only store; refuse it rather than poison the stream.
-    if (contents.has(ck)) violations.push(`duplicate action — already recorded as ${contents.get(ck)}`);
+    if (seenIds.has(a.action_id) || (!EVENT_ACTIONS.includes(a.action) && contents.has(ck))) {
+      return { a, violations: [], noop: contents.get(ck) || a.action_id };
+    }
+    seenIds.add(a.action_id);
     contents.set(ck, a.action_id);
+    const violations = validate(sch.$defs.action, a, sch);
+    violations.push(...screenText(JSON.stringify(a), forbidden));
     const rec = prior.records.get(a.record_id);
     if (!rec) violations.push(`unknown record ${a.record_id} — a consumer cannot act on a record that does not exist`);
     else {
@@ -811,16 +854,18 @@ export function appendActions(drafts, { storePath, now, policyVersion, schema })
     return { a, violations };
   });
   const ok = results.every((r) => r.violations.length === 0);
-  if (ok && batch.length) {
+  const toWrite = results.filter((r) => !r.noop).map((r) => r.a);
+  if (ok && toWrite.length) {
     mkdirSync(dirname(storePath), { recursive: true });
-    appendFileSync(storePath, batch.map((x) => JSON.stringify(x)).join("\n") + "\n");
+    appendFileSync(storePath, toWrite.map((x) => JSON.stringify(x)).join("\n") + "\n");
   }
-  return results.map(({ a, violations }) => ({
-    action_id: a.action_id,
+  return results.map(({ a, violations, noop }) => ({
+    action_id: noop || a.action_id,
     record_id: a.record_id,
     action: a.action,
     validation: violations.length ? { fail: violations } : "pass",
     stored: ok,
+    ...(noop ? { noop: true } : {}),
   }));
 }
 

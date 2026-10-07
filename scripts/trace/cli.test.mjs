@@ -6,7 +6,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ROOT } from "./lib.mjs";
-import { judgeEnv, runJudge } from "./bench-judge.mjs";
+import { judgeEnv, runBenchJudge, runJudge } from "./bench-judge.mjs";
 
 const CLI = join(ROOT, "scripts/trace/cli.mjs");
 let dir;
@@ -59,6 +59,24 @@ describe("pnpm trace (CLI process)", () => {
     for (const id of ids) expect(JSON.parse(trace(["show", id]).stdout).actions[0]).toMatchObject({ action: "HOLD", consumer: "critic-round" });
   });
 
+  it("the documented hand-off works: a critic-panel-shaped result file → write <file> → act --from <file>", () => {
+    trace(["write", "-"], draft({ claim_id: "cli:prior" }));
+    const priorId = JSON.parse(trace(["query", "--json"]).stdout)[0].record_id;
+    const file = join(dir, "result.json");
+    writeFileSync(file, JSON.stringify({ confirmed: [], traceRecords: [JSON.parse(draft({ claim_id: "cli:new" }))], reuseActions: [{ record_id: priorId, consumer: "critic-panel", action: "REUSE", note: "still present" }] }));
+    expect(trace(["write", file]).status).toBe(0);
+    expect(trace(["act", "--from", file]).status).toBe(0);
+    expect(trace(["act", "--from", file]).status).toBe(0); // a later REUSE event is stored again
+    expect(JSON.parse(trace(["show", priorId]).stdout).actions).toHaveLength(2);
+    expect(trace(["lint"]).status).toBe(0);
+  });
+
+  it("act --from with no recognizable actions fails instead of silently writing nothing", () => {
+    const file = join(dir, "empty.json");
+    writeFileSync(file, JSON.stringify({ something: [] }));
+    expect(trace(["act", "--from", file]).status).toBe(1);
+  });
+
   it("lint exits 1 on a tampered store", () => {
     trace(["write", "-"], draft());
     writeFileSync(store, readFileSync(store, "utf8").replace("demo claim", "other claim"));
@@ -98,10 +116,44 @@ describe("bench-judge safety helpers", () => {
     expect(env.HTTPS_PROXY).toBeUndefined();
   });
 
-  it("a judge that could not run is 'not observed', never 'caught'", () => {
-    expect(runJudge("x", { spawn: () => ({ error: new Error("ENOENT"), status: null }) })).toBeNull();
-    expect(runJudge("x", { spawn: () => ({ status: null, signal: "SIGTERM" }) })).toBeNull();
-    expect(runJudge("x", { spawn: () => ({ status: 1 }) })).toBe(true);
-    expect(runJudge("x", { spawn: () => ({ status: 0 }) })).toBe(false);
+  it("a judge that could not run is 'not observed', never 'caught'", async () => {
+    expect(await runJudge("x", { spawn: () => ({ error: new Error("ENOENT"), status: null }) })).toBeNull();
+    expect(await runJudge("x", { spawn: () => ({ status: null, signal: "SIGTERM" }) })).toBeNull();
+    expect(await runJudge("x", { spawn: () => ({ status: 1 }) })).toBe(true);
+    expect(await runJudge("x", { spawn: () => Promise.resolve({ status: 0 }) })).toBe(false);
+  });
+
+  // A synthetic fixture that creates a throwaway untracked file — safe to apply in the
+  // real tree while other test files run (nothing reads it).
+  const tmpName = `scripts/trace/.bench-judge-test-${process.pid}.txt`;
+  const newFilePatch = `diff --git a/${tmpName} b/${tmpName}\nnew file mode 100644\n--- /dev/null\n+++ b/${tmpName}\n@@ -0,0 +1 @@\n+temporary\n`;
+  const fx = (over = {}) => ({ id: "B90-synthetic", kind: "bad", patch: newFilePatch, judge: { kind: "command", command: "fake-judge", catches: true }, ...over });
+  const quiet = { log: () => {}, applied: () => [] };
+
+  it("runBenchJudge aborts when the judge already fails on the clean tree (baseline)", async () => {
+    await expect(runBenchJudge({ fixtures: [fx()] }, { ...quiet, judge: async () => true })).rejects.toThrow(/baseline failed/);
+  });
+
+  it("runBenchJudge: a judge that did not run is ok:false, and the patch is reversed", async () => {
+    let calls = 0;
+    const res = await runBenchJudge({ fixtures: [fx()] }, { ...quiet, judge: async () => (calls++ === 0 ? false : null) });
+    expect(res[0]).toMatchObject({ observed: null, ok: false });
+    expect(spawnSync("git", ["status", "--porcelain", "--", tmpName], { cwd: ROOT, encoding: "utf8" }).stdout).toBe("");
+  });
+
+  it("runBenchJudge: an interrupt stops the run after restoring the tree", async () => {
+    let calls = 0;
+    const judge = async () => {
+      calls += 1;
+      if (calls === 2) process.emit("SIGUSR2", "SIGUSR2"); // during the first fixture
+      return calls === 1 ? false : true;
+    };
+    await expect(runBenchJudge({ fixtures: [fx(), fx({ id: "B91-synthetic" })] }, { ...quiet, judge, signals: ["SIGUSR2"] })).rejects.toThrow(/interrupted/);
+    expect(calls).toBe(2); // the second fixture never ran
+    expect(spawnSync("git", ["status", "--porcelain", "--", tmpName], { cwd: ROOT, encoding: "utf8" }).stdout).toBe("");
+  });
+
+  it("runBenchJudge refuses to start while a fixture patch is still applied (killed run)", async () => {
+    await expect(runBenchJudge({ fixtures: [fx()] }, { log: () => {}, judge: async () => false, applied: (m) => m.fixtures })).rejects.toThrow(/--recover/);
   });
 });
