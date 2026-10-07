@@ -25,11 +25,15 @@ $ARGUMENTS
 3. **Run the Workflow** — `scriptPath: .claude/workflows/trace-bench.js`, `args` = the
    step-2 JSON. This command opts into multi-agent orchestration (it spawns
    fixtures × repeat verifier agents + fixtures single-pass agents); invoking Workflow
-   here is expected. Save the returned object to
-   `.claude/trace/bench/runs/<YYYY-MM-DD>-<arms>.json`.
-4. **Score it:** `pnpm trace bench-score .claude/trace/bench/runs/<file>.json --record`
-   — prints the metrics and appends a `measured` TRACE record (`claim_id
-   bench:trace-bench-lite`, revising the previous run's record).
+   here is expected. Save the returned object to your **scratchpad**, never the repo —
+   the verdict prose names the defects, and anything committed is greppable by the next
+   run's agents.
+4. **Score it:** `pnpm trace bench-score <scratch>/run.json --transcripts <the workflow's
+   transcript dir> --record` — scans every agent transcript for leaked ground truth
+   (fixture ids, defect text) and excludes those runs (**F0**), prints the metrics, and
+   appends a counts-only `measured` TRACE record (`claim_id bench:trace-bench-lite`,
+   revising the previous run's record). `--record` refuses to run without
+   `--transcripts`: an unscanned run is not a measurement.
 5. **Report** a table per arm (WrongAcceptRate, FalseHoldRate, defer rate, gate
    downgrades, invariance; single-pass vs panel recall / false-block; n_eff), the
    external-judge gap (`judgeOnly` / `agentOnly` / `both` / `neither` — `agentOnly` is
@@ -45,6 +49,10 @@ $ARGUMENTS
   schema, evidence gate and denylist are byte-identical copies — `pnpm test` fails on
   drift), with `checksPassed` self-reported as true for every fixture (worst case: the
   checker must not lean on the implementer's word).
-- Adding a fixture: a `B..`/`G..` entry in `.claude/trace/bench/fixtures.json` + a patch
-  in `patches/` (generate it with `git diff` from a clean tree); `pnpm test` checks that
-  it applies and that its judge kind matches the denylist; `bench-judge` checks the rest.
+- Fixtures live **encoded** in `.claude/trace/bench/fixtures.bundle` (see that folder's
+  README): agents grep this repo, so ground truth must never be plain text in it. Edit via
+  `pnpm trace bench-unpack <dir-outside-repo>` → edit → `pnpm trace bench-pack <dir>`;
+  `pnpm test` checks the bundle, that patches apply, judge kinds vs the denylist, and that
+  no fixture id/defect text appears anywhere in the tree; `bench-judge` checks the rest.
+- When reporting, describe fixtures by count and category, not by id — the report text
+  may end up in the repo (log, records).

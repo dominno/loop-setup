@@ -3,12 +3,17 @@
 // Usage: pnpm trace <command> [...]   (see `pnpm trace help`)
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   appendActions,
-  BENCH_DIR,
+  BENCH_BUNDLE,
   benchArgs,
   benchRecordDraft,
+  contaminatedRuns,
+  encodeBench,
+  markContaminated,
+  readBench,
   DEFAULT_STORE,
   latestByClaim,
   loadEntries,
@@ -40,7 +45,11 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
   pnpm trace rotate [--max 500] [--keep 200]   lossless move of old lines into <YYYY>.jsonl archives
   pnpm trace bench-args [--arms verifier,single-pass,panel] [--repeat N] [--critics a,b] [--only B01-x,G01-y]
                                        print the args JSON for .claude/workflows/trace-bench.js (no ground truth)
-  pnpm trace bench-score <results.json> [--record]   score a trace-bench run; --record also writes the measured-claim record
+  pnpm trace bench-score <results.json>... --transcripts <dir> [--record]
+                                       score trace-bench run(s) (runs concatenated); agent transcripts are scanned for
+                                       leaked ground truth (contaminated runs excluded, F0); --record writes the record
+  pnpm trace bench-unpack <dir>        decode the fixture bundle into <dir> (outside the repo!) for editing
+  pnpm trace bench-pack <dir>          re-encode <dir>/fixtures.json (patches inline) into the bundle
   pnpm trace bench-judge [--only ids] [--skip-e2e]   verify each fixture's judge.catches by running its deterministic check
 
   --store <path>  use another store (default .claude/memory/trace/records.jsonl; env TRACE_STORE)
@@ -215,8 +224,31 @@ async function main() {
     return 0;
   }
 
+  if (cmd === "bench-pack") {
+    const dir = pos[0];
+    if (!dir) return out("usage: pnpm trace bench-pack <dir containing fixtures.json>"), 2;
+    const manifest = JSON.parse(readFileSync(join(dir, "fixtures.json"), "utf8"));
+    const problems = manifestViolations(manifest);
+    if (problems.length) return out({ error: "invalid bench manifest", problems }, true), 1;
+    writeFileSync(BENCH_BUNDLE, encodeBench(manifest));
+    out(`packed ${manifest.fixtures.length} fixtures into ${BENCH_BUNDLE}`);
+    return 0;
+  }
+
+  if (cmd === "bench-unpack") {
+    const dir = pos[0];
+    if (!dir) return out("usage: pnpm trace bench-unpack <dir outside the repo>"), 2;
+    if (join(dir, "/").startsWith(join(ROOT, "/"))) {
+      out("refusing to unpack inside the repo — plain-text fixtures there would contaminate the next bench run");
+      return 1;
+    }
+    writeFileSync(join(dir, "fixtures.json"), JSON.stringify(readBench(), null, 2) + "\n");
+    out(`unpacked to ${join(dir, "fixtures.json")} (patches are inline)`);
+    return 0;
+  }
+
   if (cmd === "bench-args" || cmd === "bench-score" || cmd === "bench-judge") {
-    const manifest = JSON.parse(readFileSync(join(BENCH_DIR, "fixtures.json"), "utf8"));
+    const manifest = readBench();
     const problems = manifestViolations(manifest);
     if (problems.length) {
       out({ error: "invalid bench manifest", problems }, true);
@@ -225,7 +257,6 @@ async function main() {
     const list = (x) => (typeof x === "string" ? x.split(",").map((s) => s.trim()).filter(Boolean) : undefined);
     if (cmd === "bench-args") {
       const args = benchArgs(manifest, {
-        readPatch: (p) => readFileSync(join(BENCH_DIR, p), "utf8"),
         arms: list(flags.arms),
         repeat: flags.repeat ? Number(flags.repeat) : undefined,
         critics: list(flags.critics),
@@ -240,9 +271,36 @@ async function main() {
       out(results, true);
       return results.every((r) => r.ok !== false) ? 0 : 1;
     }
-    const resultsRef = pos[0] || "-";
-    const raw = readJsonInput(resultsRef);
-    const score = scoreBench(manifest, raw && raw.runs ? raw : raw?.result || raw);
+    const refs = pos.length ? pos : ["-"];
+    const resultsRef = refs.join(" ");
+    let runs = refs.flatMap((ref) => {
+      const raw = readJsonInput(ref);
+      const res = raw && raw.runs ? raw : raw?.result || raw;
+      return Array.isArray(res?.runs) ? res.runs : [];
+    });
+    // Contamination scan (F0): any agent whose transcript contains a real fixture id or
+    // defect text saw ground truth; its runs are excluded. Required for --record.
+    const tdirs = flags.transcripts ? String(flags.transcripts).split(",") : [];
+    if (!tdirs.length && flags.record) {
+      out("--record needs --transcripts <workflow transcript dir> — an unscanned run cannot be recorded as a measurement");
+      return 1;
+    }
+    const transcripts = tdirs.flatMap((d) =>
+      readdirSync(d)
+        .filter((f) => /^agent-.*\.jsonl$/.test(f))
+        .map((f) => {
+          let label = "";
+          try {
+            label = JSON.parse(readFileSync(join(d, f.replace(/\.jsonl$/, ".meta.json")), "utf8")).description || "";
+          } catch {
+            /* no meta → unknown label */
+          }
+          return { label, text: readFileSync(join(d, f), "utf8") };
+        }),
+    );
+    runs = markContaminated(runs, contaminatedRuns(transcripts, manifest));
+    const score = scoreBench(manifest, { runs });
+    score.transcriptsScanned = transcripts.length;
     out(score, true);
     if (flags.record) {
       const prior = latestByClaim(state.records, state.superseded).get("bench:trace-bench-lite");

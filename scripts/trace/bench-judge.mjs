@@ -3,9 +3,10 @@
 // the judge command, then reverse the patch. Refuses to touch files with local changes.
 // The ground truth about "what our tests catch" is then an observed fact, not a guess.
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BENCH_DIR, loadWorkflowBlock, ROOT } from "./lib.mjs";
+import { loadWorkflowBlock, ROOT } from "./lib.mjs";
 
 function git(args, opts = {}) {
   return spawnSync("git", args, { cwd: ROOT, encoding: "utf8", ...opts });
@@ -14,16 +15,18 @@ function git(args, opts = {}) {
 export function runBenchJudge(manifest, { only, skipE2e, log = (s) => process.stderr.write(`${s}\n`) } = {}) {
   const { hitsDenylist, parseDiffPaths } = loadWorkflowBlock("loop-iteration.js", "loop-denylist", ["hitsDenylist", "parseDiffPaths"]);
   const results = [];
+  // Patches live inline in the encoded bundle; materialize each one outside the repo.
+  const scratch = mkdtempSync(join(tmpdir(), "trace-bench-judge-"));
   // Scope the before/after integrity check to the files fixtures can touch, so
   // unrelated concurrent edits elsewhere in the tree do not trip it.
-  const touchable = [...new Set(manifest.fixtures.flatMap((f) => parseDiffPaths(readFileSync(join(BENCH_DIR, f.patch), "utf8"))))];
+  const touchable = [...new Set(manifest.fixtures.flatMap((f) => parseDiffPaths(f.patch)))];
   const status = () => git(["status", "--porcelain", "--", ...touchable]).stdout;
   const before = status();
   for (const f of manifest.fixtures) {
     if (only && !only.includes(f.id)) continue;
-    const patchPath = join(BENCH_DIR, f.patch);
-    const patch = readFileSync(patchPath, "utf8");
-    const paths = [...new Set(parseDiffPaths(patch))];
+    const patchPath = join(scratch, `${f.id}.patch`);
+    writeFileSync(patchPath, f.patch);
+    const paths = [...new Set(parseDiffPaths(f.patch))];
     const j = f.judge || {};
     if (j.kind === "none") {
       results.push({ id: f.id, kind: j.kind, expected: false, observed: false, ok: true, note: "no deterministic judge covers this defect" });
@@ -58,11 +61,12 @@ export function runBenchJudge(manifest, { only, skipE2e, log = (s) => process.st
     } finally {
       const reverted = git(["apply", "-R", patchPath]);
       if (reverted.status !== 0) {
-        throw new Error(`could not reverse ${f.patch} — restore ${paths.join(", ")} with git checkout before continuing`);
+        throw new Error(`could not reverse ${f.id} — restore ${paths.join(", ")} with git checkout before continuing`);
       }
     }
     results.push({ id: f.id, kind: j.kind, expected: j.catches, observed, ok: observed === j.catches, note: j.command });
   }
+  rmSync(scratch, { recursive: true, force: true });
   // Belt and braces: the working tree must be exactly as we found it.
   if (status() !== before) {
     throw new Error("working tree changed during bench-judge — inspect `git status` before continuing");

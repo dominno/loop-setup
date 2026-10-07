@@ -150,7 +150,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  args([pnpm trace bench-args<br/>work item + patch only — no ground truth]) --> T
+  args([pnpm trace bench-args<br/>opaque token + work item + patch<br/>decoded from the encoded bundle]) --> T
   subgraph T["one parallel barrier"]
     subgraph VA["verifier arm × repeat · 🔵 Opus"]
       va[production loop verifier<br/>byte-identical prompt + schema] --> vg[▫️ evidence gate + denylist]
@@ -163,8 +163,9 @@ flowchart LR
     end
   end
   T --> runs([raw runs])
-  runs --> score[▫️ pnpm trace bench-score<br/>joins manifest ground truth]
-  score --> rep([WrongAcceptRate · invariance · judge gap · n_eff<br/>+ F1–F5 flags + measured record])
+  runs --> scan[▫️ transcript leak scan<br/>contaminated runs excluded · F0]
+  scan --> score[▫️ pnpm trace bench-score<br/>joins manifest ground truth]
+  score --> rep([WrongAcceptRate · invariance · judge gap · n_eff<br/>+ F0–F5 flags + counts-only record])
 ```
 
 > The shared blocks (`<trace-evidence-gate>`, `<loop-denylist>`, `<loop-verifier>`,

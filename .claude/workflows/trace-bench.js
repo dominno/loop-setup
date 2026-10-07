@@ -18,8 +18,9 @@ if (typeof a === 'string') {
 }
 
 // args = the JSON printed by `pnpm -s trace bench-args` — { fixtures: [{ id, item, patch }],
-// arms, repeat, critics? }. Fixtures carry ONLY the work item and the patch text: the
-// ground truth (kind, defect, judge) stays in the manifest and is joined at scoring time.
+// arms, repeat, critics? }. Fixtures carry ONLY an opaque token, the work item and the
+// patch text: the real fixture id, class, defect and judge stay in the manifest and are
+// joined at scoring time (a real fixture id names its defect and would leak the answer).
 const fixtures = (a && Array.isArray(a.fixtures) ? a.fixtures : []).filter((f) => f && f.id && f.patch)
 if (!fixtures.length) {
   return { error: 'No fixtures. Run `pnpm -s trace bench-args` and pass its JSON output as args.', runs: [] }

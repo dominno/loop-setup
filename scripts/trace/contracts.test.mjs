@@ -7,15 +7,22 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   ACTION_ALLOWED,
-  BENCH_DIR,
+  BENCH_BUNDLE,
   DEFAULT_STORE,
   EVIDENCE_POLICY,
   POLICY_PATH,
   ROOT,
   loadEntries,
   loadSchema,
+  benchArgs,
+  contaminatedRuns,
+  encodeBench,
   loadWorkflowBlock,
   manifestViolations,
+  markContaminated,
+  opaqueFixtureId,
+  readBench,
+  scoreBench,
   readPolicyVersion,
   replay,
 } from "./lib.mjs";
@@ -113,20 +120,63 @@ describe("committed record store", () => {
 });
 
 describe("TRACE-Bench-lite fixtures", () => {
-  const manifest = JSON.parse(readFileSync(join(BENCH_DIR, "fixtures.json"), "utf8"));
+  const manifest = readBench();
   const { hitsDenylist, parseDiffPaths } = loadWorkflowBlock("loop-iteration.js", "loop-denylist", ["hitsDenylist", "parseDiffPaths"]);
 
-  it("the manifest is structurally valid", () => {
+  it("the bundle decodes to a structurally valid manifest and re-encodes byte-identically", () => {
     expect(manifestViolations(manifest)).toEqual([]);
+    expect(encodeBench(manifest)).toBe(readFileSync(BENCH_BUNDLE, "utf8"));
+  });
+
+  it("no ground truth is readable as plain text anywhere in the tree (bench agents grep it)", () => {
+    const tracked = execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], { cwd: ROOT, encoding: "utf8" })
+      .split("\0")
+      .filter((p) => p && !p.endsWith(".bundle") && !p.startsWith("node_modules/"));
+    const markers = manifest.fixtures.flatMap((f) => [f.id, ...(f.defect ? [f.defect.slice(0, 60)] : [])]);
+    const leaks = [];
+    for (const p of tracked) {
+      let text;
+      try {
+        text = readFileSync(join(ROOT, p), "utf8");
+      } catch {
+        continue;
+      }
+      for (const m of markers) if (text.includes(m)) leaks.push(`${p}: ${m}`);
+    }
+    expect(leaks).toEqual([]);
   });
 
   it.each(manifest.fixtures.map((f) => [f.id, f]))("%s applies cleanly to the current tree", (_id, f) => {
-    expect(() => execFileSync("git", ["apply", "--check", join(BENCH_DIR, f.patch)], { cwd: ROOT, stdio: "pipe" })).not.toThrow();
+    expect(() => execFileSync("git", ["apply", "--check", "-"], { cwd: ROOT, input: f.patch, stdio: ["pipe", "pipe", "pipe"] })).not.toThrow();
+  });
+
+  it("bench args leak no ground truth to the agents (ids, class, defect, judge)", () => {
+    const args = benchArgs(manifest, {});
+    const text = JSON.stringify(args);
+    for (const f of manifest.fixtures) {
+      expect(text, f.id).not.toContain(f.id);
+      if (f.defect) expect(text).not.toContain(f.defect);
+    }
+    expect(args.fixtures.every((f) => /^fx-[0-9a-f]{8}$/.test(f.id))).toBe(true);
+    expect(text).not.toMatch(/"kind"|"defect"|"judge"|"lenses"/);
+  });
+
+  it("scoring maps opaque tokens back, and excludes runs whose transcript leaked ground truth (F0)", () => {
+    const [b] = manifest.fixtures.filter((f) => f.kind === "bad");
+    const token = opaqueFixtureId(b.id);
+    const runs = [{ arm: "verifier", repeat: 0, fixtureId: token, verdict: "accept", preGateVerdict: "accept" }];
+    expect(scoreBench(manifest, { runs }).arms.verifier.wrongAcceptRate).toBe(1);
+    const keys = contaminatedRuns([{ label: `bench-verify:${token}-r0-0`, text: `... read ${b.id} ...` }, { label: `bench-verify:${token}-r1-0`, text: "clean" }], manifest);
+    expect(keys).toEqual([{ arm: "verifier", token, repeat: 0 }]);
+    const s = scoreBench(manifest, { runs: markContaminated(runs, keys) });
+    expect(s.contaminatedRuns).toBe(1);
+    expect(s.arms.verifier).toBeUndefined();
+    expect(s.flags.some((f) => f.startsWith("F0"))).toBe(true);
   });
 
   it("denylist judges agree with the production denylist, and good fixtures never hit it", () => {
     for (const f of manifest.fixtures) {
-      const hit = hitsDenylist(parseDiffPaths(readFileSync(join(BENCH_DIR, f.patch), "utf8")));
+      const hit = hitsDenylist(parseDiffPaths(f.patch));
       if (f.judge.kind === "denylist") expect(hit, f.id).toBe(f.judge.catches);
       if (f.kind === "good") expect(hit, f.id).toBe(false);
     }

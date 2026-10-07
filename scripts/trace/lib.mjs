@@ -6,6 +6,7 @@
 // Everything above the "store I/O" section is pure (no fs / git) so it is unit-tested
 // directly; the CLI (cli.mjs) wires it to the filesystem and git.
 import { createHash } from "node:crypto";
+import { gunzipSync, gzipSync } from "node:zlib";
 import {
   appendFileSync,
   existsSync,
@@ -367,7 +368,7 @@ export function treeFingerprint({ head, diff, untracked }) {
 }
 
 /** Paths whose changes never count toward the tree fingerprint (the records themselves). */
-export const TREE_ID_EXCLUDES = [".claude/memory/trace", ".claude/trace/bench/runs"];
+export const TREE_ID_EXCLUDES = [".claude/memory/trace"];
 
 /** The latest (non-superseded) record per claim_id; ties broken by created_at. */
 export function latestByClaim(records, superseded) {
@@ -505,8 +506,15 @@ export function scoreBench(manifest, results, thresholds = { invariance: 0.8 }) 
   const isBad = (id) => fixtures.get(id)?.kind === "bad";
   const bad = manifest.fixtures.filter((f) => f.kind === "bad").map((f) => f.id);
   const good = manifest.fixtures.filter((f) => f.kind === "good").map((f) => f.id);
-  const runs = Array.isArray(results?.runs) ? results.runs : [];
-  const out = { fixtures: { bad: bad.length, good: good.length }, arms: {}, flags: [] };
+  // Runs carry opaque fixture tokens (see opaqueFixtureId); map them back to real ids.
+  // Runs whose agent saw ground truth (markContaminated) are excluded, never scored.
+  const byToken = new Map(manifest.fixtures.map((f) => [opaqueFixtureId(f.id), f.id]));
+  const all = (Array.isArray(results?.runs) ? results.runs : []).map((r) => ({ ...r, fixtureId: byToken.get(r.fixtureId) || r.fixtureId }));
+  const runs = all.filter((r) => !r.contaminated);
+  const out = { fixtures: { bad: bad.length, good: good.length }, contaminatedRuns: all.length - runs.length, arms: {}, flags: [] };
+  if (out.contaminatedRuns) {
+    out.flags.push(`F0 contamination: ${out.contaminatedRuns} run(s) had ground truth in their agent's transcript and were excluded — fix the leak before trusting this bench`);
+  }
 
   // --- verifier arm (loop-iteration's checker on seeded diffs) ---
   const ver = runs.filter((r) => r.arm === "verifier" && fixtures.has(r.fixtureId));
@@ -732,8 +740,68 @@ export function rotateStore(storePath, { max = 500, keep = 200 } = {}) {
 
 // ---------------------------------------------------------------------------
 // TRACE-Bench-lite helpers (manifest + workflow blocks).
+//
+// Contamination rule: the bench agents run in THIS repo and grep it freely, so ground
+// truth must never be readable as plain text in the tree. The fixtures (ids, classes,
+// defects, judges AND patches) live in one gzip+base64 bundle, agents get opaque tokens,
+// raw runs are never committed, and bench-score scans the agent transcripts for leaked
+// ground truth (F0). The first bench run was contaminated exactly this way.
 
 export const BENCH_DIR = join(ROOT, ".claude/trace/bench");
+export const BENCH_BUNDLE = join(BENCH_DIR, "fixtures.bundle");
+
+/** Decode the fixture bundle → { version, description, fixtures: [{ ..., patch: <diff text> }] }. */
+export function decodeBench(text) {
+  return JSON.parse(gunzipSync(Buffer.from(String(text).replace(/\s+/g, ""), "base64")).toString("utf8"));
+}
+
+/** Encode a manifest (patches inline) into the bundle text — deterministic, wrapped at 76 cols. */
+export function encodeBench(manifest) {
+  const b64 = gzipSync(Buffer.from(JSON.stringify(manifest, null, 2) + "\n", "utf8"), { level: 9 }).toString("base64");
+  return b64.replace(/(.{76})/g, "$1\n").replace(/\n?$/, "\n");
+}
+
+export function readBench(bundlePath = BENCH_BUNDLE) {
+  return decodeBench(readFileSync(bundlePath, "utf8"));
+}
+
+/** Strings whose presence in an agent transcript means ground truth leaked to it. */
+export function leakMarkers(manifest) {
+  const out = [];
+  for (const f of manifest.fixtures || []) {
+    out.push(f.id);
+    if (f.defect) out.push(String(f.defect).slice(0, 60));
+  }
+  return out.filter((m) => m && m.length >= 8);
+}
+
+/**
+ * Which bench agents saw ground truth: transcripts = [{ label, text }]. Returns the run
+ * keys ({ arm, token, repeat?, critic? }) parsed from the leaking agents' labels.
+ */
+export function contaminatedRuns(transcripts, manifest) {
+  const markers = leakMarkers(manifest);
+  const keys = [];
+  for (const t of transcripts) {
+    if (!markers.some((m) => t.text.includes(m))) continue;
+    let m;
+    if ((m = /^bench-verify:(fx-[0-9a-f]{8})-r(\d+)-\d+$/.exec(t.label))) keys.push({ arm: "verifier", token: m[1], repeat: Number(m[2]) });
+    else if ((m = /^bench-single:(fx-[0-9a-f]{8})-\d+$/.exec(t.label))) keys.push({ arm: "single-pass", token: m[1] });
+    else if ((m = /^bench-panel:(fx-[0-9a-f]{8}):([a-z-]+)-\d+-\d+$/.exec(t.label))) keys.push({ arm: "panel", token: m[1], critic: m[2] });
+    else keys.push({ arm: "unknown", label: t.label });
+  }
+  return keys;
+}
+
+/** Mark runs whose agent saw ground truth (scoreBench then excludes them and raises F0). */
+export function markContaminated(runs, keys) {
+  return runs.map((r) => {
+    const hit = keys.some(
+      (k) => k.arm === r.arm && k.token === r.fixtureId && (k.repeat === undefined || k.repeat === (r.repeat ?? 0)) && (k.critic === undefined || k.critic === r.critic),
+    );
+    return hit ? { ...r, contaminated: true } : r;
+  });
+}
 
 /**
  * Evaluate a marked deterministic block from a workflow script (workflows cannot be
@@ -760,7 +828,7 @@ export function manifestViolations(manifest) {
     ids.add(f.id);
     if (!["bad", "good"].includes(f.kind)) v.push(`${at}: kind must be bad|good`);
     if (!f.item) v.push(`${at}: missing item (the work-item text the checker sees)`);
-    if (!f.patch) v.push(`${at}: missing patch path`);
+    if (!/^diff --git /.test(String(f.patch || ""))) v.push(`${at}: patch must be inline unified-diff text (diff --git …)`);
     if (f.kind === "bad" && !f.defect) v.push(`${at}: a bad fixture needs its ground-truth defect`);
     if (!EVIDENCE_POLICY[f.claimType]) v.push(`${at}: claimType must be one of ${Object.keys(EVIDENCE_POLICY).join("|")}`);
     const j = f.judge || {};
@@ -774,11 +842,21 @@ export function manifestViolations(manifest) {
   return v;
 }
 
+/**
+ * Opaque per-fixture token handed to agents instead of the fixture id. Real ids
+ * ("B<nn>-<defect-slug>") leak both the bad/good class and the defect itself — the first
+ * bench run caught the verifier citing the id as evidence. Deterministic, so scoring can
+ * map results back without a side file.
+ */
+export function opaqueFixtureId(id) {
+  return `fx-${createHash("sha256").update(`trace-bench:${id}`).digest("hex").slice(0, 8)}`;
+}
+
 /** The workflow args for .claude/workflows/trace-bench.js — no ground truth leaks to agents. */
-export function benchArgs(manifest, { readPatch, arms, repeat, critics, only }) {
+export function benchArgs(manifest, { arms, repeat, critics, only }) {
   const fx = manifest.fixtures.filter((f) => !only || only.includes(f.id));
   return {
-    fixtures: fx.map((f) => ({ id: f.id, item: f.item, patch: readPatch(f.patch) })),
+    fixtures: fx.map((f) => ({ id: opaqueFixtureId(f.id), item: f.item, patch: f.patch })),
     arms: arms || ["verifier", "single-pass"],
     repeat: repeat || 1,
     ...(critics ? { critics } : {}),
@@ -802,7 +880,9 @@ export function benchRecordDraft(score, { resultsRef, priorRecordId }) {
     claim_text: `TRACE-Bench-lite (${score.fixtures.bad} bad / ${score.fixtures.good} good fixtures): ${parts.join("; ")}`,
     claim_type: "measured",
     subject: ".claude/trace/bench/fixtures.json",
-    evidence: [{ kind: "measurement", ref: `pnpm trace bench-score ${resultsRef}`, result: JSON.stringify({ arms: score.arms, externalJudgeGap: score.externalJudgeGap }).slice(0, 4000) }],
+    // Counts only — never fixture ids or defect text: the record store is in the tree the
+    // next bench run's agents can grep (contamination rule above).
+    evidence: [{ kind: "measurement", ref: `pnpm trace bench-score ${resultsRef}`, result: JSON.stringify({ arms: score.arms, externalJudgeGap: Object.fromEntries(Object.entries(score.externalJudgeGap || {}).map(([k, ids]) => [k, ids.length])), contaminatedRuns: score.contaminatedRuns }).slice(0, 4000) }],
     failed_gates: score.flags.map((x) => x.split(":")[0]),
     missing: [],
     final_status: "accept",

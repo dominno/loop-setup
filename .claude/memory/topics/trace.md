@@ -115,6 +115,16 @@ the live store. Pre-registered — results that count **against** our design:
   denylist → the checker licenses bad diffs; tighten before raising a loop above L2.
 - **F5** store `consumerCoverage` < 0.5 after real use → records are an archive, not an
   instrument; cut fields.
+- **F0** (validity precondition) any bench agent's transcript contains ground truth →
+  those runs are excluded; a run with F0 is not a clean measurement.
+
+**Contamination rule (learned the hard way — the first bench run was contaminated):**
+bench agents run inside this repo and grep it, so fixture ground truth must never be
+plain text in the tree. Fixtures live gzip+base64-encoded in
+`.claude/trace/bench/fixtures.bundle`; agents get opaque `fx-…` tokens, never real ids;
+raw runs stay in the scratchpad (their verdict prose names the defects); bench records
+carry counts only; a unit test scans the whole tree for leaked ids/defect text; and
+`bench-score --transcripts` excludes any run whose agent saw ground truth anyway.
 
 ## Not adopted (deliberately)
 The 8-stage reference writer and formulation gate (our inputs are diffs/flows, not
