@@ -29,6 +29,13 @@
   status (exclude `in-progress`, or a crash-orphaned node re-reads as ready → duplicate
   dispatch) and resolve *every* non-`done` terminal dep-state (a `dropped`/`escalated`
   dependency must cascade-resolve, else its dependents strand silently `blocked`).
+- **Verdicts are typed and recorded (TRACE-lite):** every verdict-producing workflow
+  (`critic-panel`, `loop-iteration`, `improve-skills`, `scan-docs`) returns
+  accept/qualify/revise/defer/reject plus `traceRecords` drafts; the caller appends them
+  with `pnpm trace write`, and a node/fact/story status changes only with a licensing
+  record + consumer action. Shared deterministic blocks (evidence gate, denylist, loop
+  verifier prompt, critic roster) are byte-identical copies across workflows, enforced by
+  `scripts/trace/contracts.test.mjs`. Details: [trace](./trace.md).
 - Custom commands live in `.claude/commands/` (each with a `description` for
   routing); the grouped "when to use" catalog is `.claude/skills-index.md`. A
   catalog file must NOT live in `.claude/commands/` — anything there auto-registers
@@ -105,4 +112,4 @@
   and a max-budget/turn guard. See `CLAUDE.md` → "Writing `/goal` and `/loop`
   prompts".
 
-Related: [build-and-verify](./build-and-verify.md) · [testing](./testing.md)
+Related: [build-and-verify](./build-and-verify.md) · [testing](./testing.md) · [trace](./trace.md)

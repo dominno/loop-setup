@@ -45,8 +45,14 @@ Procedure:
    and a *separate* status-verifier agent (evidence-based status, no overclaiming),
    returning one record per story. This is real multi-agent orchestration, not one
    agent judging every story in a single context. (Invoking Workflow here is expected.)
-9. Use the returned records as the source of truth for status; do browser
+9. Use the returned `records` as the source of truth for status; do browser
    verification yourself where it raises a status to `Browser verified`/`Done`.
+   **No status change without a TRACE record:** append the returned `traceRecords`
+   (`pnpm trace write -`), cite each story's `record_id` next to its "Final status" in
+   `docs/stories/US-*.md`, then `pnpm trace act <id> story-status COMMIT --ref US-<id>`
+   (or `COMMIT_QUALIFIED` for a `qualify` — the verifier downgraded the proposed status).
+   A `defer` (no verifier verdict) keeps the conservative cap and lists its `missing` as
+   the story's next action.
 10. Start or reuse localhost when browser verification is possible.
 11. Open relevant pages using Chrome or Playwright MCP.
 12. Verify implemented user flows in browser when possible.

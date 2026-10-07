@@ -31,6 +31,8 @@ this repo from the "loop engineering" loop-design checklist
 - [ ] Implementer and verifier are separate passes
 - [ ] Implementer cannot mark its own work "done"
 - [ ] Verifier runs tests in isolation before approving
+- [ ] Verifier returns a **typed TRACE verdict** (accept/qualify/revise/defer/reject); a
+      missing verdict defers — never confirms, never counts as a refutation
 
 **5. State / memory**
 - [ ] Run state documented (`.claude/memory/loop-run-log.md`)
@@ -41,6 +43,9 @@ this repo from the "loop engineering" loop-design checklist
       L2/L3 action traces to a **ready node** (no action without a node)
 - [ ] **Re-plan is an explicit step run before dispatch**; the empty/first-iteration plan
       bootstraps a node rather than deadlocking
+- [ ] **No durable state change without a record:** every node status change cites a
+      TRACE-lite record (`done` = accept/qualify + `CLEAR`); `deferred`/`escalated` nodes
+      name their `missing`; `pnpm trace lint` passes
 
 **6. Human handoff**
 - [ ] Escalation triggers explicit (max attempts, risk paths, ambiguity)
@@ -59,11 +64,16 @@ this repo from the "loop engineering" loop-design checklist
 **9. Observability**
 - [ ] Each iteration logged (started, items found, actions, escalations)
 - [ ] Success metric chosen; state inspectable without reading chat logs
+      (`pnpm trace query` / `pnpm trace metrics` — consumer coverage, defer quality,
+      repeated-error rate)
 
 **10. Safety**
 - [ ] No auto-merge without an explicit allowlist
 - [ ] Secrets/env in denylist
 - [ ] Flakes handled by root-cause, not retry-only
+- [ ] **Measured checker (L3 only):** a recent `/trace-bench` run shows the loop
+      verifier's WrongAcceptRate = 0 on bad fixtures the denylist does not catch (F4) and
+      procedural invariance ≥ 0.8 (F3) — see `.claude/memory/topics/trace.md`
 
 ## Red flags (stop & fix before raising the level)
 - Same PR/issue with >3 automated fix attempts without progress.

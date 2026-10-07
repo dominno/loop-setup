@@ -1,0 +1,27 @@
+diff --git a/src/lib/greeting.ts b/src/lib/greeting.ts
+index d83ab74..105220d 100644
+--- a/src/lib/greeting.ts
++++ b/src/lib/greeting.ts
+@@ -15,18 +15,18 @@ export function normalizeName(input: string): string {
+  * and reused on the server if needed.
+  */
+ export function buildGreeting(rawName: string): GreetingResult {
+-  const name = normalizeName(rawName);
++  const normalized = normalizeName(rawName);
+ 
+-  if (name.length === 0) {
++  if (normalized.length === 0) {
+     return { ok: false, error: "Please enter your name." };
+   }
+ 
+-  if (name.length > MAX_NAME_LENGTH) {
++  if (normalized.length > MAX_NAME_LENGTH) {
+     return {
+       ok: false,
+       error: `Name must be ${MAX_NAME_LENGTH} characters or fewer.`,
+     };
+   }
+ 
+-  return { ok: true, message: `Hello, ${name}! Welcome aboard.` };
++  return { ok: true, message: `Hello, ${normalized}! Welcome aboard.` };
+ }

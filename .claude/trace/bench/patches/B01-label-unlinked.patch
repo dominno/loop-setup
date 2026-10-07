@@ -1,0 +1,13 @@
+diff --git a/src/components/GreetingForm.tsx b/src/components/GreetingForm.tsx
+index e03a66f..6031992 100644
+--- a/src/components/GreetingForm.tsx
++++ b/src/components/GreetingForm.tsx
+@@ -56,7 +56,7 @@ export function GreetingForm() {
+ 
+   return (
+     <form className="card" onSubmit={handleSubmit} noValidate>
+-      <label className="field-label" htmlFor="name">
++      <label className="field-label">
+         Your name
+       </label>
+       <input

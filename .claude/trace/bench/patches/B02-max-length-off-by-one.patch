@@ -1,0 +1,13 @@
+diff --git a/src/lib/greeting.ts b/src/lib/greeting.ts
+index d83ab74..21e2a74 100644
+--- a/src/lib/greeting.ts
++++ b/src/lib/greeting.ts
+@@ -21,7 +21,7 @@ export function buildGreeting(rawName: string): GreetingResult {
+     return { ok: false, error: "Please enter your name." };
+   }
+ 
+-  if (name.length > MAX_NAME_LENGTH) {
++  if (name.length >= MAX_NAME_LENGTH) {
+     return {
+       ok: false,
+       error: `Name must be ${MAX_NAME_LENGTH} characters or fewer.`,

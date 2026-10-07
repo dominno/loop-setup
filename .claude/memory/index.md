@@ -7,7 +7,9 @@ session and must stay small. Detailed knowledge lives in topic pages under
 lives in `.claude/memory/log.md`. Loop **state** (not knowledge) lives beside it:
 `loop-plan.md` is the loop's current plan/DAG (the mutable watchlist every loop action
 traces to) and `loop-run-log.md` is the append-only run history — neither is a topic
-page; both are read only by a running `/loop`.
+page; both are read only by a running `/loop`. `trace/records.jsonl` is the append-only
+TRACE-lite record store (written only via `pnpm trace`) and `quarantine.md` holds
+candidate facts the `/dream` admission gate deferred — neither is part of the wiki.
 
 > Links below are plain markdown (not `@imports`), so topic pages are NOT
 > auto-loaded. Open the ones relevant to the current task.
@@ -29,6 +31,7 @@ page; both are read only by a running `/loop`.
 | Remote env (web) | pre-provisioned Chromium, Playwright pin, MCP limits | [topics/remote-env.md](./topics/remote-env.md) |
 | Workflow & docs | /dream, doc-scanner, PRD source of record | [topics/workflow.md](./topics/workflow.md) |
 | Quality bar | objective a11y (WCAG AA) + perf (JS budget) targets & gates | [topics/quality-bar.md](./topics/quality-bar.md) |
+| TRACE-lite records | typed verdicts, evidence gate per claim type, record store + consumer actions, bench & falsification | [topics/trace.md](./topics/trace.md) |
 
 ## Wiki rules
 - **Raw source** for ingests is the session + git history (ephemeral); there is no

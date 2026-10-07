@@ -2,9 +2,10 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    // Unit/component tests live next to source under src/.
+    // Unit/component tests live next to source under src/; the TRACE-lite tooling
+    // (scripts/trace) is plain ESM and keeps its tests beside it.
     // Playwright E2E specs in e2e/ are run separately via `pnpm test:e2e`.
-    include: ["src/**/*.{test,spec}.{ts,tsx}"],
+    include: ["src/**/*.{test,spec}.{ts,tsx}", "scripts/**/*.test.mjs"],
     exclude: ["e2e/**", "node_modules/**", ".next/**"],
     environment: "node",
   },

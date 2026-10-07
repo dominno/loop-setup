@@ -21,7 +21,16 @@ layer on top.
 .claude/loop.md                    Hardened loop operating prompt (trust levels, denylist, stop rules, run-log step)
 .claude/loop-checklist.md          Readiness rubric to promote a loop's trust level (L0→L3)
 .claude/memory/loop-run-log.md     Durable, append-only loop run state
+.claude/memory/loop-plan.md        The plan/DAG every L2/L3 action traces to (incl. the `deferred` status)
+.claude/memory/trace/records.jsonl TRACE-lite record store — start it empty; written only via `pnpm trace`
+.claude/memory/topics/trace.md     The record policy: typed verdicts, evidence gate, consumer actions
+scripts/trace/  .claude/trace/     The `pnpm trace` CLI/tests + schema (and bench fixtures for /bench-checkers)
 ```
+
+A node only becomes `done` with an `accept`/`qualify` record and a `CLEAR` action; a
+`defer` verdict parks it as `deferred` with the `missing` evidence named, so a hold is
+resolvable rather than a dead end. Before promoting a loop to L3, run `/bench-checkers`
+and clear checklist §10's measured-checker item.
 
 Then merge the loop paragraph from this template's `CLAUDE.md` ("Writing `/goal` and
 `/loop` prompts" → the trust-level + maker/checker note) into your `CLAUDE.md`.

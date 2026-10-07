@@ -1,7 +1,7 @@
 ---
 description: Self-learning pass — ingest durable learnings into the project knowledge wiki and lint it
 argument-hint: [ingest | query <question> | lint] (default: ingest this session)
-allowed-tools: Read, Edit, Write, Grep, Glob, Bash(git diff:*), Bash(git log:*)
+allowed-tools: Read, Edit, Write, Grep, Glob, Bash(git diff:*), Bash(git log:*), Bash(pnpm trace:*), Bash(pnpm -s trace:*)
 ---
 
 Run a **self-learning ("dream") pass** over the project knowledge wiki at
@@ -20,6 +20,10 @@ $ARGUMENTS
   links only, no facts. **Keep it small.**
 - `.claude/memory/topics/*.md` — one page per subject; the actual facts live here.
 - `.claude/memory/log.md` — append-only operation history.
+- `.claude/memory/quarantine.md` — candidate facts held back by the admission gate
+  (TRACE `defer`), each with the `missing` evidence that would admit it. Not imported.
+- `.claude/memory/trace/records.jsonl` — the TRACE-lite record store (append-only; written
+  only via `pnpm trace`). Policy: `topics/trace.md`.
 
 ## Operations
 
@@ -32,9 +36,25 @@ $ARGUMENTS
    - durable (true across future tasks, not branch- or PR-specific);
    - verifiable (a command, convention, or concrete gotcha — not a vibe);
    - not already captured in a topic page.
-4. File each learning into the **single most relevant topic page** as one
-   verifiable bullet. If it fits no existing page, create a new
-   `topics/<slug>.md`, add cross-links, and add one row to `index.md`.
+3b. **Admission gate (TRACE memory admission — nothing enters the wiki without a record
+   carrying a verdict).** Adjudicate every candidate as a claim and give it a verdict:
+   - `accept` — durable, verifiable **and verified now** (a command output, commit, or
+     file:line you checked) → consumer action `COMMIT`;
+   - `qualify` — true only under a condition (a version, an environment) →
+     `COMMIT_QUALIFIED`, and the bullet states that condition;
+   - `defer` — plausible but not verifiable this session → `QUARANTINE`: a row in
+     `.claude/memory/quarantine.md` with its `missing` evidence, **not** a topic page;
+   - `reject` — not durable, branch-specific, duplicate, or unverifiable → `REJECT`
+     (not filed; the record keeps why).
+   Write all candidate records in one `pnpm trace write -` (writer_id `dream`, claim_id
+   `wiki:<topic>:<slug>`, claim_type usually `factual`, evidence = what you checked), then
+   append the consumer actions (`pnpm trace act <id> dream COMMIT --ref topics/<page>.md`).
+   The writer rejects an `accept` whose evidence is weaker than its claim type demands —
+   downgrade it rather than forcing it through.
+4. File each `COMMIT`/`COMMIT_QUALIFIED` learning into the **single most relevant topic
+   page** as one verifiable bullet ending in its provenance comment
+   `<!-- rec:TR-xxxxxxxxxxxx -->` (so `lint` can re-audit it). If it fits no existing
+   page, create a new `topics/<slug>.md`, add cross-links, and add one row to `index.md`.
 5. If a learning is really a session-governing rule (a do/don't policy or a
    completion gate), it belongs in `CLAUDE.md`. Show the proposed `CLAUDE.md` edit and
    apply it **only after explicit confirmation** — `CLAUDE.md` is a core governing
@@ -50,7 +70,8 @@ $ARGUMENTS
      When a skill is added or changed, update `.claude/skills-index.md` (add/adjust
      its row and the "Pick by intent" line). Adding an index row is additive — no
      confirmation needed; the skill file itself needs confirmation.
-7. Append one entry to `log.md`: `## [YYYY-MM-DD] ingest | <summary>`.
+7. Append one entry to `log.md`: `## [YYYY-MM-DD] ingest | <summary>` — include the
+   admission tally (committed / qualified / quarantined / rejected) and the record ids.
 
 ### query <question>
 1. Read `index.md`, open only the relevant topic page(s), answer with citations
@@ -61,6 +82,18 @@ $ARGUMENTS
    has superseded, orphan pages with no inbound links, concepts mentioned without
    their own page, missing cross-references, and an `index.md` that drifted from
    the topic pages.
+1b. **Record store integrity:** run `pnpm trace lint` and report any error (never
+   hand-edit the store — a fix is a new record via `pnpm trace write`).
+1c. **Re-audit (reconsolidation):** run `pnpm trace reaudit` — it lists committed facts
+   whose cited evidence file changed since the record's commit. For each, find the
+   bullets citing `rec:<id>`, re-verify them, and **report** the stale ones (rewriting or
+   removing a fact still needs confirmation). `pnpm trace reaudit --act` appends a
+   `REAUDIT` action so the queue is itself on record.
+1d. **Quarantine review:** for each row in `.claude/memory/quarantine.md`, check whether
+   its `missing` evidence is now available. If so, re-adjudicate with a new record that
+   `revises` the quarantined one — promote it (`COMMIT` + file it per ingest step 4) or
+   `REJECT` it — and then remove its quarantine row (clerical: quarantine rows are not
+   facts, and the record keeps the history). Otherwise leave it.
 2. Health-check the **skills index** (`.claude/skills-index.md`): every command in
    `.claude/commands/*.md` has a `description` and a row in the index; **flag**
    (report, don't auto-remove) any index rows for commands that no longer exist and
@@ -81,6 +114,9 @@ $ARGUMENTS
    their `[YYYY-MM-DD]` header. This is a **lossless move** (nothing is deleted), so
    lint may do it without separate confirmation; preserve every entry verbatim. If
    `log.md` is ≤ 500 lines, do nothing.
+4b. **Rotate the record store if needed:** if `.claude/memory/trace/records.jsonl`
+   exceeds 500 lines, run `pnpm trace rotate` (a lossless move into
+   `.claude/memory/trace/<YYYY>.jsonl`; `pnpm trace lint` still replays every file).
 5. Append a `## [YYYY-MM-DD] lint | <summary>` entry to `log.md`. **If you rotated
    in step 4, append a *separate* `## [YYYY-MM-DD] rotate | moved <n> entries to
    log/<YYYY>.md` entry** — rotation always gets its own `rotate` entry, never
@@ -96,6 +132,11 @@ $ARGUMENTS
 - Never auto-create, rewrite, or delete a command/skill. Propose it and act only on
   confirmation. Updating `.claude/skills-index.md` rows additively is fine.
 - Keep `index.md` to summaries + links; facts belong in topic pages.
+- No fact enters a topic page without a TRACE record carrying a licensing verdict
+  (`accept`/`qualify`) and a `COMMIT`/`COMMIT_QUALIFIED` action; an unverifiable
+  candidate goes to quarantine, not to the wiki.
+- Never hand-edit `.claude/memory/trace/records.jsonl`; only `pnpm trace` writes it.
+  Adding `rec:` provenance comments to *existing* bullets is an edit — confirmation first.
 - Do not change product code. This command only curates memory and instructions.
 - If nothing durable was learned, say so and write nothing (but you may still log a
   `lint` pass if asked).

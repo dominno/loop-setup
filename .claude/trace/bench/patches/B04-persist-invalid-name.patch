@@ -1,0 +1,15 @@
+diff --git a/src/components/GreetingForm.tsx b/src/components/GreetingForm.tsx
+index e03a66f..f2f071f 100644
+--- a/src/components/GreetingForm.tsx
++++ b/src/components/GreetingForm.tsx
+@@ -43,7 +43,9 @@ export function GreetingForm() {
+       setDraft(null);
+       setError(null);
+     } else {
+-      // Validation failed: surface the error and persist nothing (AC4).
++      // Validation failed: surface the error, but remember what was typed so the
++      // visitor does not lose it on reload.
++      saveRememberedName(normalizeName(name));
+       setError(result.error);
+     }
+   }

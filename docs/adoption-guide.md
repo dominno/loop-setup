@@ -25,7 +25,11 @@ CLAUDE.md                     Project rules, critic roster, completion gates
 .claude/commands/*            Slash commands (/multi-agent-dev, /critic-round, /dream, ...)
 .claude/workflows/*           Multi-agent orchestration scripts (critic-panel, scan-docs, ...)
 .claude/loop.md  loop-checklist.md   Recurring watchdog loop + readiness rubric (used by /loop)
-.claude/memory/               Knowledge wiki (index.md + topics/ + log.md + loop-run-log.md)
+.claude/memory/               Knowledge wiki (index.md + topics/ + log.md + loop-run-log.md + loop-plan.md)
+.claude/memory/trace/  quarantine.md   TRACE-lite record store (start it EMPTY) + /dream quarantine
+.claude/trace/                TRACE-lite schema + bench fixtures (rewrite the fixtures for your app)
+scripts/trace/                `pnpm trace` CLI + its tests (add "trace": "node scripts/trace/cli.mjs"
+                              to package.json and scripts/**/*.test.mjs to your unit-test globs)
 .claude/settings.local.json   Allowed commands (adapt to your tools)
 docs/*.md  docs/stories/      Story-map scaffolds (user-stories index, stories/ per-story files, ...)
 ```

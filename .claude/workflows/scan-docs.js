@@ -1,7 +1,7 @@
 export const meta = {
   name: 'scan-docs',
   description:
-    'Deterministic doc-scanner: for each user story (passed in), pipeline an evidence-gathering agent then a separate status-verifier agent. Returns evidence-based per-story status records; the caller writes the docs/stories files.',
+    'Deterministic doc-scanner: for each user story (passed in), pipeline an evidence-gathering agent then a separate status-verifier agent. Returns evidence-based per-story status records plus TRACE-lite record drafts; the caller writes the docs/stories files.',
   phases: [
     { title: 'Evidence', detail: 'gather implementation + test evidence per story' },
     { title: 'Verify', detail: 'a separate agent confirms an evidence-based status (no overclaiming)' },
@@ -54,11 +54,23 @@ const EVIDENCE_SCHEMA = {
 const VERDICT_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['finalStatus', 'justification'],
+  required: ['finalStatus', 'justification', 'missing'],
   properties: {
     finalStatus: { type: 'string', enum: REPO_STATUSES },
     justification: { type: 'string', description: 'why the evidence supports this status; downgrade if the proposed status overclaims' },
+    missing: { type: 'array', items: { type: 'string' }, description: 'the concrete evidence that would raise this story to its next status (e.g. "an E2E spec covering AC3"); empty only if none applies' },
   },
+}
+
+// TRACE verdict on the evidence agent's claim "story X is at status <proposed>":
+// same status → accept; verifier downgraded it → qualify (the claim holds only at the
+// lower status); upgraded or a Blocked/Deprecated mismatch → revise; no verdict → defer.
+const STATUS_RANK = { 'Not started': 0, 'Partially implemented': 1, 'Implemented': 2, 'Unit tested': 3, 'E2E tested': 4 }
+function storyVerdict(proposed, final, hasVerdict) {
+  if (!hasVerdict) return 'defer'
+  if (final === proposed) return 'accept'
+  if (STATUS_RANK[final] != null && STATUS_RANK[proposed] != null && STATUS_RANK[final] < STATUS_RANK[proposed]) return 'qualify'
+  return 'revise'
 }
 
 // On a missing verifier verdict, fail CLOSED: cap the maker's self-proposed status
@@ -95,8 +107,40 @@ const records = await pipeline(
       finalStatus: v ? v.finalStatus : conservativeStatus(ev.proposedStatus || 'Not started'),
       justification: (v && v.justification) || 'verifier returned no verdict — capped to a conservative status; needs manual review',
       notes: ev.notes || '',
+      proposedStatus: ev.proposedStatus || 'Not started',
+      verdict: storyVerdict(ev.proposedStatus || 'Not started', v ? v.finalStatus : null, !!v),
+      missing: (v && Array.isArray(v.missing) ? v.missing.filter(Boolean) : []),
     }))
   },
 )
 
-return { count: records.filter(Boolean).length, records: records.filter(Boolean) }
+const settled = records.filter(Boolean)
+
+// TRACE-lite record drafts — one per story status claim (the caller writes them with
+// `pnpm trace write` and cites the record_id in the story file before changing a status;
+// no durable state change without a record).
+const traceRecords = settled.map((r, i) => {
+  const missing = r.verdict === 'defer'
+    ? [...r.missing, 'a status-verifier verdict (none was returned — status capped conservatively)']
+    : r.missing
+  return {
+    writer_id: `scan-docs/verify:${r.id || 'story'}-${i}`,
+    claim_id: `story:${String(r.id || 'story').toLowerCase()}:status`,
+    claim_text: `Story ${r.id} (${r.title}) is at status "${r.proposedStatus}"`,
+    claim_type: 'factual',
+    subject: String(r.id || 'story'),
+    evidence: [
+      ...r.implementationFiles.map((f) => ({ kind: 'file_line', ref: String(f) })),
+      { kind: 'command', ref: 'repo code + test search (scan-docs evidence agent)', result: `implementation files: ${r.implementationFiles.length}; unit tests: ${r.unitTests}; e2e tests: ${r.e2eTests}` },
+    ],
+    failed_gates: r.verdict === 'qualify' ? ['status-overclaim'] : [],
+    missing,
+    repair: r.verdict === 'revise' ? `status is "${r.finalStatus}"` : '',
+    qualifier: r.verdict === 'qualify' ? `holds only at "${r.finalStatus}"` : '',
+    final_status: r.verdict,
+    reason: String(r.justification || 'no justification given'),
+    provenance: { workflow: 'scan-docs' },
+  }
+})
+
+return { count: settled.length, records: settled, traceRecords }

@@ -34,16 +34,24 @@ flowchart LR
     c9[Security]
     c10[Regression]
   end
-  R --> dedup[▫️ merge-dedup<br/>keep corroborating critics]
-  dedup --> V
+  R --> dedup[▫️ merge-dedup<br/>agreement ≠ evidence; keep only<br/>independent evidence]
+  dedup --> reuse{▫️ revisits a prior record,<br/>still-present, identical tree?}
+  reuse -- yes --> reused[▫️ reuse prior verdict<br/>→ REUSE action]
+  reuse -- no --> V
   subgraph V["Verify — one skeptic per blocker/important · 🔵 Opus"]
-    v1[refute finding #1]
-    v2[refute finding #2]
-    vn[refute finding #N]
+    v1[typed verdict #1<br/>+ lens critical questions]
+    v2[typed verdict #2]
+    vn[typed verdict #N]
   end
-  V --> out([confirmed matrix + niceToHaves + refuted])
+  V --> gate[▫️ evidence gate<br/>cap accept by claim type]
+  gate --> out([confirmed accept/qualify · deferred · revised · refuted<br/>+ traceRecords + reuseActions])
+  reused --> out
 ```
 
+> Prior verdicts come in via `args.priorRecords` (`pnpm -s trace query --latest --writer
+> critic-panel --json`) + `args.treeId` (`pnpm -s trace tree-id`). The evidence gate is the canonical
+> `<trace-evidence-gate>` block (byte-identical to `scripts/trace/lib.mjs`).
+>
 > `uiInScope: false` drops the 5 UI-facing critics (First-Time User, UX Flow, Designer,
 > Artistic Direction, Accessibility) from the Review fan-out for non-UI (backend / docs /
 > config) changes — the 10-node graph above is the default/full case.
@@ -63,12 +71,13 @@ flowchart LR
   end
   R --> dedup[▫️ merge-dedup]
   dedup --> gate{budget floor?}
-  gate -- "under floor" --> skip[▫️ skip verify →<br/>needsDesign, unverified]
+  gate -- "under floor" --> skip[▫️ skip verify →<br/>deferred, unverified]
   gate -- ok --> V
   subgraph V["Verify — 2-axis skeptic per finding · 🔵 Opus"]
-    v1[real? + editSafe?]
+    v1[real? + editSafe? + saferEdit]
   end
-  V --> out([applyReady + needsDesign + refuted])
+  V --> map[▫️ two axes → TRACE verdict<br/>accept · revise · defer · reject]
+  map --> out([applyReady + needsDesign + deferred + refuted<br/>+ traceRecords])
   skip --> out
 ```
 
@@ -78,9 +87,10 @@ flowchart LR
 flowchart LR
   stories([stories]) --> P
   subgraph P["pipeline — per story, independent"]
-    e[🟢 gather code+test evidence] --> v[🔵 strict status verifier<br/>fail-closed cap]
+    e[🟢 gather code+test evidence] --> v[🔵 strict status verifier<br/>fail-closed cap + missing]
   end
-  P --> out([per-story status records])
+  P --> map[▫️ proposed vs verified status →<br/>accept · qualify · revise · defer]
+  map --> out([per-story status records + traceRecords])
 ```
 
 ## `gap-analysis` — docs↔code↔tests gaps (`/story-gap-analysis`)
@@ -126,12 +136,40 @@ flowchart LR
   budget -- ok --> P
   subgraph P["pipeline — per item, independent"]
     impl[⚪ implementer<br/>isolated worktree, real git diff] --> dl{▫️ denylist gate<br/>.claude / CLAUDE.md / auth / secrets…}
-    dl -- hit --> escd[escalated-denylist]
-    dl -- clear --> ver[🔵 verifier reviews real diff]
+    dl -- hit --> escd[escalated-denylist<br/>defer: human approval]
+    dl -- clear --> nd{▫️ diff returned?}
+    nd -- no --> dfr[deferred: no diff]
+    nd -- yes --> ver[🔵 verifier: typed verdict on the real diff]
+    ver --> eg[▫️ evidence gate<br/>practical: accept needs the diff]
   end
-  P --> out([applied + rejected + escalate])
+  P --> out([applied + deferred + rejected + escalate<br/>+ traceRecords])
   esc0 --> out
 ```
+
+## `trace-bench` — measure the checkers (`/bench-checkers`)
+
+```mermaid
+flowchart LR
+  args([pnpm trace bench-args<br/>work item + patch only — no ground truth]) --> T
+  subgraph T["one parallel barrier"]
+    subgraph VA["verifier arm × repeat · 🔵 Opus"]
+      va[production loop verifier<br/>byte-identical prompt + schema] --> vg[▫️ evidence gate + denylist]
+    end
+    subgraph SA["single-pass arm · 🟢 Sonnet"]
+      sp[one reviewer, all 10 lenses]
+    end
+    subgraph PA["panel arm (opt-in) · 🟢 Sonnet"]
+      pc[one agent per critic per fixture]
+    end
+  end
+  T --> runs([raw runs])
+  runs --> score[▫️ pnpm trace bench-score<br/>joins manifest ground truth]
+  score --> rep([WrongAcceptRate · invariance · judge gap · n_eff<br/>+ F1–F5 flags + measured record])
+```
+
+> The shared blocks (`<trace-evidence-gate>`, `<loop-denylist>`, `<loop-verifier>`,
+> `<critic-roster>`) are byte-identical copies of production — `pnpm test` fails on
+> drift, so the bench always measures the checker that actually runs.
 
 ---
 

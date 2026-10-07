@@ -147,10 +147,22 @@ multi-agent opt-in:
   (`/loop` at L2/L3).
 - `improve-skills.js` — per-lens meta-critic over the project's OWN prompts and
   workflows → adversarial verify → proposed edits (`/improve-skills`).
+- `trace-bench.js` — measure our own checkers on seeded-defect fixtures (production
+  loop verifier, single-pass reviewer, optional critic panel) → scored by
+  `pnpm trace bench-score` (`/bench-checkers`).
+
+**Typed verdicts and records (TRACE-lite).** Every checker returns a typed verdict —
+`accept` / `qualify` / `revise` / `defer` / `reject` — held to its claim type's evidence
+standard, never a bare true/false; a missing verdict is `defer`. **No durable state change
+without a record:** a loop node → `done`, a fact → the wiki, a story → a new status only
+with an `accept`/`qualify` TRACE-lite record and a consumer action, written via
+`pnpm trace` (never hand-edited). Agreement between same-model critics is not evidence —
+only different evidence corroborates. Policy: `.claude/memory/topics/trace.md`.
 
 This is heavier (many subagents) by design; it buys genuine independent review
 instead of one context role-playing the panel. Commands that don't fan out
 (`/fix-localhost`, `/write-goal`, `/dream`, `/memory-audit`) stay single-agent.
+`/bench-checkers` is the sanctioned opt-in for `trace-bench.js`.
 
 **Self-improvement, not just self-learning.** `/dream` improves what the system
 *knows* (the memory wiki); `/improve-skills` improves the *machinery* — it dogfoods
@@ -199,7 +211,9 @@ A task is complete only when:
 - lint passes
 - unit tests pass when relevant
 - build passes when relevant
-- post-implementation critic review has no blockers
+- post-implementation critic review has no confirmed blockers, and every deferred
+  blocker names its missing evidence
+- the critic rounds' TRACE-lite records are appended (`pnpm trace lint` passes)
 - Artistic Direction Critic confirms the UI has an intentional look and feel when the task touches UI or product experience
 - changed files and remaining risks are reported
 

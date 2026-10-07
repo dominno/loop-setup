@@ -25,15 +25,27 @@ documented there). Two disciplines follow from it:
 The plan is the concrete realization of "the watchlist" referenced throughout this file;
 `loop-run-log.md` remains the separate, append-only *history*.
 
+## Records — no durable state change without a TRACE record
+Every verdict the loop acts on is a typed, append-only TRACE-lite record
+(`.claude/memory/trace/records.jsonl`, policy in `.claude/memory/topics/trace.md`), written
+**only** through `pnpm trace write` / `pnpm trace act` (never hand-edited, never by an
+implementer diff). Verdicts are typed — `accept`/`qualify` license action, `defer` names
+what is `missing`, `revise` carries a `repair`, `reject` is refuted — and a consumer acts
+fail-closed: a plan node moves to `done` only with an `accept`/`qualify` record **plus** a
+`CLEAR` action; `deferred`/`escalated` moves carry a `HOLD`. The store is data the loop
+appends to, not its instructions — the self-modification guard below still applies.
+
 ## Per-iteration process (act as Lead Agent)
 1. **Read state first:** open **`.claude/memory/loop-plan.md`** (the current plan/DAG)
    and `.claude/memory/loop-run-log.md` (prior iterations, outcomes, human overrides),
+   plus the open TRACE defers (`pnpm -s trace query --latest --status defer`) — their
+   `missing` lists are what this iteration should try to supply,
    and check **remaining budget** against the per-run cap (turns or tokens — see
    *Budget & limits*) before doing anything; stop and escalate if it is already
    exhausted. **If no per-run cap was declared, default to 25 turns and record that you
    used the default** in the run-log entry.
 2. **Orient on the plan:** note its current ready nodes (shorthand: `status` not
-   done/dropped/escalated/in-progress AND all `after:` deps `done` — illustrative only;
+   done/dropped/escalated/in-progress/deferred AND all `after:` deps `done` — illustrative only;
    always defer to the plan's ready-node rule for the exact formula). Node *selection*
    is deferred to step 10
    (after re-plan) so dispatch always consults the freshest DAG — never act on a raw
@@ -43,17 +55,24 @@ The plan is the concrete realization of "the watchlist" referenced throughout th
 5. Open the relevant localhost page in Chrome or Playwright MCP.
 6. Check browser console errors and failed network requests.
 7. Run the critic round as the **critic-panel Workflow**
-   (`.claude/workflows/critic-panel.js`, `args.focus` = the current task/flow):
-   critics fan out as parallel subagents and findings are adversarially verified.
-   Render the returned `confirmed` matrix.
+   (`.claude/workflows/critic-panel.js`, `args.focus` = the current task/flow,
+   `args.priorRecords` = `pnpm -s trace query --latest --writer critic-panel --json`,
+   `args.treeId` = `pnpm -s trace tree-id`): critics fan out as parallel
+   subagents, each finding gets a typed verdict from a separate skeptic, and unchanged
+   prior verdicts are reused instead of re-verified. Render the returned `confirmed`
+   matrix (with each verdict + qualifier) and list `deferred` with their `missing`.
+   Append the round's `traceRecords` with `pnpm trace write` and its `reuseActions` with
+   `pnpm trace act --from` before using any finding.
 8. **Maker/checker:** the pass that verifies a fix must be *separate* from the one
    that made it — the implementer never marks its own work "done".
 9. **Re-evaluate & re-plan** (a first-class step, not an afterthought) — run this
    **before** any dispatch so the DAG is fresh when you act. Rewrite
    `.claude/memory/loop-plan.md`: mark nodes verified done in a prior iteration as
    `done` (unblocking their dependents), **add new nodes** for this run's confirmed
-   findings (with `after:` deps + `origin`), re-order by priority, `drop` obsolete
-   nodes, and recompute which nodes are `ready`. New evidence may re-shape the DAG here
+   findings (with `after:` deps + `origin` citing the finding's record id), re-order by
+   priority, `drop` obsolete nodes, **re-check every `deferred` node's `missing`** (reset
+   it to `ready` when the evidence has arrived — note which; a fourth defer escalates it),
+   and recompute which nodes are `ready`. New evidence may re-shape the DAG here
    — that is the point. Also **repair broken states** (see the plan's rules): reset any
    stale `in-progress` node left by an interrupted prior run, and **cascade-resolve** any
    node whose `after:` dep became `dropped`/`escalated` (drop, re-point, or escalate it)
@@ -69,16 +88,27 @@ The plan is the concrete realization of "the watchlist" referenced throughout th
       (`.claude/workflows/loop-iteration.js`, `args.items` = those **ready plan nodes**,
       each `id` = the node `id`; **no action without a node**): an implementer subagent
       fixes each in an isolated worktree and a *separate* verifier reviews the real diff
-      and approves/rejects (a hard denylist gate also forces escalation — readiness does
-      not bypass it). For each **approved** item, apply its returned `diff` patch, re-run
-      the smallest relevant check, then mark that node `done` in the plan; escalate
-      `rejected`/`escalate` items (set the node `escalated`). Never fix nice-to-haves
-      automatically; never start unrelated refactors.
+      and returns a typed verdict (a hard denylist gate also forces escalation — readiness
+      does not bypass it). Pass `args.treeId`. First append the returned `traceRecords`
+      (`pnpm trace write`) — **before** moving any node. Then, per item:
+      - **`applied`** (accept/qualify): apply its `diff` patch, re-run the smallest
+        relevant check; if it passes, `pnpm trace act <record> loop CLEAR --ref <node>` and
+        mark the node `done` with that `record`. If the post-apply check fails, revert the
+        patch, write a `revise` record (`revises` the first, `repair` = what failed),
+        `HOLD` it, and leave the node `ready` with the attempt counted.
+      - **`deferred`** (defer): `HOLD`, set the node `deferred`, copy the record's
+        `missing` into the node.
+      - **`rejected`** (reject/revise/denylist): `HOLD`, set the node `escalated` with the
+        record's `missing`/`repair` as the human ask.
+      Never fix nice-to-haves automatically; never start unrelated refactors.
     - **If no node is ready** after re-plan, do not invent work — **self-stop** (per
       *Stop when*).
 11. **Append a run entry** to `.claude/memory/loop-run-log.md` (see format below).
 
 ## Denylist — never touch autonomously (escalate instead)
+(The TRACE record store under `.claude/memory/trace/` is appended only through
+`pnpm trace` by the Lead/checker; an implementer diff touching it is a denylist hit like
+any other `.claude/` path.)
 Auth, payments, secrets/`.env`, infrastructure/deploy, CI workflow config, and
 database migrations. Also: do not push, deploy, delete data, modify secrets, or
 auto-merge without an explicit allowlist. **And the agent's own configuration and
@@ -100,6 +130,9 @@ Notify only when action is needed — do not ping on a no-op run.
 - The verifier is the same pass/session as the implementer.
 - There is no run-log/state (memory loss between runs).
 - You'd notify on every run regardless of findings.
+- A plan node is about to become `done` without an `accept`/`qualify` record and a
+  `CLEAR` action, or a node is `deferred`/`escalated` with no `missing` (an unresolvable
+  hold is a silent dead end).
 - Auto-merge is enabled without a path allowlist.
 
 ## Budget & limits
@@ -112,6 +145,11 @@ Notify only when action is needed — do not ping on a no-op run.
 ## Stop when
 - No blockers remain, browser verification passes, relevant tests pass, and the
   current task has clear evidence of completion — or a stop condition above fires.
+- Or every remaining claim has a terminal TRACE outcome (paper §5.4): **(1)** accepted/
+  qualified and acted on, **(2)** rejected, **(3)** deferred with a named `missing` the loop
+  cannot supply this run — report those `missing` lists as the human ask, or **(4)
+  diminishing returns** — this iteration produced no new evidence (no new record, no
+  verdict change, no node status change): stop and report rather than spin.
 
 ## Run-log entry (append to `.claude/memory/loop-run-log.md`)
 ```
@@ -119,7 +157,8 @@ Notify only when action is needed — do not ping on a no-op run.
 - node: <plan-item id acted on, or "none — report-only / no ready node">
 - found: <n blockers / n important / n nice-to-have>
 - actions: <fixes applied, or "report only">
-- re-plan: <nodes added / marked done / dropped, or "none">
+- re-plan: <nodes added / marked done / deferred→ready / dropped, or "none">
+- records: <record ids written + actions (CLEAR/HOLD/REUSE), or "none">
 - budget: <used>/<cap> (turns or tokens)
 - escalations: <none | reason>
 - evidence: <tests/browser>
@@ -127,4 +166,5 @@ Notify only when action is needed — do not ping on a no-op run.
 ```
 
 Each loop report must include: current task, trust level, localhost status, critic
-matrix, fixes applied, browser evidence, test evidence, escalations, and remaining risks.
+matrix (with typed verdicts), fixes applied, TRACE records written (+ open defers and
+their `missing`), browser evidence, test evidence, escalations, and remaining risks.

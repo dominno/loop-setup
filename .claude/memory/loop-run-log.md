@@ -11,7 +11,8 @@ Entry format (see `.claude/loop.md`):
 - node: <plan-item id acted on, or "none — report-only / no ready node">
 - found: <n blockers / n important / n nice-to-have>
 - actions: <fixes applied, or "report only">
-- re-plan: <nodes added / marked done / dropped, or "none">
+- re-plan: <nodes added / marked done / deferred→ready / dropped, or "none">
+- records: <record ids written + actions (CLEAR/HOLD/REUSE), or "none">
 - budget: <used>/<cap> (turns or tokens)
 - escalations: <none | reason>
 - evidence: <tests/browser>

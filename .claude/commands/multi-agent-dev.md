@@ -22,11 +22,16 @@ Procedure:
    Playwright MCP) and observe current behavior.
 4. **Pre-implementation critic round** — invoke the Workflow tool with
    `scriptPath: .claude/workflows/critic-panel.js`,
-   `args: { "focus": "$ARGUMENTS (current behavior + changed files)" }`.
-   Render the returned `confirmed` findings as the critic matrix; record
-   `niceToHaves`; ignore `refuted`.
+   `args: { "focus": "$ARGUMENTS (current behavior + changed files)", "priorRecords": <pnpm -s trace query --latest --writer critic-panel --json>, "treeId": "<pnpm -s trace tree-id>" }`.
+   Render the returned `confirmed` findings (verdict `accept`/`qualify`) as the critic
+   matrix with their verdicts; list `deferred` (with `missing`) and `revised` (with
+   `repair`); record `niceToHaves`; ignore `refuted`. Append the verdicts with
+   `pnpm trace write -` / `pnpm trace act --from -` (TRACE records — see
+   `.claude/memory/topics/trace.md`).
 5. As Lead Agent, choose the smallest safe plan from the confirmed blockers +
-   directly-related important findings.
+   directly-related important findings. Act on a `qualify` finding only at its
+   qualified strength; for a `deferred` blocker, first gather its `missing` evidence
+   (run the check, reproduce in the browser) rather than fixing blind.
 6. Implement only those. Keep the **maker/checker split**: implementation is your
    pass; the post-implementation workflow below is the independent checker.
 7. Run the smallest relevant automated checks first.
@@ -37,7 +42,13 @@ Procedure:
     `args.focus` set to the changed flow and `args.priorEvidence` set to what you
     already gathered (git diff summary + test/lint/build results + browser/console
     findings) so the critics verify against it instead of re-running everything.
-    Fix any remaining confirmed blockers (re-run the workflow until none remain).
+    Pass `priorRecords` + a fresh `treeId` again (reuse only fires on an identical tree). Fix any
+    remaining confirmed blockers and re-run until none remain — **but stop on
+    diminishing returns**: if a re-run produces no new evidence (no new record, no
+    verdict change), stop re-running and report the remaining blockers as `defer` with
+    their `missing` instead of spinning. For every finding you fixed, append
+    `pnpm trace act <record> multi-agent-dev CLEAR`; for one you deliberately left,
+    `HOLD` with a note.
 12. Report final evidence.
 
 Never mark complete unless:
@@ -46,7 +57,9 @@ Never mark complete unless:
 - no blocking console errors remain
 - typecheck, lint, and unit tests pass (build passes when the change warrants it)
 - relevant E2E tests pass
-- post-implementation critic round has no blockers
+- post-implementation critic round has no confirmed blockers (and every remaining
+  `deferred` blocker names its `missing` evidence in the report)
+- the round's TRACE records are appended (`pnpm trace lint` passes)
 - files changed are reported
 - remaining risks are listed
 

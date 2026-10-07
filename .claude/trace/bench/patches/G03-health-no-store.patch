@@ -1,0 +1,15 @@
+diff --git a/src/app/api/health/route.ts b/src/app/api/health/route.ts
+index 2baba76..58a80c2 100644
+--- a/src/app/api/health/route.ts
++++ b/src/app/api/health/route.ts
+@@ -2,5 +2,9 @@ import { NextResponse } from "next/server";
+ 
+ /** Liveness endpoint used by smoke tests and uptime checks. */
+ export function GET() {
+-  return NextResponse.json({ status: "ok" });
++  // Liveness must reflect the current process, never a cached response.
++  return NextResponse.json(
++    { status: "ok" },
++    { headers: { "cache-control": "no-store" } },
++  );
+ }
