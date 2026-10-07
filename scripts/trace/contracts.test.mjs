@@ -119,12 +119,15 @@ describe("committed record store", () => {
   });
 });
 
+// Bench agents run `pnpm test` in this repo, so nothing here may PRINT ground truth:
+// no fixture id or defect text in test names or assertion messages (opaque tokens and
+// counts only). A leak via a failing test title contaminated the second bench run.
 describe("TRACE-Bench-lite fixtures", () => {
   const manifest = readBench();
   const { hitsDenylist, parseDiffPaths } = loadWorkflowBlock("loop-iteration.js", "loop-denylist", ["hitsDenylist", "parseDiffPaths"]);
 
   it("the bundle decodes to a structurally valid manifest and re-encodes byte-identically", () => {
-    expect(manifestViolations(manifest)).toEqual([]);
+    expect(manifestViolations(manifest).length).toBe(0); // count only — messages name fixture ids
     expect(encodeBench(manifest)).toBe(readFileSync(BENCH_BUNDLE, "utf8"));
   });
 
@@ -133,7 +136,7 @@ describe("TRACE-Bench-lite fixtures", () => {
       .split("\0")
       .filter((p) => p && !p.endsWith(".bundle") && !p.startsWith("node_modules/"));
     const markers = manifest.fixtures.flatMap((f) => [f.id, ...(f.defect ? [f.defect.slice(0, 60)] : [])]);
-    const leaks = [];
+    const leakyFiles = new Set();
     for (const p of tracked) {
       let text;
       try {
@@ -141,22 +144,28 @@ describe("TRACE-Bench-lite fixtures", () => {
       } catch {
         continue;
       }
-      for (const m of markers) if (text.includes(m)) leaks.push(`${p}: ${m}`);
+      if (markers.some((m) => text.includes(m))) leakyFiles.add(p); // report the file, never the marker
     }
-    expect(leaks).toEqual([]);
+    expect([...leakyFiles]).toEqual([]);
   });
 
-  it.each(manifest.fixtures.map((f) => [f.id, f]))("%s applies cleanly to the current tree", (_id, f) => {
-    expect(() => execFileSync("git", ["apply", "--check", "-"], { cwd: ROOT, input: f.patch, stdio: ["pipe", "pipe", "pipe"] })).not.toThrow();
+  it("every fixture patch applies cleanly to the current tree", () => {
+    const failing = manifest.fixtures.filter((f) => {
+      try {
+        execFileSync("git", ["apply", "--check", "-"], { cwd: ROOT, input: f.patch, stdio: ["pipe", "pipe", "pipe"] });
+        return false;
+      } catch {
+        return true;
+      }
+    });
+    expect(failing.map((f) => opaqueFixtureId(f.id))).toEqual([]);
   });
 
   it("bench args leak no ground truth to the agents (ids, class, defect, judge)", () => {
     const args = benchArgs(manifest, {});
     const text = JSON.stringify(args);
-    for (const f of manifest.fixtures) {
-      expect(text, f.id).not.toContain(f.id);
-      if (f.defect) expect(text).not.toContain(f.defect);
-    }
+    const leaked = manifest.fixtures.filter((f) => text.includes(f.id) || (f.defect && text.includes(f.defect)));
+    expect(leaked.map((f) => opaqueFixtureId(f.id))).toEqual([]);
     expect(args.fixtures.every((f) => /^fx-[0-9a-f]{8}$/.test(f.id))).toBe(true);
     expect(text).not.toMatch(/"kind"|"defect"|"judge"|"lenses"/);
   });
@@ -167,7 +176,7 @@ describe("TRACE-Bench-lite fixtures", () => {
     const runs = [{ arm: "verifier", repeat: 0, fixtureId: token, verdict: "accept", preGateVerdict: "accept" }];
     expect(scoreBench(manifest, { runs }).arms.verifier.wrongAcceptRate).toBe(1);
     const keys = contaminatedRuns([{ label: `bench-verify:${token}-r0-0`, text: `... read ${b.id} ...` }, { label: `bench-verify:${token}-r1-0`, text: "clean" }], manifest);
-    expect(keys).toEqual([{ arm: "verifier", token, repeat: 0 }]);
+    expect(keys.length === 1 && keys[0].arm === "verifier" && keys[0].token === token && keys[0].repeat === 0).toBe(true);
     const s = scoreBench(manifest, { runs: markContaminated(runs, keys) });
     expect(s.contaminatedRuns).toBe(1);
     expect(s.arms.verifier).toBeUndefined();
@@ -175,10 +184,10 @@ describe("TRACE-Bench-lite fixtures", () => {
   });
 
   it("denylist judges agree with the production denylist, and good fixtures never hit it", () => {
-    for (const f of manifest.fixtures) {
+    const wrong = manifest.fixtures.filter((f) => {
       const hit = hitsDenylist(parseDiffPaths(f.patch));
-      if (f.judge.kind === "denylist") expect(hit, f.id).toBe(f.judge.catches);
-      if (f.kind === "good") expect(hit, f.id).toBe(false);
-    }
+      return (f.judge.kind === "denylist" && hit !== f.judge.catches) || (f.kind === "good" && hit);
+    });
+    expect(wrong.map((f) => opaqueFixtureId(f.id))).toEqual([]);
   });
 });
