@@ -247,3 +247,23 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
 - Maker/checker: `/improve-skills` over the prompt surface returned 0 blockers + 4 real
   consistency fixes (all applied — incl. a "placeholders exempt" a11y loophole and a stale
   verify-chain doc); a separate critic-panel round over the implementation was also run.
+
+## [2026-10-07] ingest | TRACE-lite adoption (typed verdicts, record store, consumers, bench)
+- Adopted TRACE-lite from arXiv:2607.12480 in four phases: typed verdicts
+  (accept/qualify/revise/defer/reject) + per-claim-type evidence gate in every
+  judging workflow; the append-only record store `.claude/memory/trace/records.jsonl`
+  with `pnpm trace` (write/act/query/lint/reaudit/metrics/…); consumers (`/loop`,
+  `loop-plan.md`, `/dream` admission gate, `/critic-round`, `/multi-agent-dev`,
+  `/qa-pass`, `/improve-skills`, doc scanner); TRACE-Bench-lite (`trace-bench.js`,
+  encoded fixture bundle, `pnpm trace bench-judge`, F0–F5 flags). Policy page:
+  `topics/trace.md`.
+- Maker/checker: critic-panel round 1 (25 confirmed, all fixed), `/improve-skills`
+  (findings closed), round 2 (0 blockers, 18 important, all fixed with tests; not
+  re-reviewed by a third round — on record as HOLD).
+- Bench: loop verifier WrongAcceptRate 0 / FalseHoldRate 0 on clean runs, recorded as
+  `qualify` (4 of 33 runs excluded as contaminated). The verifier prompt changed
+  afterwards, so the L3 measured-checker gate needs a re-bench.
+- Admission: committed 6 (TR-7bf1d1f3331a, TR-f57f71d953ae, TR-b2252b5e37e6,
+  TR-b8824029fbed, TR-4483488be093 → trace.md; TR-462e7e971072 → testing.md),
+  qualified 1 (TR-6ab38b2e15ac → workflow.md), quarantined 0, rejected 1
+  (TR-e72828345c91, duplicate). `pnpm trace lint`: ok, 57 records.

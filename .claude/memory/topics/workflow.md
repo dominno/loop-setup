@@ -113,5 +113,9 @@
   constraints, checkpoint rules (pause vs run-through), a self-verify instruction,
   and a max-budget/turn guard. See `CLAUDE.md` → "Writing `/goal` and `/loop`
   prompts".
+- Cost (one run, scales with the number of blocker/important findings): an
+  `/improve-skills` pass over 21 prompt/workflow files spawned 112 agents (~9.4M subagent
+  tokens, ~82 min) because every blocker/important finding gets its own strong-tier
+  verifier — scope `args.targets` narrowly when budget matters. <!-- rec:TR-6ab38b2e15ac -->
 
 Related: [build-and-verify](./build-and-verify.md) · [testing](./testing.md) · [trace](./trace.md)

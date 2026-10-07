@@ -206,5 +206,22 @@ debate stage (critic panel + skeptic already is one).
   checkers/the Lead via `pnpm trace`.
 - `claim_id` must be stable across rounds for reuse/recurrence metrics to work; a reworded
   re-raise gets a new `claim_id` (fail-safe: it is re-verified, not reused).
+- A Node script blocked in `spawnSync` cannot run `process.on('SIGINT'|'SIGTERM')` listeners
+  until it yields to the event loop, and registering such a listener replaces the default
+  exit-on-signal — a signal-safe long-running script must spawn asynchronously (that is why
+  `bench-judge` uses async `spawn`). <!-- rec:TR-7bf1d1f3331a -->
+- `JSON.parse` turns a `"__proto__"` key into an own property, and `Object.assign`/spread of
+  that object rewrites the target's prototype — `pnpm trace write` refuses drafts with
+  `__proto__`/`constructor`/`prototype` keys for this reason. <!-- rec:TR-f57f71d953ae -->
+- Which paths a patch touches comes from git (`git diff --name-status -z -M -C`), not from
+  parsing the patch text: a rename/copy-only patch has no `---`/`+++` lines, only
+  `rename from`/`rename to` headers (`pnpm trace denylist-check` uses git's list).
+  <!-- rec:TR-b2252b5e37e6 -->
+- A content-addressed id must hash every field except the entry's OWN id — stripping a
+  reference field (an action's `record_id`) made one action on two different records
+  collide. <!-- rec:TR-b8824029fbed -->
+- Test titles and assertion messages are printed to any agent that runs `pnpm test`, so
+  tests over bench ground truth print only opaque tokens or counts.
+  <!-- rec:TR-4483488be093 -->
 
 Related: [workflow](./workflow.md) · [quality-bar](./quality-bar.md) · [testing](./testing.md)

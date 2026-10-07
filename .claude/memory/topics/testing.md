@@ -11,5 +11,8 @@
   starts empty per test; `page.reload()` preserves it within the same test.
 - Unit-test browser globals in Vitest's node env with
   `vi.stubGlobal('localStorage', mock)` and `vi.unstubAllGlobals()` in teardown.
+- Vitest runs test files in parallel by default (`fileParallelism: true`), so a test must
+  never mutate tracked sources that other test files read (e.g. apply a patch to `src/`);
+  use a throwaway untracked file instead. <!-- rec:TR-462e7e971072 -->
 
 Related: [client-react](./client-react.md) · [build-and-verify](./build-and-verify.md)
