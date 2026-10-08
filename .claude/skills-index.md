@@ -23,6 +23,10 @@ catalog so both you and Claude can route to the right command.
   `/sync-story-status`, `/story-gap-analysis`
 - **Capture/curate what was learned** → `/dream`, `/memory-audit`
 - **Improve the system's own prompts/skills/workflows** → `/improve-skills`
+- **Measure whether the checkers actually catch defects** (before L3, after a checker
+  prompt change) → `/bench-checkers`
+- **See what has been adjudicated / what is still deferred** → `pnpm trace query --latest`
+  (records policy: `.claude/memory/topics/trace.md`)
 - **Keep watching localhost on an interval** → `/loop` (uses `.claude/loop.md`;
   gate trust level with `.claude/loop-checklist.md`; state in
   `.claude/memory/loop-plan.md` (current plan/DAG — every L2/L3 action traces to a ready
@@ -35,7 +39,10 @@ catalog so both you and Claude can route to the right command.
 > Workflow tool — not one agent simulating critics: `critic-panel` (critic rounds),
 > `scan-docs` (`/scan-project-docs`), `gap-analysis` (`/story-gap-analysis`),
 > `e2e-design` (`/multi-agent-e2e`), `loop-iteration` (`/loop` L2/L3),
-> `improve-skills` (`/improve-skills` — meta-critic over our own prompts/workflows).
+> `improve-skills` (`/improve-skills` — meta-critic over our own prompts/workflows),
+> `trace-bench` (`/bench-checkers` — measures the checkers on seeded defects).
+> Verdict-producing workflows return typed TRACE verdicts plus `traceRecords` drafts that
+> the caller appends with `pnpm trace write` (no durable state change without a record).
 > Pass `args.models = { fanout, judge }` when invoking any of these to override the
 > default `sonnet`/`opus` model tiering (e.g. for cost control on a large fan-out).
 
@@ -61,6 +68,7 @@ catalog so both you and Claude can route to the right command.
 | `/dream` | End of a non-trivial task: ingest durable learnings into the wiki, lint it, and propose new skills | `[ingest \| query <q> \| lint]` |
 | `/memory-audit` | Periodically prune stale/duplicated/misleading memory (no deletes without confirmation) | — |
 | `/improve-skills` | Periodically improve the system's OWN prompts/skills/workflows via a meta-critic; proposes edits, confirmation-gated (manual-only) | `[scope]` |
+| `/bench-checkers` | Measure the checkers (loop verifier, single-pass reviewer, critic panel) on seeded-defect fixtures; reports WrongAcceptRate, invariance, judge gap and pre-registered falsification flags (manual-only) | `[arms] [repeat N]` |
 
 ## Conventions for adding a command
 - Every command needs a one-line `description` frontmatter (used for routing) and,

@@ -36,6 +36,7 @@ As a [user type], I want [capability], so that [benefit].
 
 **Final status:**
 Not started / Partially implemented / Implemented / Unit tested / E2E tested / Browser verified / Done / Blocked / Deprecated
+Record: `TR-xxxxxxxxxxxx` (the TRACE-lite record behind this status — `pnpm trace show <id>`)
 
 **Next action:**
 One concrete next action.

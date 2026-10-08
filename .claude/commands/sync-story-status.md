@@ -20,10 +20,19 @@ Procedure:
 5. Inspect relevant E2E tests.
 6. Start or reuse localhost when browser verification is needed.
 7. Verify implemented flows in browser when possible.
-8. Update each story's status in its own `docs/stories/US-*.md` file using the
-   strict status model, and reflect it in the `docs/user-stories.md` index table
-   and the `docs/implementation-status.md` dashboard row.
-9. Record evidence in `docs/story-verification-log.md`.
+8. Work out each in-scope story's **proposed** status with the strict status model — do
+   not write it yet; step 9's separate verifier decides what may be written. After step
+   9, update each story's own `docs/stories/US-*.md` file with the status its verdict
+   licenses, and reflect it in the `docs/user-stories.md` index table and the
+   `docs/implementation-status.md` dashboard row.
+9. Record evidence in `docs/story-verification-log.md`. The status itself must not be
+   self-adjudicated (maker ≠ checker): run the **scan-docs Workflow** for the in-scope
+   stories (`scriptPath: .claude/workflows/scan-docs.js`, `args.stories` = those
+   stories) so a separate status verifier issues the verdicts, then apply them exactly as
+   `/scan-project-docs` step 9 does (accept → COMMIT, qualify → COMMIT_QUALIFIED at the
+   lower status, revise/defer → status unchanged + HOLD; Lead-raised `Browser verified`/
+   `Done` only with its own record citing the browser observation and a no-blocker critic
+   round). No status change without a licensing record (`.claude/memory/topics/trace.md`).
 10. Update `docs/e2e-coverage-map.md`.
 11. Update `docs/gaps-and-risks.md`.
 

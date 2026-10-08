@@ -21,17 +21,23 @@ $ARGUMENTS
    instruction-following risk, safety/gating, consistency/DRY, workflow DSL, routing)
    runs in its own context, in parallel; a *separate* skeptic adversarially verifies
    every blocker/important finding. Invoking Workflow here is expected.
-2. The workflow returns `{ scope, targets, budgetStop, counts, applyReady, needsDesign, niceToHaves, refuted }`.
+2. The workflow returns `{ scope, targets, budgetStop, counts, applyReady, needsDesign, deferred, niceToHaves, refuted, traceRecords }`.
+   Each finding carries a typed TRACE verdict derived from the two axes:
+   `applyReady` = `accept` (real + edit safe), `needsDesign` = `revise` (real, edit not
+   safe — its `repair` is a safer edit to design from), `deferred` = `defer` (no verdict
+   or verification skipped — UNVERIFIED), `refuted` = `reject`.
    Render `applyReady` and `needsDesign` as a matrix and list `niceToHaves` separately:
 
    | Lens | Severity | File | Finding | Evidence | Proposed edit | Edit verified safe? |
    |---|---|---|---|---|---|---|
 
+   List `deferred` separately with its `missing`.
+
    **If `budgetStop` is true**, tell the user up front that the adversarial verify phase
-   was skipped due to the token-budget floor: every `needsDesign` item in this run is
-   **UNVERIFIED** (not merely design-pending — neither its reality nor its edit-safety
-   was checked), `applyReady` is empty by design, and a follow-up `/improve-skills` pass
-   should re-run verification before anything is applied.
+   was skipped due to the token-budget floor: every blocker/important finding is in
+   `deferred` and **UNVERIFIED** (neither its reality nor its edit-safety was checked),
+   `applyReady` and `needsDesign` are empty by design, and a follow-up `/improve-skills`
+   pass should re-run verification before anything is applied.
 
 3. **Confirmation gate (hard rule).** This command may propose edits to core prompts
    but must **never apply them without explicit confirmation** — the same rule
@@ -46,7 +52,15 @@ $ARGUMENTS
    before applying.
 6. When an edit changes a command or workflow, keep `.claude/skills-index.md` and any
    affected memory wiki page in sync (additive index updates need no confirmation).
-7. End the task with `/dream` so any durable lesson from this pass is filed into the
+7. **Verify, then record the outcome.** After applying approved edits, run `pnpm test`
+   (the contract tests catch a broken workflow, a drifted shared block or policy table)
+   before calling anything applied. Then record the run per the consumer protocol in
+   `.claude/memory/topics/trace.md` (scratchpad file → `pnpm trace write <file>`) and one
+   consumer action per adjudicated finding: `CLEAR` for an `accept` edit you applied (note
+   the passing `pnpm test`), `REJECT` for an `accept` edit the user declined, `HOLD` for a
+   `revise` (needs a designed fix) or a `defer` (unverified) — never `REJECT` a finding
+   nobody adjudicated. `CLEAR` is refused on anything but a licensing verdict (fail closed).
+8. End the task with `/dream` so any durable lesson from this pass is filed into the
    wiki.
 
 ## Notes

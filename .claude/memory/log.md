@@ -247,3 +247,99 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
 - Maker/checker: `/improve-skills` over the prompt surface returned 0 blockers + 4 real
   consistency fixes (all applied — incl. a "placeholders exempt" a11y loophole and a stale
   verify-chain doc); a separate critic-panel round over the implementation was also run.
+
+## [2026-10-07] ingest | TRACE-lite adoption (typed verdicts, record store, consumers, bench)
+- Adopted TRACE-lite from arXiv:2607.12480 in four phases: typed verdicts
+  (accept/qualify/revise/defer/reject) + per-claim-type evidence gate in every
+  judging workflow; the append-only record store `.claude/memory/trace/records.jsonl`
+  with `pnpm trace` (write/act/query/lint/reaudit/metrics/…); consumers (`/loop`,
+  `loop-plan.md`, `/dream` admission gate, `/critic-round`, `/multi-agent-dev`,
+  `/qa-pass`, `/improve-skills`, doc scanner); TRACE-Bench-lite (`trace-bench.js`,
+  encoded fixture bundle, `pnpm trace bench-judge`, F0–F5 flags). Policy page:
+  `topics/trace.md`.
+- Maker/checker: critic-panel round 1 (25 confirmed, all fixed), `/improve-skills`
+  (findings closed), round 2 (0 blockers, 18 important, all fixed with tests; not
+  re-reviewed by a third round — on record as HOLD).
+- Bench: loop verifier WrongAcceptRate 0 / FalseHoldRate 0 on clean runs, recorded as
+  `qualify` (4 of 33 runs excluded as contaminated). The verifier prompt changed
+  afterwards, so the L3 measured-checker gate needs a re-bench.
+- Admission: committed 6 (TR-7bf1d1f3331a, TR-f57f71d953ae, TR-b2252b5e37e6,
+  TR-b8824029fbed, TR-4483488be093 → trace.md; TR-462e7e971072 → testing.md),
+  qualified 1 (TR-6ab38b2e15ac → workflow.md), quarantined 0, rejected 1
+  (TR-e72828345c91, duplicate). `pnpm trace lint`: ok, 57 records.
+
+## [2026-10-08] ingest | Third checker round on TRACE-lite + clean bench re-run
+- Third critic-panel round (wf_d01e03e0-e1f, 5 non-UI critics) over the round-2 fixes:
+  0 blockers, 24 important (~9 distinct issues); the round-1/2 findings it no longer raised
+  were CLEARed. Fixed: mixed-format patches past the denylist (git's own parse, pre-apply,
+  HEAD-sourced denylist), unreachable `bench-judge --recover`, F0 coverage gaps (run ids),
+  `--brief` dropping qualifiers, `act --from` on empty lists, unbounded REAUDIT.
+- Separate checkers (subagents) re-verified each cluster on scratch clones and found
+  second-order defects in the fixes (panel labels with digits, committed fixtures reverted
+  by --recover, process-group kill on timeout, unpinned mutants) — all fixed and pinned;
+  their confirmations are the CLEAR notes. The denylist cluster's checker was stopped by a
+  safety classifier before testing, so those six records stay on HOLD.
+- TRACE-Bench-lite re-run (wf_1f8c24eb-1f2): 33/33 transcripts scanned, no exclusions,
+  verifier WrongAcceptRate 0 / FalseHoldRate 0 / invariance 1.00, single-pass recall 1.00 —
+  recorded `accept` (TR-bdc16b430394); the L3 measured-checker gate is satisfied.
+- Admission: committed 5 (TR-b219013814f2, TR-269d82f78a84, TR-00c2a9c72e0c,
+  TR-4a5419c74c07 → trace.md; TR-4a808ff82551 → testing.md), qualified 1 (TR-3ef3eac264d4 →
+  workflow.md), quarantined 1 (TR-3439a2c9a95a), rejected 1 (TR-690c19ec53fb, duplicate).
+
+## [2026-10-08] ingest | Denylist cluster verified; explicit diff prefixes
+- A separate checker (documented cases only, fresh clone) rebuilt every failing patch from
+  the 8 denylist records — all now escalated by the workflow gate and refused by
+  `denylist-check --patch` (git failures exit 2); 5 ordinary git-generated patches pass. The
+  8 records are CLEARed. Its follow-ups are fixed and pinned: a rename header quoting only
+  one side is parsed (was a fail-closed false positive), the implementer asks git for
+  explicit a/ b/ prefixes, and tests now cover unborn HEAD / non-repo exit 2, a dirty
+  `.claude/` tree with an innocent patch, copy-only and rename-out patches, state-file patches.
+- Admission: committed 1 (TR-40be9c919489 → trace.md).
+
+## [2026-10-08] ingest | 19-fixture bench with the panel arm: F4 and F1 fired
+- Extended TRACE-Bench-lite to 19 fixtures (12 bad / 7 good; five new seeded defects that
+  every deterministic check misses — bench-judge 19/19, TR-ac5033a1c8d3) and ran it with the
+  verifier (repeat 2), single-pass and a 5-critic panel (run 04cb4d42, 152 agents, 152/152
+  transcripts scanned, 0 excluded). Record TR-34201765532f (`accept`, revises
+  TR-bdc16b430394): verifier WrongAcceptRate 0.04, invariance 0.95; single-pass recall 1.00 /
+  false-block 0.14; panel(any) the same; n_eff 1.89.
+- Pre-registered flags fired: F4 (the verifier licensed one bad diff in one repeat) → the
+  L3 measured-checker gate is no longer satisfied; F1 (single-pass matches the panel at ~5x
+  lower cost on diff review). Responses proposed, not applied (bench-checkers step 6).
+- Admission: qualified 3 (TR-e1e16632e534, TR-f1ebb8958183 → trace.md; TR-7085756f8495 →
+  workflow.md).
+
+## [2026-10-08] ingest | F4/F1 responses and the verifier re-bench
+- F4 response: the loop verifier checks changes against documented contracts and holds an
+  item that contradicts one for a human (defer). F1 response: a code-only critic round runs
+  one all-lens reviewer (skeptics unchanged). A separate checker rated it `qualify`; its
+  findings (reuse lens, failure handling, loop escalation of human defers, overstated F1
+  wording) are fixed. The CLAUDE.md wording for the F1 exception awaits confirmation.
+- Verifier re-bench (run 6e7bcc95, 3 repeats, 57/57 transcripts, 0 excluded):
+  TR-44152fe382c5 `accept`, WrongAcceptRate 0 / FalseHoldRate 0 / invariance 1.00, F2 only —
+  the L3 measured-checker gate is met mechanically, but the record carries a HOLD note: the
+  rule is in-sample, so L3 should wait for held-out fixtures.
+- Admission: qualified 1 (TR-5e53f695a9e6 → trace.md).
+
+## [2026-10-08] ingest | held-out bench of the loop verifier's contract rule
+- Held-out run 5259d857 (verifier, 3 repeats, 29 fixtures incl. 6 bad + 4 good written
+  blind to the rule; 87/87 transcripts scanned): TR-039e311f20a2 `qualify` —
+  WrongAcceptRate 0, FalseHoldRate 0.03, invariance 0.97; flags F0 (1 run excluded) + F2.
+  HOLD action: the L3 gate is not met. Both blemishes trace to the bench instrument: the
+  F0 hit is an agent reproducing a defect-description prefix that quotes patch code (first
+  seen in its own output, never its input), and the one false hold is the leak-guard unit
+  test going red on a patched tree that adds a new code file.
+- Admission: qualified 2 (TR-00fe5f1e955b → trace.md, TR-57403effdd24 → workflow.md),
+  rejected 1 (TR-f86ffa871cce — an instrument bug pending a fix decision, not durable).
+
+## [2026-10-08] ingest | bench-instrument fixes + confirmatory verifier run
+- Instrument fixes (commit 7e3c127): the F0 scan reads only what an agent received
+  (`receivedText`), and the tree leak guard (`leakyFiles`) counts as code only tracked code
+  files plus untracked files a fixture patch writes. Code-only critic round: 0 blockers,
+  1 important (TR-df1a6adc08d1 qualify — the first version let any untracked code-path file
+  whitelist its own tokens) → fixed, separate checker `accept`, CLEAR.
+- Confirmatory run 486c8b06 (verifier, 3 repeats, 29 fixtures; 87/87 prompts verified
+  against the minted args): TR-df7ab02dc866 `accept` — WrongAcceptRate 0, FalseHoldRate 0,
+  invariance 1.00, nothing excluded (the old F0 scan also flags 0), F2 only. The L3
+  measured-checker item of loop-checklist.md is met; no loop's trust level was changed.
+- Admission: qualified 2 (TR-3ce4efb91999 → trace.md, TR-b3b37a1408f4 → workflow.md).

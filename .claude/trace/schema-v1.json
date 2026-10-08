@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "trace-lite/1.0",
+  "title": "TRACE-lite v1.0 — typed reasoning & commitment record",
+  "description": "Adapted subset of the TRACE schema (Chang & Chang, arXiv:2607.12480). One JSONL line per entry in .claude/memory/trace/records.jsonl: kind=record (an adjudicated claim) or kind=action (a consumer decision appended against a record). Records are immutable; corrections are new records that `revises` the old one. Policy (verdict semantics, evidence standard per claim type, consumer action matrix) lives in .claude/memory/topics/trace.md. Only the JSON-Schema keywords supported by scripts/trace/lib.mjs may be used here (a unit test enforces this).",
+  "$defs": {
+    "recordId": { "type": "string", "pattern": "^TR-[0-9a-f]{12}$" },
+    "isoTime": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$" },
+    "evidenceItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "ref"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["file_line", "command", "browser", "measurement", "rule", "diff", "reading", "record", "human"],
+          "description": "file_line = a path[:line]; command = a command run + its output; browser = a localhost observation; measurement = a number vs a declared bar (axe, bundle); rule = the named rule/standard a claim invokes; diff = the real patch; reading = code reading without a reproducible pointer (never sufficient for accept); record = a prior TRACE record; human = a human decision."
+        },
+        "ref": { "type": "string", "minLength": 1 },
+        "result": { "type": "string" }
+      }
+    },
+    "record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind", "schema_version", "policy_version", "record_id", "created_at", "writer_id",
+        "claim_id", "claim_text", "claim_type", "evidence", "failed_gates", "missing",
+        "final_status", "reason", "provenance"
+      ],
+      "properties": {
+        "kind": { "const": "record" },
+        "schema_version": { "const": "trace-lite/1.0" },
+        "policy_version": { "type": "string", "pattern": "^\\d+$" },
+        "record_id": { "$ref": "#/$defs/recordId" },
+        "created_at": { "$ref": "#/$defs/isoTime" },
+        "writer_id": { "type": "string", "minLength": 1, "description": "who wrote the verdict, e.g. critic-panel/verify:qa-e2e-3, loop-iteration/verify:LP-002-0, lead, dream" },
+        "claim_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9:._/-]*$", "description": "stable fingerprint shared by every revision of the same claim" },
+        "claim_text": { "type": "string", "minLength": 1 },
+        "claim_type": { "type": "string", "enum": ["factual", "measured", "causal", "predictive", "normative", "practical"] },
+        "retyped_from": { "type": "string", "enum": ["factual", "measured", "causal", "predictive", "normative", "practical"], "description": "the maker's claim type when the checker re-typed the claim (the gate held it to the stricter of the two)" },
+        "severity": { "type": "string", "enum": ["blocker", "important", "nice-to-have"] },
+        "subject": { "type": "string", "description": "what the claim is about: a file, a story id, a plan node id, a wiki page" },
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidenceItem" } },
+        "counter_reasons": { "type": "array", "items": { "type": "string" }, "description": "refutation attempts / defeaters the checker considered" },
+        "failed_gates": { "type": "array", "items": { "type": "string" } },
+        "missing": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "the evidence that would tighten, flip, or justify the claim — required non-empty for defer" },
+        "repair": { "type": "string", "description": "the bounded fix or restated claim — required for revise" },
+        "qualifier": { "type": "string", "description": "the reduced strength the claim holds at — required for qualify" },
+        "final_status": { "type": "string", "enum": ["accept", "qualify", "revise", "defer", "reject"] },
+        "reason": { "type": "string", "minLength": 1 },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["commit", "workflow"],
+          "properties": {
+            "commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+            "workflow": { "type": "string", "minLength": 1 },
+            "branch": { "type": "string" },
+            "run": { "type": "string" },
+            "tree": { "type": "string", "pattern": "^[0-9a-f]{16}$", "description": "working-tree fingerprint (pnpm trace tree-id): HEAD + uncommitted changes; equal ids mean identical code" }
+          }
+        },
+        "revises": { "$ref": "#/$defs/recordId" },
+        "reuses": { "$ref": "#/$defs/recordId" }
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "schema_version", "action_id", "created_at", "record_id", "consumer", "action"],
+      "properties": {
+        "kind": { "const": "action" },
+        "schema_version": { "const": "trace-lite/1.0" },
+        "action_id": { "type": "string", "pattern": "^TA-[0-9a-f]{12}$" },
+        "created_at": { "$ref": "#/$defs/isoTime" },
+        "record_id": { "$ref": "#/$defs/recordId" },
+        "consumer": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "action": { "type": "string", "enum": ["CLEAR", "HOLD", "COMMIT", "COMMIT_QUALIFIED", "QUARANTINE", "REJECT", "REUSE", "REAUDIT"] },
+        "ref": { "type": "string" },
+        "note": { "type": "string" }
+      }
+    }
+  }
+}

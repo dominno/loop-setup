@@ -41,15 +41,23 @@ CLAUDE.md                         Project rules + multi-agent workflow + doc-sca
   memory/                         Knowledge wiki (Karpathy LLM-wiki pattern), maintained by /dream
     index.md                      Small catalog imported by CLAUDE.md (always loaded)
     log.md                        Append-only history of wiki operations
+    loop-plan.md                  The loop's durable plan/DAG (every L2/L3 action traces to a ready node)
     loop-run-log.md               Append-only /loop run history (the loop's durable state)
-    topics/                       One page per subject, read on demand
+    quarantine.md                 Candidate facts the /dream admission gate deferred (not part of the wiki)
+    trace/records.jsonl           TRACE-lite record store: one typed verdict per adjudicated claim (append-only)
+    topics/                       One page per subject, read on demand (trace.md = the TRACE-lite policy)
+  trace/
+    schema-v1.json                TRACE-lite record schema (versioned)
+    bench/                        TRACE-Bench-lite: seeded-defect fixtures + scored runs
   settings.local.json             Allowed commands for the workflow
   workflows/                      Deterministic multi-agent orchestration scripts (Workflow tool)
     critic-panel.js               Fan-out critics → adversarial verify → severity matrix
     scan-docs.js                  Per-story parallel evidence-gathering → status verifier
     gap-analysis.js               Per-dimension gap analysis → synthesized next-order
     e2e-design.js                 Per-category E2E test-case enumeration → dedup
-    loop-iteration.js             Maker/checker: worktree implementer → separate verifier
+    loop-iteration.js             Maker/checker: worktree implementer → separate verifier (typed verdict)
+    improve-skills.js             Meta-critic over the project's own prompts → proposed edits
+    trace-bench.js                Measure our own checkers on seeded-defect fixtures
   commands/                       Each command has a description used for routing
     write-goal.md                 Write a production-grade /goal (or /loop) prompt for a task
     multi-agent-dev.md            Full critic-led development pass
@@ -62,6 +70,9 @@ CLAUDE.md                         Project rules + multi-agent workflow + doc-sca
     scan-project-docs.md          Build the user-story / status / coverage map from docs
     sync-story-status.md          Re-sync story statuses with code and tests
     story-gap-analysis.md         Gap analysis: docs vs code vs E2E
+    improve-skills.md             Self-improvement pass over the prompts/workflows (confirmation-gated)
+    bench-checkers.md             TRACE-Bench-lite: measure the checkers, report falsification flags
+scripts/trace/                    `pnpm trace …` — record writer, linter, re-audit, metrics, bench scoring
 docs/
   adoption-guide.md               How to adopt this template in a real project
   loop-integration-guide.md       How to add hardened recurring /loop automations to a project
@@ -223,6 +234,40 @@ and uses Claude Code's **real** memory system (`@import` + `/memory`):
 > as a custom slash command on top of the memory system. Hard rules: only durable,
 > verifiable facts; never secrets; never temporary/branch-specific bugs; prefer
 > appending; confirm before removing entries.
+
+## Typed verdicts & records (TRACE-lite)
+
+Adapted from *TRACE: An Operational Reasoning Schema for Auditable Agentic Commitments*
+(Chang & Chang, arXiv:2607.12480): the unit of value is the **record**, not any one
+checker. Every claim a checker adjudicates — a critic finding, a loop fix, a story
+status, a fact headed for the wiki — gets a typed verdict and an append-only record:
+
+- **Typed verdicts** instead of true/false: `accept` · `qualify` (holds, but weaker) ·
+  `revise` (carries a `repair`) · `defer` (names what is `missing`) · `reject`. A checker
+  that returns nothing **defers** — it is neither a confirmation nor a refutation.
+- **Evidence gate:** each claim is typed (`factual`, `measured`, `causal`, `predictive`,
+  `normative`, `practical`) and an `accept` is capped deterministically when its evidence
+  is weaker than its type demands (a perf claim needs a measurement, a "users will be
+  confused" claim needs a browser observation). No claim stronger than its evidence.
+- **No durable state change without a record:** a loop node becomes `done`, a fact enters
+  the wiki, a story changes status — only with a licensing record and a consumer action
+  (`CLEAR`, `COMMIT`, …), enforced fail-closed by `pnpm trace` and checked in CI.
+- **Consensus is not evidence:** critics share a model, so agreement doesn't upgrade a
+  finding — only *different* evidence corroborates.
+- **Measured, not assumed:** `/bench-checkers` runs the production checkers on seeded
+  defects and reports pre-registered falsification flags (e.g. "a single reviewer is as
+  good as the panel").
+
+```txt
+pnpm trace query --latest          # what has been adjudicated, and what is still deferred
+pnpm trace show TR-…               # one record + its consumer actions + revision chain
+pnpm trace lint                    # replay the store against the contract (also in pnpm test)
+pnpm trace reaudit                 # wiki facts whose evidence changed since they were committed
+pnpm trace metrics                 # consumer coverage, defer quality, repeated-error rate
+```
+
+Policy, verdict semantics and what was deliberately *not* adopted:
+[`.claude/memory/topics/trace.md`](.claude/memory/topics/trace.md).
 
 ## Severity model
 

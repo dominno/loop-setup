@@ -29,6 +29,13 @@
   status (exclude `in-progress`, or a crash-orphaned node re-reads as ready → duplicate
   dispatch) and resolve *every* non-`done` terminal dep-state (a `dropped`/`escalated`
   dependency must cascade-resolve, else its dependents strand silently `blocked`).
+- **Verdicts are typed and recorded (TRACE-lite):** every verdict-producing workflow
+  (`critic-panel`, `loop-iteration`, `improve-skills`, `scan-docs`) returns
+  accept/qualify/revise/defer/reject plus `traceRecords` drafts; the caller appends them
+  with `pnpm trace write`, and a node/fact/story status changes only with a licensing
+  record + consumer action. Shared deterministic blocks (evidence gate, denylist, loop
+  verifier prompt, critic roster) are byte-identical copies across workflows, enforced by
+  `scripts/trace/contracts.test.mjs`. Details: [trace](./trace.md).
 - Custom commands live in `.claude/commands/` (each with a `description` for
   routing); the grouped "when to use" catalog is `.claude/skills-index.md`. A
   catalog file must NOT live in `.claude/commands/` — anything there auto-registers
@@ -39,7 +46,8 @@
   `gap-analysis` (per-dimension gaps → synth order), `e2e-design` (per-category
   cases → dedup), `loop-iteration` (worktree implementer → separate verifier),
   `improve-skills` (per-lens meta-critic over our OWN prompts/workflows → proposed
-  edits, confirmation-gated). Commands invoke them via the Workflow tool (the
+  edits, confirmation-gated), `trace-bench` (measures the checkers on seeded-defect
+  fixtures, `/bench-checkers`). Commands invoke them via the Workflow tool (the
   sanctioned opt-in). Name a workflow
   distinctly from any command (e.g. `critic-panel` vs the `/critic-round` command) to
   avoid a duplicate skills-list entry. Don't force non-fan-out commands
@@ -85,7 +93,8 @@
   and a loop never stops). Hard-stop pattern: if `budget.total && budget.remaining()
   < FLOOR`, skip the expensive stage instead of failing mid-run — `loop-iteration`
   escalates all items (`budgetStopped`), `improve-skills` skips the verify fan-out and
-  routes findings to `needsDesign` (unverified ⇒ never auto-applied). Keep the fail-safe
+  returns the findings as `deferred` (TRACE `defer`: unverified ⇒ never auto-applied,
+  never counted as refuted). Keep the fail-safe
   direction: a budget stop must never *approve* unverified work.
 - **Diagram-first:** every workflow's node/edge graph is drawn in
   `docs/workflow-graphs.md` (Mermaid), with the model tier per node. Update the diagram
@@ -104,5 +113,23 @@
   constraints, checkpoint rules (pause vs run-through), a self-verify instruction,
   and a max-budget/turn guard. See `CLAUDE.md` → "Writing `/goal` and `/loop`
   prompts".
+- Cost (one run, scales with the number of blocker/important findings): an
+  `/improve-skills` pass over 21 prompt/workflow files spawned 112 agents (~9.4M subagent
+  tokens, ~82 min) because every blocker/important finding gets its own strong-tier
+  verifier — scope `args.targets` narrowly when budget matters. <!-- rec:TR-6ab38b2e15ac -->
+- Cost reference (one run each; critic-panel cost scales with its blocker/important
+  findings — 24 here): a critic-panel round with the 5 non-UI critics spawned 29 agents
+  (~2.9M subagent tokens, ~51 min); TRACE-Bench-lite (verifier + single-pass, repeat 2,
+  11 fixtures) spawned 33 agents (~2.0M tokens, ~10 min). <!-- rec:TR-3ef3eac264d4 -->
+- Cost (one run): TRACE-Bench-lite with verifier (repeat 2) + single-pass + a 5-critic
+  panel over 19 fixtures spawned 152 agents (~9.5M subagent tokens, ~59 min); the panel arm
+  (~5 agents per fixture) dominates. <!-- rec:TR-7085756f8495 -->
+- Cost (one run): a verifier-only TRACE-Bench-lite run at repeat 3 over 29 fixtures spawned
+  87 agents (~5.8M subagent tokens, ~49 min); each verifier applies the diff and runs the
+  repo's checks, so cost tracks the verify chain's runtime. <!-- rec:TR-57403effdd24 -->
+- Workflow subagent transcripts indent every line after the first of the agent's prompt
+  (its first user message) by two spaces — strip `\n  ` before checking that a prompt
+  carries an exact args string, e.g. a bench patch (observed 2026-10-08).
+  <!-- rec:TR-b3b37a1408f4 -->
 
-Related: [build-and-verify](./build-and-verify.md) · [testing](./testing.md)
+Related: [build-and-verify](./build-and-verify.md) · [testing](./testing.md) · [trace](./trace.md)

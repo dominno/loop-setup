@@ -26,11 +26,17 @@ Checklist:
     - keyboard navigation works for critical flow
 12. Run a **post-implementation critic round as a Workflow** — invoke the Workflow
     tool with `scriptPath: .claude/workflows/critic-panel.js` and
-    `args: { "focus": "the changed flows for $ARGUMENTS", "priorEvidence": "<git diff summary + the typecheck/lint/unit/build/E2E results + a11y/browser findings from steps 2-11>" }`.
+    `args: { "focus": "the changed flows for $ARGUMENTS", "priorEvidence": "<git diff summary + the typecheck/lint/unit/build/E2E results + a11y/browser findings from steps 2-11>", "priorRecords": <pnpm -s trace query --latest --writer critic-panel --brief>, "treeId": "<pnpm -s trace tree-id>" }`.
     The critics run as parallel subagents and verify against that evidence; each
-    blocker/important finding is checked by a separate skeptic (no single agent
-    simulating the panel).
-13. Report the workflow's `confirmed` blockers/non-blockers and recommended next
-    actions.
+    blocker/important finding gets a typed verdict from a separate skeptic (no single
+    agent simulating the panel). Record the verdicts per the **consumer protocol** in
+    `.claude/memory/topics/trace.md` (scratchpad file → `pnpm trace write <file>` →
+    `pnpm trace act --from <file>`).
+13. Report the workflow's `confirmed` findings (with verdicts and qualifiers), the
+    `deferred` ones with their `missing` evidence, the `revised` ones with their `repair`,
+    any `failedReviewers`, and recommended next actions.
 
-Never mark as complete if build, tests, or critical browser flow fails.
+Never mark as complete if build, tests, or the critical browser flow fails, if any
+blocker is open (confirmed, deferred or revised — a defer is not a pass until its
+`missing` evidence is supplied and re-adjudicated, or a human accepts the risk), or if a
+reviewer failed in the critic round.

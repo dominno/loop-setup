@@ -1,0 +1,5 @@
+# TRACE-lite record store: append-only JSONL. Concurrent appends on two branches merge
+# cleanly as a union (each side keeps its relative order); `pnpm trace lint` (also run by
+# `pnpm test`) is the post-merge integrity check. Rotation (`pnpm trace rotate`) runs only
+# on the default branch — a union merge of two rotations would duplicate records.
+.claude/memory/trace/records.jsonl merge=union
