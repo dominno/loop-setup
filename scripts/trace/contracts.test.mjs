@@ -15,6 +15,7 @@ import {
   loadEntries,
   loadSchema,
   benchArgs,
+  briefRecords,
   contaminatedRuns,
   encodeBench,
   leakMarkers,
@@ -189,5 +190,17 @@ describe("TRACE-Bench-lite fixtures", () => {
       return (f.judge.kind === "denylist" && hit !== f.judge.catches) || (f.kind === "good" && hit);
     });
     expect(wrong.map((f) => opaqueFixtureId(f.id))).toEqual([]);
+  });
+});
+
+describe("verdict-reuse input contract", () => {
+  it("`query --brief` carries every field critic-panel reads from a prior record", () => {
+    const text = readFileSync(join(ROOT, ".claude/workflows/critic-panel.js"), "utf8");
+    const reads = new Set([...text.matchAll(/\bprior\.([a-z_]+)/g)].map((m) => m[1]));
+    const digest = /const priorDigest[\s\S]*?\n {2}: ''/.exec(text)[0];
+    for (const m of digest.matchAll(/\br\.([a-z_]+)/g)) reads.add(m[1]);
+    expect(reads.size).toBeGreaterThan(5);
+    const keys = Object.keys(briefRecords([{ record_id: "TR-x", provenance: {} }])[0]);
+    expect([...reads].filter((k) => !keys.includes(k))).toEqual([]);
   });
 });

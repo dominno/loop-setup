@@ -10,7 +10,13 @@ import {
   applyEvidenceGateStrict,
   staleFixtures,
   appendActions,
+  benchRecordDraft,
+  BRIEF_WINDOW,
+  briefRecords,
   effectivePanelSize,
+  insideRepo,
+  markUnscanned,
+  numstatPaths,
   latestByClaim,
   loadEntries,
   loadSchema,
@@ -352,7 +358,7 @@ describe("checker-round hardening (policy v2)", () => {
     expect(replay(loadEntries(store), schema, POLICY).errors).toEqual([]);
   });
 
-  it("REUSE / REAUDIT are events: the same one at a later time is stored again", () => {
+  it("REUSE is an event: the same one at a later time is stored again", () => {
     const [a] = writeRecords([draft()], ctx());
     appendActions([{ record_id: a.record_id, consumer: "critic-panel", action: "REUSE", note: "same" }], ctx());
     const second = appendActions([{ record_id: a.record_id, consumer: "critic-panel", action: "REUSE", note: "same" }], { ...ctx(), now: "2026-10-07T15:00:00.000Z" });
@@ -458,5 +464,58 @@ describe("bench scoring fails closed on unattributable leaks", () => {
   it("raises F0 when a leak cannot be tied to a run", () => {
     const s = scoreBench({ fixtures: [{ id: "B1", kind: "bad" }, { id: "G1", kind: "good" }] }, { runs: [], unattributedLeaks: 1 });
     expect(s.flags.some((f) => f.startsWith("F0 contamination") && f.includes("could not be tied"))).toBe(true);
+  });
+});
+
+describe("round-3 fixes", () => {
+  it("REAUDIT is a decision: re-auditing an unchanged queue is a no-op, changed evidence is a new action", () => {
+    const [a] = writeRecords([draft()], ctx());
+    const act = (note, now) => appendActions([{ record_id: a.record_id, consumer: "dream", action: "REAUDIT", note }], { ...ctx(), now });
+    act("evidence changed: src/a.ts", NOW);
+    const again = act("evidence changed: src/a.ts", "2026-10-08T09:00:00.000Z");
+    expect(again[0]).toMatchObject({ stored: true, noop: true });
+    expect(act("evidence changed: src/a.ts, src/b.ts", "2026-10-08T10:00:00.000Z")[0].noop).toBeUndefined();
+    expect(loadEntries(store).filter((e) => e.value.kind === "action")).toHaveLength(2);
+  });
+
+  it("--brief keeps every field verdict reuse reads (a reused qualify keeps its qualifier) and the newest window only", () => {
+    const recs = Array.from({ length: BRIEF_WINDOW + 3 }, (_, i) => ({
+      record_id: `TR-${String(i).padStart(12, "0")}`, claim_id: `c${i}`, claim_text: "t", claim_type: "factual",
+      final_status: "qualify", qualifier: `holds only for case ${i}`, repair: "", failed_gates: ["g"], missing: [],
+      reason: "r".repeat(500), provenance: { commit: "abc1234", workflow: "critic-panel", tree: "0123456789abcdef" },
+      created_at: `2026-10-07T12:00:${String(i).padStart(2, "0")}.000Z`,
+    }));
+    const brief = briefRecords(recs);
+    expect(brief).toHaveLength(BRIEF_WINDOW);
+    expect(brief[0]).toMatchObject({ claim_id: `c${BRIEF_WINDOW + 2}`, qualifier: `holds only for case ${BRIEF_WINDOW + 2}`, failed_gates: ["g"], provenance: { tree: "0123456789abcdef" } });
+    expect(brief[0].reason.length).toBe(200);
+    expect(brief.some((r) => r.claim_id === "c0")).toBe(false); // the oldest fall out of the window
+  });
+
+  it("numstatPaths reads git's -z listing (plain and rename forms)", () => {
+    expect(numstatPaths("1\t1\tsrc/a.ts\x000\t0\t.claude/loop.md\x00")).toEqual(["src/a.ts", ".claude/loop.md"]);
+    expect(numstatPaths("0\t0\t\x00docs/x.md\x00.claude/loop.md\x00-\t-\timg.png\x00")).toEqual(["docs/x.md", ".claude/loop.md", "img.png"]);
+  });
+
+  it("insideRepo resolves relative paths against the cwd before comparing", () => {
+    expect(insideRepo("tmp-unpack", "/repo", "/repo")).toBe(true);
+    expect(insideRepo("../elsewhere", "/repo", "/repo")).toBe(false);
+    expect(insideRepo("/repo-sibling/x", "/repo", "/")).toBe(false);
+    expect(insideRepo("/repo/sub", "/repo", "/")).toBe(true);
+  });
+
+  it("runs no scanned transcript belongs to are excluded (F0 coverage), and the record is a qualify", () => {
+    const manifest = { fixtures: [{ id: "B1", kind: "bad" }, { id: "G1", kind: "good" }] };
+    const runs = [
+      { arm: "verifier", repeat: 0, fixtureId: "fx-00000001", verdict: "defer" },
+      { arm: "verifier", repeat: 0, fixtureId: "fx-00000002", verdict: "accept" },
+      { arm: "verifier", repeat: 1, fixtureId: "fx-00000002", verdict: "accept", noVerdict: true },
+    ];
+    const marked = markUnscanned(runs, [{ label: "bench-verify:fx-00000001-r0-0" }, { label: "critic:security-1" }]);
+    expect(marked.map((r) => !!r.unscanned)).toEqual([false, true, false]); // a no-verdict run is excluded anyway
+    const score = scoreBench(manifest, { runs: marked });
+    expect(score.unscannedRuns).toBe(1);
+    expect(score.flags.some((f) => f.startsWith("F0 coverage"))).toBe(true);
+    expect(benchRecordDraft(score, { resultsRef: "x" }).final_status).toBe("qualify");
   });
 });

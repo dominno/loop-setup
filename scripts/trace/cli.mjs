@@ -10,14 +10,17 @@ import {
   BENCH_BUNDLE,
   benchArgs,
   benchRecordDraft,
+  briefRecords,
   contaminatedRuns,
   encodeBench,
   leakMarkers,
   loadWorkflowBlock,
   markContaminated,
+  markUnscanned,
+  insideRepo,
+  numstatPaths,
   CODE_PATHS,
   readBench,
-  staleFixtures,
   DEFAULT_STORE,
   latestByClaim,
   loadEntries,
@@ -47,8 +50,10 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
   pnpm trace show <record_id>          a record, its consumer actions, and its revision chain
   pnpm trace query [--claim-id ID] [--status S] [--writer PREFIX] [--subject S] [--latest] [--json] [--brief]
                                        --brief: compact JSON (newest 40, only the fields critic-panel reads) for args.priorRecords
-  pnpm trace denylist-check            run the loop's production denylist over the paths git reports as changed
-                                       (tracked diff vs HEAD, renames/copies included, plus untracked) — exit 1 on a hit
+  pnpm trace denylist-check --patch <file>
+                                       BEFORE applying a patch: run the loop's production denylist (read from HEAD) over
+                                       every path git's own parser finds in it (git apply --numstat) — exit 1 on a hit,
+                                       exit 2 when it cannot be verified (git error, no paths)
   pnpm trace lint                      replay the whole store and check every contract invariant (exit 1 on error)
   pnpm trace reaudit [--act]           licensing records whose file evidence changed since their commit
   pnpm trace metrics                   store-level consumer-value metrics
@@ -166,16 +171,34 @@ async function main() {
   };
 
   if (cmd === "denylist-check") {
-    const { hitsDenylist } = loadWorkflowBlock("loop-iteration.js", "loop-denylist", ["hitsDenylist"]);
-    // Paths from git itself (renames/copies resolved), not from parsing patch text.
-    const changed = (git(["diff", "HEAD", "--name-status", "-z", "-M", "-C"]) || "").split("\0").filter(Boolean).filter((x) => !/^[A-Z]\d*$/.test(x));
-    const untracked = (git(["ls-files", "--others", "--exclude-standard", "-z"]) || "").split("\0").filter(Boolean);
-    // The loop's own state files (plan, run-log, record store) are written by the Lead every
-    // iteration and are not part of an implementer's patch — exclude them.
-    const isState = (p) => TREE_ID_EXCLUDES.some((x) => p === x || p.startsWith(`${x}/`));
-    const paths = [...new Set([...changed, ...untracked])].filter((p) => !isState(p));
+    // Judge the PATCH, before it is applied — not the working tree (which also holds the
+    // Lead's own bookkeeping and unrelated uncommitted edits, and which a patch could
+    // rewrite to weaken the very check that inspects it). Paths come from git's own
+    // parser, the denylist from HEAD; anything that cannot be verified exits 2 (fail closed).
+    if (typeof flags.patch !== "string") {
+      out("usage: pnpm trace denylist-check --patch <file>   (run it BEFORE git apply <file>)");
+      return 2;
+    }
+    const sh = (args) => execFileSync("git", args, { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 28, stdio: ["ignore", "pipe", "pipe"] });
+    let paths;
+    let hitsDenylist;
+    try {
+      // `git apply --numstat` names only the DESTINATION of a rename/copy; the reversed
+      // patch names its source — the union covers both sides (renaming a protected file
+      // away deletes it).
+      const patch = resolve(flags.patch);
+      paths = [...new Set([...numstatPaths(sh(["apply", "--numstat", "-z", patch])), ...numstatPaths(sh(["apply", "--numstat", "-z", "-R", patch]))])];
+      ({ hitsDenylist } = loadWorkflowBlock("loop-iteration.js", "loop-denylist", ["hitsDenylist"], { source: sh(["show", "HEAD:.claude/workflows/loop-iteration.js"]) }));
+    } catch (e) {
+      out({ ok: false, error: `could not verify the patch: ${String(e.stderr || e.message || e).trim().split("\n")[0]}` }, true);
+      return 2;
+    }
+    if (!paths.length) {
+      out({ ok: false, error: "git found no paths in the patch — nothing can be verified" }, true);
+      return 2;
+    }
     const hits = paths.filter((p) => hitsDenylist([p]));
-    out({ ok: hits.length === 0, checked: paths.length, hits }, true);
+    out({ ok: hits.length === 0, checked: paths.length, paths, hits }, true);
     return hits.length ? 1 : 0;
   }
 
@@ -217,7 +240,16 @@ async function main() {
     let drafts;
     if (flags.from) {
       const input = readJsonInput(flags.from === true ? "-" : flags.from);
-      drafts = Array.isArray(input) ? input : input?.actions || input?.reuseActions || [];
+      drafts = Array.isArray(input) ? input : Array.isArray(input?.actions) ? input.actions : Array.isArray(input?.reuseActions) ? input.reuseActions : null;
+      if (drafts === null) {
+        out("no actions found in the input (expected an array, {actions:[...]} or a result with reuseActions)");
+        return 1;
+      }
+      // A recognised but empty list (a critic round that reused nothing) is a normal outcome.
+      if (!drafts.length) {
+        out("nothing to record (0 actions)");
+        return 0;
+      }
     } else {
       const [record_id, consumer, action] = pos;
       if (!record_id || !consumer || !action) {
@@ -225,10 +257,6 @@ async function main() {
         return 2;
       }
       drafts = [{ record_id, consumer, action: String(action).toUpperCase(), ref: flags.ref, note: flags.note }];
-    }
-    if (!drafts.length) {
-      out("no actions found in the input (expected an array, {actions:[...]} or a result with reuseActions)");
-      return 1;
     }
     const results = appendActions(drafts, { storePath, now, policyVersion, schema, forbidden: benchForbidden() });
     out(results, true);
@@ -270,15 +298,7 @@ async function main() {
     if (flags.writer) recs = recs.filter((r) => r.writer_id.startsWith(flags.writer));
     if (flags.subject) recs = recs.filter((r) => r.subject === flags.subject);
     if (flags.brief) {
-      const brief = [...recs]
-        .sort((x, y) => String(y.created_at).localeCompare(String(x.created_at)))
-        .slice(0, 40)
-        .map((r) => ({
-          record_id: r.record_id, claim_id: r.claim_id, claim_text: r.claim_text, claim_type: r.claim_type,
-          final_status: r.final_status, missing: r.missing, reason: String(r.reason).slice(0, 200),
-          provenance: { tree: r.provenance.tree }, created_at: r.created_at,
-        }));
-      process.stdout.write(JSON.stringify(brief) + "\n");
+      process.stdout.write(JSON.stringify(briefRecords(recs)) + "\n");
       return 0;
     }
     if (flags.json) return out(recs, true), 0;
@@ -295,7 +315,7 @@ async function main() {
     if (flags.act && cands.length) {
       const res = appendActions(
         cands.map((c) => ({ record_id: c.record_id, consumer: "dream", action: "REAUDIT", note: `evidence changed: ${c.changed.join(", ")}` })),
-        { storePath, now, policyVersion, schema },
+        { storePath, now, policyVersion, schema, forbidden: benchForbidden() },
       );
       out(res, true);
       if (!res.every((r) => r.stored)) return 1;
@@ -330,7 +350,7 @@ async function main() {
   if (cmd === "bench-unpack") {
     const dir = pos[0];
     if (!dir) return out("usage: pnpm trace bench-unpack <dir outside the repo>"), 2;
-    if (join(resolve(dir), "/").startsWith(join(ROOT, "/"))) {
+    if (insideRepo(dir)) {
       out("refusing to unpack inside the repo — plain-text fixtures there would contaminate the next bench run");
       return 1;
     }
@@ -349,17 +369,17 @@ async function main() {
     const list = (x) => (typeof x === "string" ? x.split(",").map((s) => s.trim()).filter(Boolean) : undefined);
     if (cmd === "bench-args" || cmd === "bench-judge") {
       // Precondition (kept out of `pnpm test` so product edits never redden the main gate):
-      // every fixture must still apply, else the bench would measure a broken setup.
-      const stale = staleFixtures(manifest, (patch) => {
-        try {
-          execFileSync("git", ["apply", "--check", "-"], { cwd: ROOT, input: patch, stdio: ["pipe", "pipe", "pipe"] });
-          return true;
-        } catch {
-          return false;
-        }
-      });
-      if (stale.length) {
-        out({ error: "stale fixtures — their patches no longer apply to the working tree; regenerate them (bench-unpack → edit → bench-pack)", stale }, true);
+      // no fixture patch may still be applied (a killed run — --recover reverses it, and is
+      // checked FIRST, since an applied patch also fails the stale check), and every fixture
+      // must still apply, else the bench would measure a broken setup.
+      const { benchPreflight } = await import("./bench-judge.mjs");
+      const pre = benchPreflight(manifest, { recover: cmd === "bench-judge" && !!flags.recover });
+      if (pre.reversed) {
+        out({ reversed: pre.reversed }, true);
+        return 0;
+      }
+      if (pre.error) {
+        out(pre, true);
         return 1;
       }
     }
@@ -374,11 +394,7 @@ async function main() {
       return 0;
     }
     if (cmd === "bench-judge") {
-      const { runBenchJudge, recoverApplied } = await import("./bench-judge.mjs");
-      if (flags.recover) {
-        out({ reversed: recoverApplied(manifest) }, true);
-        return 0;
-      }
+      const { runBenchJudge } = await import("./bench-judge.mjs");
       const results = await runBenchJudge(manifest, { only: list(flags.only), skipE2e: !!flags["skip-e2e"] });
       out(results, true);
       return results.every((r) => r.ok !== false) ? 0 : 1;
@@ -415,7 +431,7 @@ async function main() {
       return 1;
     }
     const keys = contaminatedRuns(transcripts, manifest);
-    runs = markContaminated(runs, keys);
+    runs = markUnscanned(markContaminated(runs, keys), transcripts);
     const score = scoreBench(manifest, { runs, unattributedLeaks: keys.filter((k) => k.arm === "unknown").length });
     score.transcriptsScanned = transcripts.length;
     if (flags.record && score.unattributedLeaks) {
@@ -423,12 +439,17 @@ async function main() {
       out("--record refused: ground truth leaked into a transcript that cannot be tied to a run (F0)");
       return 1;
     }
+    if (flags.record && score.unscannedRuns) {
+      out(score, true);
+      out(`--record refused: ${score.unscannedRuns} run(s) have no scanned transcript — is --transcripts this run's transcript dir? (F0)`);
+      return 1;
+    }
     out(score, true);
     if (flags.record) {
       const prior = latestByClaim(state.records, state.superseded).get("bench:trace-bench-lite");
       const commit = git(["rev-parse", "--short=12", "HEAD"]) || undefined;
       const branch = git(["rev-parse", "--abbrev-ref", "HEAD"]) || undefined;
-      const res = writeRecords([benchRecordDraft(score, { resultsRef, priorRecordId: prior && prior.record_id })], { storePath, now, policyVersion, commit, branch, schema });
+      const res = writeRecords([benchRecordDraft(score, { resultsRef, priorRecordId: prior && prior.record_id })], { storePath, now, policyVersion, commit, branch, schema, forbidden: benchForbidden() });
       out(res, true);
       return res.every((r) => r.stored) ? 0 : 1;
     }

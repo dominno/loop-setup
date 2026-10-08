@@ -465,6 +465,25 @@ export function latestByClaim(records, superseded) {
   return byClaim;
 }
 
+/**
+ * `pnpm trace query --brief` — the compact prior-record shape passed to critic-panel as
+ * args.priorRecords (the newest BRIEF_WINDOW records). It must carry every field
+ * critic-panel reads from a prior (a contract test enforces this): a reused `qualify`
+ * that lost its qualifier would be acted on at full strength.
+ */
+export const BRIEF_WINDOW = 40;
+export function briefRecords(recs) {
+  return [...recs]
+    .sort((x, y) => String(y.created_at).localeCompare(String(x.created_at)))
+    .slice(0, BRIEF_WINDOW)
+    .map((r) => ({
+      record_id: r.record_id, claim_id: r.claim_id, claim_text: r.claim_text, claim_type: r.claim_type,
+      final_status: r.final_status, qualifier: r.qualifier || "", repair: r.repair || "",
+      failed_gates: r.failed_gates || [], missing: r.missing || [], reason: String(r.reason || "").slice(0, 200),
+      provenance: { tree: r.provenance && r.provenance.tree }, created_at: r.created_at,
+    }));
+}
+
 /** Extract a repo path from an evidence ref like "src/a.ts:12" or "src/a.ts:3-9". */
 export function pathFromRef(ref) {
   const m = /^([^\s:,]+\.[A-Za-z0-9]+)(?::\d+(?:-\d+)?)?$/.exec(String(ref || "").trim());
@@ -603,19 +622,24 @@ export function scoreBench(manifest, results, thresholds = { invariance: 0.8 }) 
   // Runs whose agent saw ground truth (markContaminated) are excluded, never scored.
   const byToken = new Map(manifest.fixtures.map((f) => [opaqueFixtureId(f.id), f.id]));
   const all = (Array.isArray(results?.runs) ? results.runs : []).map((r) => ({ ...r, fixtureId: byToken.get(r.fixtureId) || r.fixtureId }));
-  const clean = all.filter((r) => !r.contaminated);
+  // Runs with no scanned transcript (markUnscanned) are excluded too: unvouched ≠ clean.
+  const clean = all.filter((r) => !r.contaminated && !r.unscanned);
   // Validity: a run whose agent returned no verdict measured nothing — scoring it as a
   // hold would let a dead checker look perfect on the bad fixtures.
   const runs = clean.filter((r) => !r.noVerdict);
   const out = {
     fixtures: { bad: bad.length, good: good.length },
-    contaminatedRuns: all.length - clean.length,
+    contaminatedRuns: all.filter((r) => r.contaminated).length,
+    unscannedRuns: all.filter((r) => r.unscanned && !r.contaminated).length,
     noVerdictRuns: clean.length - runs.length,
     arms: {},
     flags: [],
   };
   if (out.contaminatedRuns) {
     out.flags.push(`F0 contamination: ${out.contaminatedRuns} run(s) had ground truth in their agent's transcript and were excluded — fix the leak before trusting this bench`);
+  }
+  if (out.unscannedRuns) {
+    out.flags.push(`F0 coverage: ${out.unscannedRuns} run(s) have no scanned agent transcript and were excluded — point --transcripts at this run's workflow transcript dir`);
   }
   // A leak in a transcript that cannot be attributed to a run can contaminate any run:
   // the measurement is not trustworthy at all (fail closed).
@@ -823,10 +847,14 @@ export function writeRecords(drafts, { storePath, now, policyVersion, commit, br
   }));
 }
 
-/** Append consumer actions all-or-nothing, enforcing the action matrix (fail closed). */
-/** Bookkeeping events that legitimately repeat (each reuse / re-audit is a new event). */
-export const EVENT_ACTIONS = ["REUSE", "REAUDIT"];
+/**
+ * Bookkeeping events that legitimately repeat: each reuse is a new event. REAUDIT is
+ * not one — its note names the changed evidence, so re-auditing an unchanged queue is a
+ * no-op instead of appending a line per stale record on every pass.
+ */
+export const EVENT_ACTIONS = ["REUSE"];
 
+/** Append consumer actions all-or-nothing, enforcing the action matrix (fail closed). */
 export function appendActions(drafts, { storePath, now, policyVersion, schema, forbidden = [] }) {
   const sch = schema || loadSchema();
   const prior = replay(loadEntries(storePath), sch, policyVersion);
@@ -970,26 +998,40 @@ export function leakMarkers(manifest, codeText) {
  */
 export function contaminatedRuns(transcripts, manifest) {
   const markers = leakMarkers(manifest);
-  const keys = [];
-  for (const t of transcripts) {
-    if (!markers.some((m) => t.text.includes(m))) continue;
-    let m;
-    if ((m = /^bench-verify:(fx-[0-9a-f]{8})-r(\d+)-\d+$/.exec(t.label))) keys.push({ arm: "verifier", token: m[1], repeat: Number(m[2]) });
-    else if ((m = /^bench-single:(fx-[0-9a-f]{8})-\d+$/.exec(t.label))) keys.push({ arm: "single-pass", token: m[1] });
-    else if ((m = /^bench-panel:(fx-[0-9a-f]{8}):([a-z-]+)-\d+-\d+$/.exec(t.label))) keys.push({ arm: "panel", token: m[1], critic: m[2] });
-    else keys.push({ arm: "unknown", label: t.label });
-  }
-  return keys;
+  return transcripts
+    .filter((t) => markers.some((m) => t.text.includes(m)))
+    .map((t) => runKeyFromLabel(t.label) || { arm: "unknown", label: t.label });
 }
+
+/**
+ * The bench run an agent label belongs to (trace-bench.js labels its agents
+ * bench-verify:<token>-r<repeat>-<i>, bench-single:<token>-<i>,
+ * bench-panel:<token>:<critic>-<i>-<j>), or null for any other agent.
+ */
+export function runKeyFromLabel(label) {
+  let m;
+  if ((m = /^bench-verify:(fx-[0-9a-f]{8})-r(\d+)-\d+$/.exec(label))) return { arm: "verifier", token: m[1], repeat: Number(m[2]) };
+  if ((m = /^bench-single:(fx-[0-9a-f]{8})-\d+$/.exec(label))) return { arm: "single-pass", token: m[1] };
+  if ((m = /^bench-panel:(fx-[0-9a-f]{8}):([a-z-]+)-\d+-\d+$/.exec(label))) return { arm: "panel", token: m[1], critic: m[2] };
+  return null;
+}
+
+const runMatchesKey = (r, k) =>
+  k.arm === r.arm && k.token === r.fixtureId && (k.repeat === undefined || k.repeat === (r.repeat ?? 0)) && (k.critic === undefined || k.critic === r.critic);
 
 /** Mark runs whose agent saw ground truth (scoreBench then excludes them and raises F0). */
 export function markContaminated(runs, keys) {
-  return runs.map((r) => {
-    const hit = keys.some(
-      (k) => k.arm === r.arm && k.token === r.fixtureId && (k.repeat === undefined || k.repeat === (r.repeat ?? 0)) && (k.critic === undefined || k.critic === r.critic),
-    );
-    return hit ? { ...r, contaminated: true } : r;
-  });
+  return runs.map((r) => (keys.some((k) => runMatchesKey(r, k)) ? { ...r, contaminated: true } : r));
+}
+
+/**
+ * Mark scored runs that NO scanned transcript belongs to: the leak scan cannot vouch for
+ * them, so they are excluded like contaminated runs (F0) — a wrong or partial transcript
+ * dir must not yield a clean-looking measurement.
+ */
+export function markUnscanned(runs, transcripts) {
+  const keys = transcripts.map((t) => runKeyFromLabel(t.label)).filter(Boolean);
+  return runs.map((r) => (r.noVerdict || keys.some((k) => runMatchesKey(r, k)) ? r : { ...r, unscanned: true }));
 }
 
 /**
@@ -997,11 +1039,40 @@ export function markContaminated(runs, keys) {
  * imported) and return the named bindings — used to run the PRODUCTION denylist
  * against fixtures instead of a re-implementation.
  */
-export function loadWorkflowBlock(file, tag, names) {
-  const text = readFileSync(join(ROOT, ".claude/workflows", file), "utf8");
+export function loadWorkflowBlock(file, tag, names, { source } = {}) {
+  // `source` lets a caller evaluate a TRUSTED copy (e.g. `git show HEAD:<file>`) instead
+  // of the working tree, which a patch under review may have rewritten.
+  const text = source ?? readFileSync(join(ROOT, ".claude/workflows", file), "utf8");
   const m = new RegExp(`// <${tag}>\\n[\\s\\S]*?// </${tag}>\\n`).exec(text);
   if (!m) throw new Error(`${file}: no <${tag}> block`);
   return new Function(`${m[0]}\nreturn { ${names.join(", ")} };`)();
+}
+
+/**
+ * Paths from `git apply --numstat -z <patch>` — git's OWN parse of a patch, so every
+ * format git apply accepts (mixed prefixes, traditional diffs, timestamps, binary) is
+ * covered. Records are `added\tdeleted\tpath\0` (the `git diff --numstat -z` rename form
+ * `added\tdeleted\t\0src\0dst\0` is accepted too). `git apply --numstat` names only the
+ * destination of a rename/copy, so callers union it with the `-R` (reversed) listing.
+ */
+export function numstatPaths(z) {
+  const tokens = String(z || "").split("\0");
+  const paths = [];
+  for (let i = 0; i < tokens.length; i += 1) {
+    const m = /^(?:\d+|-)\t(?:\d+|-)\t([\s\S]*)$/.exec(tokens[i]);
+    if (!m) continue;
+    if (m[1] !== "") paths.push(m[1]);
+    else {
+      paths.push(tokens[i + 1], tokens[i + 2]);
+      i += 2;
+    }
+  }
+  return paths.filter(Boolean);
+}
+
+/** True when `dir` (relative paths resolved against the cwd) lies inside the repo. */
+export function insideRepo(dir, root = ROOT, cwd = process.cwd()) {
+  return join(resolve(cwd, String(dir)), "/").startsWith(join(root, "/"));
 }
 
 /** Structural problems in a bench manifest (pure; patch existence checked by caller). */
@@ -1085,8 +1156,8 @@ export function benchRecordDraft(score, { resultsRef, priorRecordId }) {
     missing: [],
     // Excluded runs (contamination or no verdict) shrink the sample: the numbers hold
     // only for the runs that were actually measured.
-    ...(score.contaminatedRuns || score.noVerdictRuns
-      ? { final_status: "qualify", qualifier: `measured on the clean runs only — ${score.contaminatedRuns || 0} contaminated and ${score.noVerdictRuns || 0} no-verdict run(s) were excluded` }
+    ...(score.contaminatedRuns || score.unscannedRuns || score.noVerdictRuns
+      ? { final_status: "qualify", qualifier: `measured on the clean runs only — ${score.contaminatedRuns || 0} contaminated, ${score.unscannedRuns || 0} unscanned and ${score.noVerdictRuns || 0} no-verdict run(s) were excluded` }
       : { final_status: "accept" }),
     reason: "deterministic scoring of the raw bench runs against the manifest's ground truth; the flags are the pre-registered falsification criteria that fired",
     provenance: { workflow: "trace-bench" },

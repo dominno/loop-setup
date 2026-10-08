@@ -20,7 +20,7 @@ import { spawn as spawnAsync, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadWorkflowBlock, ROOT } from "./lib.mjs";
+import { loadWorkflowBlock, opaqueFixtureId, ROOT, staleFixtures } from "./lib.mjs";
 
 // Only what node/pnpm/playwright need. No tokens, keys or proxy credentials.
 const ENV_ALLOW = [
@@ -28,7 +28,7 @@ const ENV_ALLOW = [
   "NODE_OPTIONS", "PNPM_HOME", "COREPACK_HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME",
   "PLAYWRIGHT_BROWSERS_PATH", "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD",
 ];
-const SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"];
+export const SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"];
 
 export function judgeEnv(source = process.env) {
   const env = { CI: "true", NEXT_TELEMETRY_DISABLED: "1" };
@@ -73,9 +73,9 @@ function spawnJudge(cmd, args, opts, onChild) {
  * Run a judge command; resolves true (failed = caught), false (passed) or null (did not
  * run). `spawn` may return a result or a promise of one (tests inject a stub).
  */
-export async function runJudge(command, { spawn, env = judgeEnv(), onChild = () => {} } = {}) {
+export async function runJudge(command, { spawn, env = judgeEnv(), onChild = () => {}, timeoutMs = 600_000 } = {}) {
   const [cmd, ...cmdArgs] = command.split(/\s+/);
-  const run = await (spawn ? spawn(cmd, cmdArgs, { cwd: ROOT, env }) : spawnJudge(cmd, cmdArgs, { cwd: ROOT, env, timeout: 600_000 }, onChild));
+  const run = await (spawn ? spawn(cmd, cmdArgs, { cwd: ROOT, env }) : spawnJudge(cmd, cmdArgs, { cwd: ROOT, env, timeout: timeoutMs }, onChild));
   if (run.error || run.signal || run.status === null) return null;
   return run.status !== 0;
 }
@@ -89,14 +89,32 @@ export function appliedFixtures(manifest, { reverseApplies } = {}) {
 }
 
 /** Reverse every applied fixture patch (recovery after a SIGKILL/crash mid-run). */
-export function recoverApplied(manifest) {
+export function recoverApplied(manifest, { applied = appliedFixtures } = {}) {
   const reversed = [];
-  for (const f of appliedFixtures(manifest)) {
+  for (const f of applied(manifest)) {
     const r = git(["apply", "-R", "-"], { input: f.patch, stdio: ["pipe", "pipe", "pipe"] });
     if (r.status !== 0) throw new Error(`could not reverse ${f.id}: ${String(r.stderr).trim()}`);
     reversed.push(f.id);
   }
   return reversed;
+}
+
+/**
+ * The CLI precondition for bench-args / bench-judge. Order matters: a fixture patch left
+ * applied by a killed run ALSO fails the stale check (its forward apply no longer
+ * applies), so applied patches are detected — and with `recover`, reversed — before any
+ * fixture is reported stale. Returns { reversed } | { error, … } | {}.
+ */
+export function benchPreflight(manifest, { recover = false, applied = appliedFixtures, applies } = {}) {
+  if (recover) return { reversed: recoverApplied(manifest, { applied }) };
+  const left = applied(manifest);
+  if (left.length) {
+    return { error: `${left.length} fixture patch(es) are still applied to the working tree (an interrupted bench-judge run?) — run \`pnpm trace bench-judge --recover\` first`, applied: left.map((f) => opaqueFixtureId(f.id)) };
+  }
+  const check = applies || ((patch) => git(["apply", "--check", "-"], { input: patch, stdio: ["pipe", "pipe", "pipe"] }).status === 0);
+  const stale = staleFixtures(manifest, check);
+  if (stale.length) return { error: "stale fixtures — their patches no longer apply to the working tree; regenerate them (bench-unpack → edit → bench-pack)", stale };
+  return {};
 }
 
 export async function runBenchJudge(

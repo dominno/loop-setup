@@ -130,9 +130,10 @@ they do not adjudicate, and no durable state changes on their output.
   Rotation runs only on the default branch (a union of two rotations would duplicate
   records).
 - **Idempotent decisions, repeatable events** — re-recording an identical decision is a
-  no-op (reported `noop`), never a batch failure; `REUSE`/`REAUDIT` are events and are
-  stored each time they happen. Action notes/refs are screened for secrets and bench
-  ground truth exactly like records.
+  no-op (reported `noop`), never a batch failure; `REUSE` is an event and is stored each
+  time it happens. A `REAUDIT` is a decision: its note names the changed evidence, so
+  re-auditing an unchanged queue is a no-op rather than a line per stale record per pass.
+  Action notes/refs are screened for secrets and bench ground truth exactly like records.
 - **Version legibility** — `schema_version` const + `policy_version` stamp; a reader refuses
   records from a newer policy (`pnpm trace lint`).
 - **Self-containment** — verdict, failed gates, missing, repair live in the record.

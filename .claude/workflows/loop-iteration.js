@@ -184,18 +184,55 @@ const hitsDenylist = (files) => (files || []).some((f) => DENYLIST.some((re) => 
 // applies). The gate must not trust the implementer's self-reported `changedFiles`
 // alone: a maker that under-reports its changed files while its diff still touches a
 // denylisted path would otherwise slip past. We check the UNION of both.
-function parseDiffPaths(diff) {
+// Fail closed: git apply strips ANY one leading path component and accepts traditional
+// (non-git) sections, so a header this parser cannot pin to an a/ or b/ path, or a hunk
+// that does not match its own line counts, marks the whole diff `unparsable` — the
+// caller escalates instead of trusting a partial path list. (The Lead re-checks the
+// patch with git's own parser before applying it: `pnpm trace denylist-check --patch`.)
+function diffPathScan(diff) {
   const paths = []
-  const s = String(diff || '')
-  for (const m of s.matchAll(/^diff --git a\/(.+?) b\/(.+)$/gm)) { paths.push(m[1], m[2]) }
-  // git C-quotes unusual paths: diff --git "a/x y" "b/x y"
-  for (const m of s.matchAll(/^diff --git "a\/(.+?)" "b\/(.+?)"$/gm)) { paths.push(m[1], m[2]) }
-  for (const m of s.matchAll(/^\+\+\+ b\/(.+)$/gm)) { if (m[1] !== '/dev/null') paths.push(m[1]) }
-  for (const m of s.matchAll(/^--- a\/(.+)$/gm)) { if (m[1] !== '/dev/null') paths.push(m[1]) }
-  // Rename/copy-only patches carry their paths in extended headers, not in ---/+++ lines.
-  for (const m of s.matchAll(/^(?:rename|copy) (?:from|to) (.+)$/gm)) { paths.push(m[1]) }
-  return paths
+  let unparsable = false
+  const unquote = (p) => (p.length > 1 && p.startsWith('"') && p.endsWith('"') ? p.slice(1, -1) : p)
+  // `--- a/x<TAB>2026-01-01 …`: the traditional format may append a timestamp after a tab.
+  const side = (raw) => {
+    const p = unquote(raw.replace(/\t.*$/, ''))
+    if (p === '/dev/null') return
+    if (/^[ab]\/./.test(p)) paths.push(p.slice(2))
+    else unparsable = true
+  }
+  const lines = String(diff || '').split('\n').map((l) => l.replace(/\r$/, ''))
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]
+    let m
+    if ((m = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/.exec(line))) {
+      // Consume exactly the hunk's lines, so hunk CONTENT ("--- x" removed text) is never
+      // mistaken for a file header.
+      let oldN = m[1] === undefined ? 1 : Number(m[1])
+      let newN = m[2] === undefined ? 1 : Number(m[2])
+      while ((oldN > 0 || newN > 0) && i + 1 < lines.length) {
+        const l = lines[++i]
+        if (l.startsWith('\\')) continue // "\ No newline at end of file"
+        const c = l === '' ? ' ' : l[0] // some editors strip the space of an empty context line
+        if (c === ' ') { oldN -= 1; newN -= 1 }
+        else if (c === '-') oldN -= 1
+        else if (c === '+') newN -= 1
+        else { unparsable = true; break }
+      }
+      if (oldN > 0 || newN > 0) unparsable = true
+    } else if (line.startsWith('diff --git ')) {
+      if ((m = /^diff --git a\/(.+?) b\/(.+)$/.exec(line)) || (m = /^diff --git "a\/(.+?)" "b\/(.+?)"$/.exec(line))) paths.push(m[1], m[2])
+      else unparsable = true
+    } else if (line.startsWith('--- ') || line.startsWith('+++ ')) {
+      side(line.slice(4))
+    } else if ((m = /^(?:rename|copy) (?:from|to) (.+)$/.exec(line))) {
+      // Rename/copy-only patches carry their paths in extended headers, not in ---/+++ lines.
+      paths.push(unquote(m[1]))
+    }
+  }
+  if (String(diff || '').trim() && paths.length === 0) unparsable = true
+  return { paths, unparsable }
 }
+const parseDiffPaths = (diff) => diffPathScan(diff).paths
 // </loop-denylist>
 
 phase('Implement')
@@ -215,9 +252,10 @@ const outcomes = await pipeline(
     // the caller applies), so an under-reported file list can't bypass the gate.
     // TRACE: a failed hard gate forbids clearance; the defer names the human approval
     // that could lift it (resolvable by a human, never by the loop).
-    const gatedFiles = [...(im.changedFiles || []), ...parseDiffPaths(im.diff)]
-    // Fail closed: a non-empty diff whose paths cannot be parsed cannot be cleared by the gate.
-    const unparsable = String(im.diff || '').trim() && parseDiffPaths(im.diff).length === 0
+    const scan = diffPathScan(im.diff)
+    const gatedFiles = [...(im.changedFiles || []), ...scan.paths]
+    // Fail closed: a non-empty diff whose paths cannot all be parsed cannot be cleared by the gate.
+    const unparsable = String(im.diff || '').trim() && scan.unparsable
     if (unparsable || hitsDenylist(gatedFiles)) {
       return {
         ...base, applied: false, status: 'escalated-denylist',

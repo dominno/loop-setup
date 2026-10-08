@@ -2,11 +2,11 @@
 // paths, and the bench-judge safety helpers.
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ROOT } from "./lib.mjs";
-import { judgeEnv, runBenchJudge, runJudge } from "./bench-judge.mjs";
+import { opaqueFixtureId, readBench, ROOT } from "./lib.mjs";
+import { benchPreflight, judgeEnv, runBenchJudge, runJudge, SIGNALS } from "./bench-judge.mjs";
 
 const CLI = join(ROOT, "scripts/trace/cli.mjs");
 let dir;
@@ -155,5 +155,158 @@ describe("bench-judge safety helpers", () => {
 
   it("runBenchJudge refuses to start while a fixture patch is still applied (killed run)", async () => {
     await expect(runBenchJudge({ fixtures: [fx()] }, { log: () => {}, judge: async () => false, applied: (m) => m.fixtures })).rejects.toThrow(/--recover/);
+  });
+
+  it("preflight: a fixture patch left applied is reported as applied (not stale), and --recover reverses it", () => {
+    const m = { fixtures: [fx()] };
+    expect(benchPreflight(m)).toEqual({});
+    expect(spawnSync("git", ["apply", "-"], { cwd: ROOT, input: newFilePatch }).status).toBe(0);
+    try {
+      const pre = benchPreflight(m);
+      expect(pre.error).toMatch(/--recover/);
+      expect(pre.stale).toBeUndefined();
+      expect(benchPreflight(m, { recover: true }).reversed).toEqual(["B90-synthetic"]);
+      expect(existsSync(join(ROOT, tmpName))).toBe(false);
+    } finally {
+      rmSync(join(ROOT, tmpName), { force: true });
+    }
+  });
+
+  it("preflight: a patch that neither applies nor is applied is stale", () => {
+    const gone = `scripts/trace/.bench-judge-missing-${process.pid}.txt`;
+    const patch = `diff --git a/${gone} b/${gone}\n--- a/${gone}\n+++ b/${gone}\n@@ -1 +1 @@\n-x\n+y\n`;
+    expect(benchPreflight({ fixtures: [fx({ patch })] }).stale).toHaveLength(1);
+  });
+
+  it("`pnpm trace bench-judge --recover` is reachable from the CLI (exit 0, nothing to reverse on a clean tree)", () => {
+    const out = trace(["bench-judge", "--recover"]);
+    expect(out.status).toBe(0);
+    expect(JSON.parse(out.stdout).reversed).toEqual([]);
+  });
+
+  it("a judge that outlives its timeout is killed and counts as 'did not run'", async () => {
+    const t0 = Date.now();
+    expect(await runJudge("sleep 30", { timeoutMs: 200 })).toBeNull();
+    expect(Date.now() - t0).toBeLessThan(5000);
+  });
+
+  it("the default signal list covers Ctrl+C, kill and a closed terminal", () => {
+    expect(SIGNALS).toEqual(expect.arrayContaining(["SIGINT", "SIGTERM", "SIGHUP"]));
+  });
+
+  it("a REAL signal kills the running judge process, stops the run and removes the handlers", async () => {
+    const keep = () => {}; // guard: never let a stray SIGUSR2 hit the default (terminate) action
+    process.on("SIGUSR2", keep);
+    const before = process.listenerCount("SIGUSR2");
+    try {
+      const m = { fixtures: [fx({ judge: { kind: "command", command: "sleep 31.5", catches: true } })] };
+      const t0 = Date.now();
+      const run = runBenchJudge(m, { log: () => {}, applied: () => [], signals: ["SIGUSR2"] });
+      setTimeout(() => process.kill(process.pid, "SIGUSR2"), 300);
+      await expect(run).rejects.toThrow(/interrupted/);
+      expect(Date.now() - t0).toBeLessThan(10000);
+      // no judge left running (exact argv match — a parent shell's command line may contain the text)
+      const judges = spawnSync("ps", ["-eo", "args="], { encoding: "utf8" }).stdout.split("\n").filter((l) => l.trim() === "sleep 31.5");
+      expect(judges).toHaveLength(0);
+      expect(process.listenerCount("SIGUSR2")).toBe(before);
+    } finally {
+      process.off("SIGUSR2", keep);
+    }
+  });
+});
+
+describe("round-3 CLI fixes", () => {
+  it("act --from a critic-panel result that reused nothing exits 0 (a recognised, empty list)", () => {
+    const file = join(dir, "res.json");
+    writeFileSync(file, JSON.stringify({ confirmed: [], traceRecords: [], reuseActions: [] }));
+    expect(trace(["act", "--from", file]).status).toBe(0);
+  });
+
+  it("consumer-action notes are screened for bench ground truth at the CLI (act and write --then-act)", () => {
+    const leaky = readBench().fixtures[0].id;
+    trace(["write", "-"], draft());
+    const id = JSON.parse(trace(["query", "--json"]).stdout)[0].record_id;
+    const a = trace(["act", id, "loop", "HOLD", "--note", `see ${leaky}`]);
+    expect(a.status).toBe(1);
+    expect(a.stdout.includes(leaky)).toBe(false);
+    expect(trace(["write", "-", "--then-act", "HOLD", "--consumer", "x", "--note", `see ${leaky}`], draft({ claim_id: "cli:other" })).status).toBe(1);
+  });
+
+  it("query --brief returns the newest window and keeps qualifiers", () => {
+    const many = Array.from({ length: 41 }, (_, i) => JSON.parse(draft({ claim_id: `cli:b${i}`, claim_text: `claim ${i}`, final_status: "qualify", qualifier: `only case ${i}` })));
+    expect(trace(["write", "-"], JSON.stringify(many)).status).toBe(0);
+    const brief = JSON.parse(trace(["query", "--brief"]).stdout);
+    expect(brief).toHaveLength(40);
+    expect(brief.every((r) => r.qualifier.startsWith("only case"))).toBe(true);
+  });
+
+  it("reaudit --act twice on an unchanged queue appends the REAUDIT once", () => {
+    trace(["write", "-"], draft({ evidence: [{ kind: "file_line", ref: "package.json:1" }], provenance: { workflow: "test", commit: "deadbeef0000" } }));
+    const lines = () => readFileSync(store, "utf8").trim().split("\n").length;
+    expect(trace(["reaudit", "--act"]).status).toBe(0);
+    expect(lines()).toBe(2);
+    expect(trace(["reaudit", "--act"]).status).toBe(0);
+    expect(lines()).toBe(2);
+  });
+
+  describe("denylist-check --patch (git's own parse, before applying)", () => {
+    const clean = "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-a\n+b\n";
+    const check = (text) => {
+      const p = join(dir, "x.patch");
+      writeFileSync(p, text);
+      return trace(["denylist-check", "--patch", p]);
+    };
+    it("passes a patch that touches no protected path", () => {
+      expect(check(clean).status).toBe(0);
+    });
+    it("catches a mixed-format section with a non-a/b prefix", () => {
+      const out = check(`${clean}--- c/.claude/memory/loop-plan.md\n+++ c/.claude/memory/loop-plan.md\n@@ -1 +1 @@\n-a\n+b\n`);
+      expect(out.status).toBe(1);
+      expect(JSON.parse(out.stdout).hits).toEqual([".claude/memory/loop-plan.md"]);
+    });
+    it("catches a gitignored .env created by a traditional section with a timestamp", () => {
+      expect(check(`${clean}--- /dev/null\t2026-01-01\n+++ b/.env.local\t2026-01-01\n@@ -0,0 +1 @@\n+K=1\n`).status).toBe(1);
+    });
+    it("catches a rename that moves a protected file away (both sides are checked)", () => {
+      expect(check("diff --git a/.claude/loop.md b/docs/x.md\nsimilarity index 100%\nrename from .claude/loop.md\nrename to docs/x.md\n").status).toBe(1);
+    });
+    it("fails closed (exit 2) when git cannot parse the patch, the file is missing, or no --patch is given", () => {
+      expect(check("not a patch\n").status).toBe(2);
+      expect(trace(["denylist-check", "--patch", join(dir, "missing.patch")]).status).toBe(2);
+      expect(trace(["denylist-check"]).status).toBe(2);
+    });
+  });
+
+  describe("bench-score --record fails closed", () => {
+    const setup = (transcripts) => {
+      const m = readBench();
+      const runs = join(dir, "runs.json");
+      writeFileSync(runs, JSON.stringify({ runs: m.fixtures.map((f) => ({ arm: "verifier", repeat: 0, fixtureId: opaqueFixtureId(f.id), verdict: "defer", failedGates: [], missing: ["x"] })) }));
+      const tdir = join(dir, "transcripts");
+      mkdirSync(tdir);
+      transcripts(m).forEach((t, i) => {
+        writeFileSync(join(tdir, `agent-${i}.jsonl`), t.text);
+        writeFileSync(join(tdir, `agent-${i}.meta.json`), JSON.stringify({ description: t.label }));
+      });
+      return (extra = []) => trace(["bench-score", runs, "--transcripts", tdir, "--record", ...extra]);
+    };
+    const covering = (m) => m.fixtures.map((f, i) => ({ label: `bench-verify:${opaqueFixtureId(f.id)}-r0-${i}`, text: "clean" }));
+    it("on an empty transcript dir", () => {
+      const out = setup(() => [])();
+      expect(out.status).toBe(1);
+      expect(out.stdout).toMatch(/holds no agent transcripts/);
+    });
+    it("on a leak in a transcript that cannot be tied to a run", () => {
+      expect(setup((m) => [...covering(m), { label: "some-other-agent", text: `saw ${m.fixtures[0].id}` }])().status).toBe(1);
+    });
+    it("when the transcripts do not cover the runs", () => {
+      const out = setup(() => [{ label: "critic:security-1", text: "clean" }])();
+      expect(out.status).toBe(1);
+      expect(out.stdout).toMatch(/no scanned transcript/);
+    });
+    it("records an accept when every run is covered and nothing leaked", () => {
+      expect(setup(covering)().status).toBe(0);
+      expect(JSON.parse(readFileSync(store, "utf8").trim().split("\n")[0])).toMatchObject({ claim_id: "bench:trace-bench-lite", final_status: "accept" });
+    });
   });
 });

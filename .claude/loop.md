@@ -105,10 +105,12 @@ instructions — the self-modification guard below still applies to everything e
       exists: reset the nodes to `ready`, write no records, log it, and stop (budget
       exhausted → escalate). Otherwise record its `traceRecords` per the consumer
       protocol — **before** moving any node. Then, per item:
-      - **`applied`** (accept, or qualify at L2): apply the `diff` patch, then run
-        `pnpm trace denylist-check` (the production denylist over the paths git itself
-        reports changed — catches anything the patch-text parser missed); a hit → revert,
-        `HOLD`, escalate. Then re-run the smallest relevant check. If it passes, `pnpm trace act <that node's loop-iteration record> loop CLEAR
+      - **`applied`** (accept, or qualify at L2): save the `diff` to a scratch file and,
+        **before applying it**, run `pnpm trace denylist-check --patch <file>` (the
+        production denylist, read from HEAD, over every path git's own parser finds in the
+        patch — catches anything the patch-text parser missed); exit 1 (a hit) or 2 (could
+        not verify) → do not apply, `HOLD`, escalate. Exit 0 → `git apply <file>`, then
+        re-run the smallest relevant check. If it passes, `pnpm trace act <that node's loop-iteration record> loop CLEAR
         --ref <node> --note "<check that passed; qualifier if any>"` and mark the node
         `done` with that `record` (copy a qualifier into the node's notes). If no relevant
         automated check exists, do not CLEAR: `HOLD` and escalate. If the check fails,

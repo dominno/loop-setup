@@ -5,7 +5,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { finalizeRecord, loadSchema, readPolicyVersion, ROOT, semanticViolations, validate } from "./lib.mjs";
+import { benchArgs, briefRecords, finalizeRecord, loadSchema, markUnscanned, opaqueFixtureId, readPolicyVersion, ROOT, scoreBench, semanticViolations, validate } from "./lib.mjs";
 
 const schema = loadSchema();
 const POLICY = readPolicyVersion();
@@ -323,5 +323,59 @@ describe("trace-bench (real body, stub agents)", () => {
     const fixtures = [{ id: "fx-00000000", item: "do a thing", patch: "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-a\n+b\n" }];
     const { result } = await runWorkflow("trace-bench.js", { fixtures, arms: ["verifier"], repeat: 1 }, () => null);
     expect(result.runs).toEqual([expect.objectContaining({ arm: "verifier", noVerdict: true, verdict: "defer" })]);
+  });
+});
+
+describe("round-3 fixes (real bodies, stub agents)", () => {
+  it("a qualify reused from `pnpm trace query --brief` output keeps its qualifier", async () => {
+    const stored = {
+      record_id: "TR-cccccccccccc", claim_id: "critic:security:input-has-no-accessible-name", claim_text: "Input has no accessible name",
+      claim_type: "factual", final_status: "qualify", qualifier: "only on the mobile layout", repair: "", failed_gates: ["g"], missing: [],
+      reason: "verified earlier", provenance: { commit: "abc1234", workflow: "critic-panel", tree: TREE }, created_at: "2026-10-07T12:00:00.000Z",
+    };
+    const { result, calls } = await runWorkflow(
+      "critic-panel.js",
+      { focus: "x", uiInScope: false, priorRecords: briefRecords([stored]), treeId: TREE },
+      onlySecurity([finding({ revisits: stored.record_id, revisitReason: "still-present" })]),
+    );
+    expect(calls.filter((c) => c.label.startsWith("verify:"))).toHaveLength(0);
+    expect(result.confirmed[0]).toMatchObject({ verdict: "qualify", qualifier: "only on the mobile layout", failedGates: ["g"], reused: stored.record_id });
+  });
+
+  const items = [{ id: "LP-003", description: "x" }];
+  const gate = (diff) => runWorkflow("loop-iteration.js", { items, level: "L2" }, (label) =>
+    label.startsWith("impl:") ? { changedFiles: ["src/a.ts"], diff, checksPassed: true, notes: "" } : verdict({ evidenceChecked: [{ kind: "diff", ref: "src/a.ts" }] }),
+  );
+  const ok = "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,2 +1,2 @@\n--- a removed comment line\n+b\n ctx\n";
+
+  it("a mixed-format patch (a second section with a non-a/b prefix) is unparsable and escalated", async () => {
+    const { result, calls } = await gate(`${ok}--- c/.claude/memory/loop-plan.md\n+++ c/.claude/memory/loop-plan.md\n@@ -1 +1 @@\n-a\n+b\n`);
+    expect(calls.some((c) => c.label.startsWith("verify:"))).toBe(false);
+    expect(result.rejected[0]).toMatchObject({ status: "escalated-denylist", failedGates: ["denylist:unparsable-diff-paths"] });
+  });
+
+  it("a traditional section with a tab timestamp is parsed (so a .env it creates is a denylist hit)", async () => {
+    const { result } = await gate(`${ok}--- /dev/null\t2026-01-01 00:00:00\n+++ b/.env.local\t2026-01-01 00:00:00\n@@ -0,0 +1 @@\n+K=1\n`);
+    expect(result.rejected[0].status).toBe("escalated-denylist");
+    expect(result.rejected[0].failedGates[0]).toMatch(/\.env\.local/);
+  });
+
+  it("hunk content that looks like a header ('--- …' removed text) is not mistaken for one", async () => {
+    const { result } = await gate(ok);
+    expect(result.applied).toHaveLength(1);
+  });
+
+  it("trace-bench runs and agent labels match what the scorer and the F0 coverage scan expect", async () => {
+    const patch = "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-a\n+b\n";
+    const manifest = { fixtures: [{ id: "B90-x", kind: "bad", item: "x", patch }, { id: "G90-y", kind: "good", item: "y", patch }] };
+    const { result, calls } = await runWorkflow("trace-bench.js", benchArgs(manifest, { arms: ["verifier", "single-pass"], repeat: 2 }), (label) =>
+      label.startsWith("bench-verify:") ? verdict({ evidenceChecked: [{ kind: "diff", ref: "src/a.ts" }] }) : { block: label.includes(opaqueFixtureId("B90-x")), findings: [] },
+    );
+    const runs = markUnscanned(result.runs, calls.map((c) => ({ label: c.label, text: "" })));
+    const score = scoreBench(manifest, { runs });
+    expect(score.unscannedRuns).toBe(0);
+    expect(score.arms.verifier).toMatchObject({ wrongAcceptRate: 1, falseHoldRate: 0 });
+    expect(score.arms.verifier.perRepeat).toHaveLength(2);
+    expect(score.arms.singlePass).toMatchObject({ agents: 2, recall: 1, falseBlockRate: 0 });
   });
 });

@@ -49,7 +49,7 @@ flowchart LR
 ```
 
 > Prior verdicts come in via `args.priorRecords` (`pnpm -s trace query --latest --writer
-> critic-panel --json`) + `args.treeId` (`pnpm -s trace tree-id`). The evidence gate is the canonical
+> critic-panel --brief`) + `args.treeId` (`pnpm -s trace tree-id`). The evidence gate is the canonical
 > `<trace-evidence-gate>` block (byte-identical to `scripts/trace/lib.mjs`).
 >
 > `uiInScope: false` drops the 5 UI-facing critics (First-Time User, UX Flow, Designer,
