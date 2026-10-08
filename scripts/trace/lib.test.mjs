@@ -15,7 +15,9 @@ import {
   briefRecords,
   effectivePanelSize,
   insideRepo,
+  loadWorkflowBlock,
   markUnscanned,
+  opaqueFixtureId,
   numstatPaths,
   runKeyFromLabel,
   unmatchedLeaks,
@@ -527,18 +529,37 @@ describe("round-3 fixes", () => {
     expect(unmatchedLeaks(runs, [{ ...key, runId: "ffff9999" }, { ...key }, { arm: "unknown", label: "x" }])).toBe(3);
   });
 
-  it("runs no scanned transcript belongs to are excluded (F0 coverage), and the record is a qualify", () => {
-    const manifest = { fixtures: [{ id: "B1", kind: "bad" }, { id: "G1", kind: "good" }] };
+  it("runs no scanned transcript belongs to are excluded from the metrics (F0 coverage), and that alone makes the record a qualify", () => {
+    const manifest = { fixtures: [{ id: "B10-x", kind: "bad" }, { id: "G10-y", kind: "good" }] };
+    const [bad, good] = ["B10-x", "G10-y"].map(opaqueFixtureId);
     const runs = [
-      { arm: "verifier", repeat: 0, fixtureId: "fx-00000001", verdict: "defer" },
-      { arm: "verifier", repeat: 0, fixtureId: "fx-00000002", verdict: "accept" },
-      { arm: "verifier", repeat: 1, fixtureId: "fx-00000002", verdict: "accept", noVerdict: true },
+      { arm: "verifier", repeat: 0, fixtureId: bad, verdict: "accept" }, // a wrong accept — but nobody scanned its agent
+      { arm: "verifier", repeat: 0, fixtureId: good, verdict: "accept" },
     ];
-    const marked = markUnscanned(runs, [{ label: "bench-verify:fx-00000001-r0-0", text: "x" }, { label: "critic:security-1", text: "x" }]);
-    expect(marked.map((r) => !!r.unscanned)).toEqual([false, true, false]); // a no-verdict run is excluded anyway
+    const marked = markUnscanned(runs, [{ label: `bench-verify:${good}-r0-1`, text: "x" }, { label: "critic:security-1", text: "x" }]);
+    expect(marked.map((r) => !!r.unscanned)).toEqual([true, false]);
     const score = scoreBench(manifest, { runs: marked });
     expect(score.unscannedRuns).toBe(1);
+    expect(score.noVerdictRuns).toBe(0);
+    expect(score.arms.verifier.wrongAcceptRate).toBeNull(); // the unscanned run was not scored
     expect(score.flags.some((f) => f.startsWith("F0 coverage"))).toBe(true);
     expect(benchRecordDraft(score, { resultsRef: "x" }).final_status).toBe("qualify");
+  });
+
+  it("a no-verdict run needs no transcript (it is excluded anyway)", () => {
+    expect(markUnscanned([{ arm: "verifier", repeat: 1, fixtureId: "fx-00000002", noVerdict: true }], [])[0].unscanned).toBeUndefined();
+  });
+
+  it("a transcript covers only its own repeat and its own critic", () => {
+    const v = { arm: "verifier", repeat: 0, fixtureId: "fx-00000001" };
+    expect(markUnscanned([v], [{ label: "bench-verify:fx-00000001-r1-0", text: "x" }])[0].unscanned).toBe(true);
+    const p = { arm: "panel", critic: "security", fixtureId: "fx-00000001" };
+    expect(markUnscanned([p], [{ label: "bench-panel:fx-00000001:regression-0-0", text: "x" }])[0].unscanned).toBe(true);
+    expect(markUnscanned([p], [{ label: "bench-panel:fx-00000001:security-0-0", text: "x" }])[0].unscanned).toBeUndefined();
+  });
+
+  it("loadWorkflowBlock evaluates a trusted copy when given one (denylist-check reads HEAD, not the working tree)", () => {
+    const source = "// <loop-denylist>\nconst hitsDenylist = () => 'from-source'\n// </loop-denylist>\n";
+    expect(loadWorkflowBlock("loop-iteration.js", "loop-denylist", ["hitsDenylist"], { source }).hitsDenylist()).toBe("from-source");
   });
 });

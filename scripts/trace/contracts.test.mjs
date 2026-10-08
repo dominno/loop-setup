@@ -198,7 +198,7 @@ describe("verdict-reuse input contract", () => {
     const text = readFileSync(join(ROOT, ".claude/workflows/critic-panel.js"), "utf8");
     const reads = new Set([...text.matchAll(/\bprior\.([a-z_]+)/g)].map((m) => m[1]));
     const digest = /const priorDigest[\s\S]*?\n {2}: ''/.exec(text)[0];
-    for (const m of digest.matchAll(/\br\.([a-z_]+)/g)) reads.add(m[1]);
+    for (const m of digest.matchAll(/\b[rxy]\.([a-z_]+)/g)) reads.add(m[1]); // the digest's map (r) and sort (x, y)
     expect(reads.size).toBeGreaterThan(5);
     const keys = Object.keys(briefRecords([{ record_id: "TR-x", provenance: {} }])[0]);
     expect([...reads].filter((k) => !keys.includes(k))).toEqual([]);

@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { opaqueFixtureId, readBench, ROOT } from "./lib.mjs";
-import { appliedFixtures, benchPreflight, judgeEnv, runBenchJudge, runJudge, SIGNALS } from "./bench-judge.mjs";
+import { appliedFixtures, benchPreconditionStep, benchPreflight, judgeEnv, runBenchJudge, runJudge, SIGNALS } from "./bench-judge.mjs";
 
 const CLI = join(ROOT, "scripts/trace/cli.mjs");
 let dir;
@@ -199,39 +199,135 @@ describe("bench-judge safety helpers", () => {
     expect(benchPreflight({ fixtures: [fx({ patch })] }, { recover: true })).toMatchObject({ reversed: [], stale: [expect.any(String)] });
   });
 
-  it("`pnpm trace bench-judge --recover` is reachable from the CLI (exit 0, nothing to reverse on a clean tree)", () => {
-    const out = trace(["bench-judge", "--recover"]);
-    expect(out.status).toBe(0);
-    expect(JSON.parse(out.stdout).reversed).toEqual([]);
+  // Never run `bench-judge --recover` against the real manifest here: it would reverse a
+  // fixture patch an in-flight bench-judge run has applied. The CLI delegates its whole
+  // precondition step (flag wiring + exit codes) to benchPreconditionStep.
+  it("the CLI precondition step: --recover only for bench-judge, exit 1 while anything is still applied or stale", () => {
+    const m = { fixtures: [fx()] };
+    expect(benchPreconditionStep("bench-args", {}, m)).toBeNull();
+    expect(spawnSync("git", ["apply", "-"], { cwd: ROOT, input: newFilePatch }).status).toBe(0);
+    try {
+      const args = benchPreconditionStep("bench-args", { recover: true }, m); // bench-args never recovers
+      expect(args.code).toBe(1);
+      expect(args.body.applied).toEqual([opaqueFixtureId("B90-synthetic")]); // opaque tokens only
+      expect(benchPreconditionStep("bench-judge", { recover: true }, m)).toEqual({ code: 0, body: { reversed: [opaqueFixtureId("B90-synthetic")] } });
+      expect(existsSync(join(ROOT, tmpName))).toBe(false);
+    } finally {
+      rmSync(join(ROOT, tmpName), { force: true });
+    }
+    const gone = `scripts/trace/.bench-judge-missing-${process.pid}.txt`;
+    const stale = { fixtures: [fx({ patch: `diff --git a/${gone} b/${gone}\n--- a/${gone}\n+++ b/${gone}\n@@ -1 +1 @@\n-x\n+y\n` })] };
+    expect(benchPreconditionStep("bench-judge", { recover: true }, stale).code).toBe(1);
   });
 
-  it("a judge that outlives its timeout is killed and counts as 'did not run'", async () => {
-    const t0 = Date.now();
-    expect(await runJudge("sleep 30", { timeoutMs: 200 })).toBeNull();
-    expect(Date.now() - t0).toBeLessThan(5000);
+  // A judge with a CHILD of its own (like `pnpm test:e2e` → its dev server): the kill must
+  // reach the whole process group, not just the direct child.
+  const judgeWithChild = () => {
+    const d = mkdtempSync(join(tmpdir(), "trace-judge-"));
+    const script = join(d, "judge.sh");
+    const pidFile = join(d, "grandchild.pid");
+    writeFileSync(script, `sleep 30 &\necho $! > ${pidFile}\nwait\n`);
+    const grandchild = () => Number(readFileSync(pidFile, "utf8"));
+    return { d, command: `sh ${script}`, grandchild, ready: () => existsSync(pidFile) && readFileSync(pidFile, "utf8").trim() !== "" };
+  };
+  // Gone, or a zombie waiting to be reaped (some containers never reap orphans).
+  const dead = (pid) => {
+    try {
+      return readFileSync(`/proc/${pid}/stat`, "utf8").replace(/^.*\) /s, "").startsWith("Z");
+    } catch {
+      return true;
+    }
+  };
+  const settle = async (pids) => {
+    for (let i = 0; i < 40 && !pids.every(dead); i += 1) await new Promise((r) => setTimeout(r, 50));
+    return pids.map(dead);
+  };
+  const waitFor = async (cond) => {
+    for (let i = 0; i < 100 && !cond(); i += 1) await new Promise((r) => setTimeout(r, 20));
+  };
+
+  it("a judge that outlives its timeout is killed WITH its children and counts as 'did not run'", async () => {
+    const j = judgeWithChild();
+    try {
+      let child;
+      const t0 = Date.now();
+      expect(await runJudge(j.command, { timeoutMs: 400, onChild: (c) => (child = c) })).toBeNull();
+      expect(Date.now() - t0).toBeLessThan(5000);
+      expect(await settle([child.pid, j.grandchild()])).toEqual([true, true]);
+    } finally {
+      rmSync(j.d, { recursive: true, force: true });
+    }
   });
 
   it("the default signal list covers Ctrl+C, kill and a closed terminal", () => {
     expect(SIGNALS).toEqual(expect.arrayContaining(["SIGINT", "SIGTERM", "SIGHUP"]));
   });
 
-  it("a REAL signal kills the running judge process, stops the run and removes the handlers", async () => {
+  it("a REAL signal kills the running judge AND its children, stops the run and removes the handlers", async () => {
     const keep = () => {}; // guard: never let a stray SIGUSR2 hit the default (terminate) action
     process.on("SIGUSR2", keep);
     const before = process.listenerCount("SIGUSR2");
+    const j = judgeWithChild();
     try {
-      const m = { fixtures: [fx({ judge: { kind: "command", command: "sleep 31.5", catches: true } })] };
+      let child;
+      const m = { fixtures: [fx({ judge: { kind: "command", command: j.command, catches: true } })] };
       const t0 = Date.now();
-      const run = runBenchJudge(m, { log: () => {}, applied: () => [], signals: ["SIGUSR2"] });
-      setTimeout(() => process.kill(process.pid, "SIGUSR2"), 300);
+      const run = runBenchJudge(m, { log: () => {}, applied: () => [], signals: ["SIGUSR2"], onChild: (c) => (child = c) });
+      await waitFor(j.ready);
+      process.kill(process.pid, "SIGUSR2");
       await expect(run).rejects.toThrow(/interrupted/);
       expect(Date.now() - t0).toBeLessThan(10000);
-      // no judge left running (exact argv match — a parent shell's command line may contain the text)
-      const judges = spawnSync("ps", ["-eo", "args="], { encoding: "utf8" }).stdout.split("\n").filter((l) => l.trim() === "sleep 31.5");
-      expect(judges).toHaveLength(0);
+      expect(await settle([child.pid, j.grandchild()])).toEqual([true, true]); // checked by pid, not a machine-wide scan
       expect(process.listenerCount("SIGUSR2")).toBe(before);
     } finally {
       process.off("SIGUSR2", keep);
+      rmSync(j.d, { recursive: true, force: true });
+    }
+  });
+
+  // Two synthetic new-file fixtures; their files are the only "touchable" paths.
+  const other = `scripts/trace/.bench-judge-test-${process.pid}-b.txt`;
+  const otherPatch = `diff --git a/${other} b/${other}\nnew file mode 100644\n--- /dev/null\n+++ b/${other}\n@@ -0,0 +1 @@\n+temporary\n`;
+  const cleanup = () => [tmpName, other].forEach((p) => rmSync(join(ROOT, p), { force: true }));
+
+  it("refuses to apply a fixture onto files with local changes, and leaves them untouched", async () => {
+    writeFileSync(join(ROOT, tmpName), "mine\n");
+    try {
+      const res = await runBenchJudge({ fixtures: [fx()] }, { ...quiet, judge: async () => false });
+      expect(res[0]).toMatchObject({ ok: false, observed: null });
+      expect(res[0].note).toMatch(/refused: local changes/);
+      expect(readFileSync(join(ROOT, tmpName), "utf8")).toBe("mine\n");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("throws (pointing at --recover) when a fixture patch cannot be reversed after its judge ran", async () => {
+    let calls = 0;
+    const judge = async () => {
+      calls += 1;
+      if (calls === 2) writeFileSync(join(ROOT, tmpName), "changed by the judge\n"); // during the fixture
+      return false;
+    };
+    try {
+      await expect(runBenchJudge({ fixtures: [fx()] }, { ...quiet, judge })).rejects.toThrow(/could not reverse.*--recover/);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("throws when the working tree changed during the run (end-of-run integrity check)", async () => {
+    let calls = 0;
+    const judge = async () => {
+      calls += 1;
+      if (calls === 2) writeFileSync(join(ROOT, other), "left behind\n"); // touches the other fixture's file
+      return false;
+    };
+    const m = { fixtures: [fx(), fx({ id: "B91-synthetic", patch: otherPatch })] };
+    try {
+      await expect(runBenchJudge(m, { ...quiet, judge })).rejects.toThrow(/working tree changed/);
+    } finally {
+      cleanup();
     }
   });
 });
@@ -268,6 +364,22 @@ describe("round-3 CLI fixes", () => {
     expect(lines()).toBe(2);
     expect(trace(["reaudit", "--act"]).status).toBe(0);
     expect(lines()).toBe(2);
+    expect(JSON.parse(readFileSync(store, "utf8").trim().split("\n")[1])).toMatchObject({ action: "REAUDIT", note: "evidence changed: package.json" });
+  });
+
+  it("act --from records BOTH actions and reuseActions when a result carries both", () => {
+    trace(["write", "-"], draft());
+    const id = JSON.parse(trace(["query", "--json"]).stdout)[0].record_id;
+    const file = join(dir, "both.json");
+    writeFileSync(file, JSON.stringify({ actions: [], reuseActions: [{ record_id: id, consumer: "critic-panel", action: "REUSE", note: "n" }] }));
+    expect(trace(["act", "--from", file]).status).toBe(0);
+    expect(JSON.parse(trace(["show", id]).stdout).actions).toHaveLength(1);
+  });
+
+  it("bench-unpack refuses an in-repo directory (the guard is wired, not just the helper)", () => {
+    const out = trace(["bench-unpack", `scripts/trace/.no-such-dir-${process.pid}`]);
+    expect(out.status).toBe(1);
+    expect(out.stdout).toMatch(/refusing to unpack inside the repo/);
   });
 
   describe("denylist-check --patch (git's own parse, before applying)", () => {
@@ -312,11 +424,13 @@ describe("round-3 CLI fixes", () => {
       });
       return (extra = []) => trace(["bench-score", runs, "--transcripts", tdir, "--record", ...extra]);
     };
+    // Boolean checks only: bench-score's stdout names fixtures, and a failing toMatch would print it.
+    const says = (out, re) => re.test(out.stdout);
     const covering = (m, run = RUN) => m.fixtures.map((f, i) => ({ label: `bench-verify:${opaqueFixtureId(f.id)}-r0-${i}@${run}`, text: "clean" }));
     it("on an empty transcript dir", () => {
       const out = setup(() => [])();
       expect(out.status).toBe(1);
-      expect(out.stdout).toMatch(/holds no agent transcripts/);
+      expect(says(out, /holds no agent transcripts/)).toBe(true);
     });
     it("on a leak in a transcript that cannot be tied to a run", () => {
       expect(setup((m) => [...covering(m), { label: "some-other-agent", text: `saw ${m.fixtures[0].id}` }])().status).toBe(1);
@@ -324,12 +438,12 @@ describe("round-3 CLI fixes", () => {
     it("when the transcripts do not cover the runs", () => {
       const out = setup(() => [{ label: "critic:security-1", text: "clean" }])();
       expect(out.status).toBe(1);
-      expect(out.stdout).toMatch(/no scanned transcript/);
+      expect(says(out, /no scanned transcript/)).toBe(true);
     });
     it("when the transcripts belong to ANOTHER bench run (same fixtures, different run id)", () => {
       const out = setup((m) => covering(m, "ffffffff"))();
       expect(out.status).toBe(1);
-      expect(out.stdout).toMatch(/no scanned transcript/);
+      expect(says(out, /no scanned transcript/)).toBe(true);
     });
     it("when a transcript is empty (nothing was scanned)", () => {
       expect(setup((m) => covering(m).map((t, i) => (i === 0 ? { ...t, text: "" } : t)))().status).toBe(1);
@@ -337,12 +451,12 @@ describe("round-3 CLI fixes", () => {
     it("for runs without a run id (args not minted by bench-args)", () => {
       const out = setup((m) => covering(m, "").map((t) => ({ ...t, label: t.label.replace(/@$/, "") })), { runId: "" })();
       expect(out.status).toBe(1);
-      expect(out.stdout).toMatch(/run id/);
+      expect(says(out, /run id/)).toBe(true);
     });
     it("on a leak in a transcript of ANOTHER run in the same dir (never silently ignored)", () => {
       const out = setup((m) => [...covering(m), { label: `bench-verify:${opaqueFixtureId(m.fixtures[0].id)}-r0-0@ffff9999`, text: `saw ${m.fixtures[0].id}` }])();
       expect(out.status).toBe(1);
-      expect(out.stdout).toMatch(/cannot be tied to a run/);
+      expect(says(out, /cannot be tied to a run/)).toBe(true);
     });
     it("records an accept when every run is covered and nothing leaked — and refuses the same run id twice", () => {
       const record = setup(covering);
@@ -350,7 +464,20 @@ describe("round-3 CLI fixes", () => {
       expect(JSON.parse(readFileSync(store, "utf8").trim().split("\n")[0])).toMatchObject({ claim_id: "bench:trace-bench-lite", final_status: "accept" });
       const again = record();
       expect(again.status).toBe(1);
-      expect(again.stdout).toMatch(/already recorded/);
+      expect(says(again, /already recorded/)).toBe(true);
+    });
+    it("excludes a run whose OWN transcript leaked, and records a qualify (not a clean accept)", () => {
+      expect(setup((m) => covering(m).map((t, i) => (i === 0 ? { ...t, text: `saw ${m.fixtures[0].id}` } : t)))().status).toBe(0);
+      expect(JSON.parse(readFileSync(store, "utf8").trim().split("\n")[0])).toMatchObject({ final_status: "qualify" });
+    });
+    it("refuses to record when the results path itself carries ground truth (the evidence ref is screened)", () => {
+      const m = readBench();
+      const named = join(dir, `${m.fixtures[0].id}.json`);
+      setup(covering);
+      writeFileSync(named, readFileSync(join(dir, "runs.json")));
+      const out = trace(["bench-score", named, "--transcripts", join(dir, "transcripts"), "--record"]);
+      expect(out.status).toBe(1);
+      expect(says(out, /bench ground truth/)).toBe(true);
     });
   });
 });

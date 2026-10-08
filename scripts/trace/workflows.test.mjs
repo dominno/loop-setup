@@ -305,6 +305,39 @@ describe("improve-skills and scan-docs face the evidence gate too", () => {
     expect(dead.result.deferred).toHaveLength(1);
   });
 
+  it("improve-skills: a finding the skeptic refutes (real:false) is rejected, never apply-ready", async () => {
+    const { result } = await runWorkflow("improve-skills.js", { targets: ["CLAUDE.md"] }, (label) =>
+      label.startsWith("meta:safety")
+        ? { findings: [meta] }
+        : label.startsWith("meta:")
+          ? { findings: [] }
+          : skeptic({ real: false, evidenceChecked: [{ kind: "rule", ref: "CLAUDE.md rule" }, { kind: "file_line", ref: "CLAUDE.md:1" }] }),
+    );
+    expect(result.applyReady).toHaveLength(0);
+    expect(result.refuted).toHaveLength(1);
+    expect(result.traceRecords[0].final_status).toBe("reject");
+  });
+
+  const story = { id: "US-001", title: "Greeting", source: "docs/prd.md" };
+  const evidenceAt = (proposedStatus) => ({ implementationFiles: ["src/lib/greeting.ts"], unitTests: "Present", e2eTests: "Present", proposedStatus, notes: "" });
+  const checked = [{ kind: "file_line", ref: "src/lib/greeting.ts:1" }, { kind: "command", ref: "pnpm test", result: "pass" }];
+
+  it("scan-docs: a verifier that DOWNGRADES the status is a qualify (holds only at the lower status), not an accept", async () => {
+    const { result } = await runWorkflow("scan-docs.js", { stories: [story] }, (label) =>
+      label.startsWith("evidence:") ? evidenceAt("E2E tested") : { finalStatus: "Unit tested", justification: "no e2e", missing: [], evidenceChecked: checked },
+    );
+    expect(result.records[0]).toMatchObject({ verdict: "qualify", finalStatus: "Unit tested" });
+    expectWritable(result.traceRecords);
+  });
+
+  it("scan-docs: a verifier that UPGRADES the status is a revise (the maker's claim was wrong), not an accept", async () => {
+    const { result } = await runWorkflow("scan-docs.js", { stories: [story] }, (label) =>
+      label.startsWith("evidence:") ? evidenceAt("Implemented") : { finalStatus: "E2E tested", justification: "e2e exists", missing: [], evidenceChecked: checked },
+    );
+    expect(result.records[0].verdict).toBe("revise");
+    expectWritable(result.traceRecords);
+  });
+
   it("scan-docs: a status verdict with no checked evidence is deferred and the status capped", async () => {
     const story = { id: "US-001", title: "Greeting", source: "docs/prd.md" };
     const { result } = await runWorkflow("scan-docs.js", { stories: [story] }, (label) =>
@@ -367,18 +400,21 @@ describe("round-3 fixes (real bodies, stub agents)", () => {
 
   it("trace-bench runs and agent labels (every arm, run id included) match what the scorer and the F0 coverage scan expect", async () => {
     const patch = "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-a\n+b\n";
-    const manifest = { fixtures: [{ id: "B90-x", kind: "bad", item: "x", patch }, { id: "G90-y", kind: "good", item: "y", patch }] };
+    const ci = "diff --git a/.github/workflows/x.yml b/.github/workflows/x.yml\n--- a/.github/workflows/x.yml\n+++ b/.github/workflows/x.yml\n@@ -1 +1 @@\n-a\n+b\n";
+    const manifest = { fixtures: [{ id: "B90-x", kind: "bad", item: "x", patch }, { id: "B91-ci", kind: "bad", item: "z", patch: ci }, { id: "G90-y", kind: "good", item: "y", patch }] };
     const args = benchArgs(manifest, { arms: ["verifier", "single-pass", "panel"], repeat: 2, critics: ["qa-e2e", "security"], runId: "0a1b2c3d" });
     const { result, calls } = await runWorkflow("trace-bench.js", args, (label) =>
-      label.startsWith("bench-verify:") ? verdict({ evidenceChecked: [{ kind: "diff", ref: "src/a.ts" }] }) : { block: label.includes(opaqueFixtureId("B90-x")), findings: [] },
+      label.startsWith("bench-verify:") ? verdict({ evidenceChecked: [{ kind: "diff", ref: "src/a.ts" }] }) : { block: !label.includes(opaqueFixtureId("G90-y")), findings: [] },
     );
     expect(result.runId).toBe("0a1b2c3d");
     const runs = markUnscanned(result.runs.map((r) => ({ ...r, runId: result.runId })), calls.map((c) => ({ label: c.label, text: "scanned" })));
     const score = scoreBench(manifest, { runs });
     expect(score.unscannedRuns).toBe(0);
-    expect(score.arms.verifier).toMatchObject({ wrongAcceptRate: 1, falseHoldRate: 0 });
+    // The verifier accepts everything: the CI-config fixture is caught by the denylist hit the
+    // run carries (denylistHit), the other bad one is a wrong accept.
+    expect(score.arms.verifier).toMatchObject({ wrongAcceptRate: 0.5, falseHoldRate: 0 });
     expect(score.arms.verifier.perRepeat).toHaveLength(2);
-    expect(score.arms.singlePass).toMatchObject({ agents: 2, recall: 1, falseBlockRate: 0 });
-    expect(score.arms.panel).toMatchObject({ critics: 2, agents: 4 });
+    expect(score.arms.singlePass).toMatchObject({ agents: 3, recall: 1, falseBlockRate: 0 });
+    expect(score.arms.panel).toMatchObject({ critics: 2, agents: 6 });
   });
 });

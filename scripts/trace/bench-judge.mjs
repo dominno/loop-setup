@@ -42,10 +42,14 @@ function git(args, opts = {}) {
 
 /** Default async spawner: resolves { status, signal, error } and exposes the child for kill(). */
 function spawnJudge(cmd, args, opts, onChild) {
+  // `timeout` is NOT forwarded to spawn: Node's own timeout kills only the direct child,
+  // whose exit would then cancel our timer and orphan its children (a Playwright dev
+  // server). Our timer kills the whole process group instead.
+  const { timeout, ...spawnOpts } = opts;
   return new Promise((resolve) => {
     let child;
     try {
-      child = spawnAsync(cmd, args, { ...opts, stdio: "ignore", detached: true });
+      child = spawnAsync(cmd, args, { ...spawnOpts, stdio: "ignore", detached: true });
     } catch (error) {
       resolve({ error, status: null });
       return;
@@ -57,7 +61,7 @@ function spawnJudge(cmd, args, opts, onChild) {
       } catch {
         /* already gone */
       }
-    }, opts.timeout || 600_000);
+    }, timeout || 600_000);
     child.on("error", (error) => {
       clearTimeout(timer);
       resolve({ error, status: null });
@@ -147,9 +151,21 @@ export function benchPreflight(manifest, { recover = false, applied = appliedFix
   return {};
 }
 
+/**
+ * The CLI's precondition step for bench-args / bench-judge, as a function so its flag
+ * wiring is testable on a synthetic manifest (never on the real tree). Returns
+ * { code, body } when the CLI must stop here, or null to continue.
+ */
+export function benchPreconditionStep(cmd, flags, manifest, opts = {}) {
+  const pre = benchPreflight(manifest, { ...opts, recover: cmd === "bench-judge" && !!flags.recover });
+  if (pre.reversed) return { code: pre.stale && pre.stale.length ? 1 : 0, body: pre };
+  if (pre.error) return { code: 1, body: pre };
+  return null;
+}
+
 export async function runBenchJudge(
   manifest,
-  { only, skipE2e, log = (s) => process.stderr.write(`${s}\n`), judge, applied = appliedFixtures, signals = SIGNALS } = {},
+  { only, skipE2e, log = (s) => process.stderr.write(`${s}\n`), judge, applied = appliedFixtures, signals = SIGNALS, onChild = () => {} } = {},
 ) {
   const { hitsDenylist, parseDiffPaths } = loadWorkflowBlock("loop-iteration.js", "loop-denylist", ["hitsDenylist", "parseDiffPaths"]);
   const leftovers = applied(manifest);
@@ -174,7 +190,15 @@ export async function runBenchJudge(
     }
   };
   for (const s of signals) process.on(s, onSignal);
-  const runOne = (command) => (judge ? judge(command) : runJudge(command, { onChild: (c) => (current = c) }));
+  const runOne = (command) =>
+    judge
+      ? judge(command)
+      : runJudge(command, {
+          onChild: (c) => {
+            current = c;
+            onChild(c);
+          },
+        });
 
   const results = [];
   const scratch = mkdtempSync(join(tmpdir(), "trace-bench-judge-"));

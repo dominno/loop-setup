@@ -242,7 +242,8 @@ async function main() {
     let drafts;
     if (flags.from) {
       const input = readJsonInput(flags.from === true ? "-" : flags.from);
-      drafts = Array.isArray(input) ? input : Array.isArray(input?.actions) ? input.actions : Array.isArray(input?.reuseActions) ? input.reuseActions : null;
+      const lists = Array.isArray(input) ? [input] : [input?.actions, input?.reuseActions].filter(Array.isArray);
+      drafts = lists.length ? lists.flat() : null;
       if (drafts === null) {
         out("no actions found in the input (expected an array, {actions:[...]} or a result with reuseActions)");
         return 1;
@@ -374,16 +375,11 @@ async function main() {
       // no fixture patch may still be applied (a killed run — --recover reverses it, and is
       // checked FIRST, since an applied patch also fails the stale check), and every fixture
       // must still apply, else the bench would measure a broken setup.
-      const { benchPreflight } = await import("./bench-judge.mjs");
-      const pre = benchPreflight(manifest, { recover: cmd === "bench-judge" && !!flags.recover });
-      if (pre.reversed) {
-        out(pre, true);
-        // Something that neither applies nor reverses cleanly may still be a seeded defect.
-        return pre.stale && pre.stale.length ? 1 : 0;
-      }
-      if (pre.error) {
-        out(pre, true);
-        return 1;
+      const { benchPreconditionStep } = await import("./bench-judge.mjs");
+      const stop = benchPreconditionStep(cmd, flags, manifest);
+      if (stop) {
+        out(stop.body, true);
+        return stop.code;
       }
     }
     if (cmd === "bench-args") {
