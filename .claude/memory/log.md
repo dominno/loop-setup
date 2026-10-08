@@ -295,3 +295,16 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
   explicit a/ b/ prefixes, and tests now cover unborn HEAD / non-repo exit 2, a dirty
   `.claude/` tree with an innocent patch, copy-only and rename-out patches, state-file patches.
 - Admission: committed 1 (TR-40be9c919489 → trace.md).
+
+## [2026-10-08] ingest | 19-fixture bench with the panel arm: F4 and F1 fired
+- Extended TRACE-Bench-lite to 19 fixtures (12 bad / 7 good; five new seeded defects that
+  every deterministic check misses — bench-judge 19/19, TR-ac5033a1c8d3) and ran it with the
+  verifier (repeat 2), single-pass and a 5-critic panel (run 04cb4d42, 152 agents, 152/152
+  transcripts scanned, 0 excluded). Record TR-34201765532f (`accept`, revises
+  TR-bdc16b430394): verifier WrongAcceptRate 0.04, invariance 0.95; single-pass recall 1.00 /
+  false-block 0.14; panel(any) the same; n_eff 1.89.
+- Pre-registered flags fired: F4 (the verifier licensed one bad diff in one repeat) → the
+  L3 measured-checker gate is no longer satisfied; F1 (single-pass matches the panel at ~5x
+  lower cost on diff review). Responses proposed, not applied (bench-checkers step 6).
+- Admission: qualified 3 (TR-e1e16632e534, TR-f1ebb8958183 → trace.md; TR-7085756f8495 →
+  workflow.md).

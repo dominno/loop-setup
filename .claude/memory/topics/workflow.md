@@ -121,5 +121,8 @@
   findings — 24 here): a critic-panel round with the 5 non-UI critics spawned 29 agents
   (~2.9M subagent tokens, ~51 min); TRACE-Bench-lite (verifier + single-pass, repeat 2,
   11 fixtures) spawned 33 agents (~2.0M tokens, ~10 min). <!-- rec:TR-3ef3eac264d4 -->
+- Cost (one run): TRACE-Bench-lite with verifier (repeat 2) + single-pass + a 5-critic
+  panel over 19 fixtures spawned 152 agents (~9.5M subagent tokens, ~59 min); the panel arm
+  (~5 agents per fixture) dominates. <!-- rec:TR-7085756f8495 -->
 
 Related: [build-and-verify](./build-and-verify.md) · [testing](./testing.md) · [trace](./trace.md)

@@ -242,5 +242,14 @@ debate stage (critic panel + skeptic already is one).
 - `git diff --src-prefix=a/ --dst-prefix=b/` emits `a/`/`b/` headers even under
   `diff.noprefix` or `diff.mnemonicPrefix`, so the loop implementer asks for them explicitly
   (the denylist parser accepts only `a/`/`b/`). <!-- rec:TR-40be9c919489 -->
+- Measured (one run, 19-fixture bench, 5 of 10 critics, diff review only — no browser):
+  a single-pass all-lens reviewer matched the critic panel (recall 1.00, false-block 0.14
+  for both, panel = any critic blocks) at ~5x lower cost; the panel's majority vote lost
+  recall (0.83) and its effective size was 1.89 of 5 (ρ̄ 0.41) — F1 fired.
+  <!-- rec:TR-e1e16632e534 -->
+- Measured (one fixture, one run): the loop verifier can license a diff because it "does
+  exactly what the item asks" even when the item requests a change that contradicts a
+  documented contract (code doc comment + an existing test's intent) — 1 of 2 repeats, so
+  F4 fired and loops stay at ≤ L2 until the verifier is tightened. <!-- rec:TR-f1ebb8958183 -->
 
 Related: [workflow](./workflow.md) · [quality-bar](./quality-bar.md) · [testing](./testing.md)
