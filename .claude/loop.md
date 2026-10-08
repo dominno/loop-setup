@@ -120,8 +120,9 @@ instructions — the self-modification guard below still applies to everything e
         `HOLD`, set the node `escalated` with `missing` = "human approval of the qualifier:
         <qualifier>".
       - **`deferred`** (defer): `HOLD`, set the node `deferred`, copy the record's
-        `missing` into the node (a denylist defer — `missing` = human approval — makes the
-        node `escalated` instead).
+        `missing` into the node. A defer whose `missing` names a human decision or approval
+        (a denylist defer, or the verifier's "a human decision to change <contract>") makes
+        the node `escalated` instead — the loop cannot supply it.
       - **`rejected`** (reject/revise/denylist): `HOLD`, set the node `escalated`; its
         `missing` = the record's `missing`, else its `repair`, else "a human decision on:
         <the record's reason>" — never empty.

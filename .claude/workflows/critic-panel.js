@@ -1,9 +1,9 @@
 export const meta = {
   name: 'critic-panel',
   description:
-    'Deterministic multi-agent critic round: fan out the critics as parallel subagents (each in its own context, each typing its claims), adversarially adjudicate every blocker/important finding with a separate skeptic that returns a typed TRACE verdict (accept/qualify/revise/defer/reject) held to the claim type evidence standard, reuse unchanged prior verdicts, then return a synthesized matrix plus TRACE-lite record drafts.',
+    'Deterministic multi-agent critic round: fan out the critics as parallel subagents (each in its own context, each typing its claims; a code-only round uses one all-lens reviewer instead), adversarially adjudicate every blocker/important finding with a separate skeptic that returns a typed TRACE verdict (accept/qualify/revise/defer/reject) held to the claim type evidence standard, reuse unchanged prior verdicts, then return a synthesized matrix plus TRACE-lite record drafts.',
   phases: [
-    { title: 'Review', detail: 'each critic reviews independently, in its own context, and types each claim' },
+    { title: 'Review', detail: 'each critic reviews independently, in its own context, and types each claim (a code-only round: one all-lens reviewer)' },
     { title: 'Verify', detail: 'a separate skeptic adjudicates each blocker/important claim; a deterministic evidence gate caps overclaims' },
   ],
 }
@@ -155,13 +155,16 @@ const ALL_CRITICS = [
 ]
 // </critic-roster>
 const CRITICS = ALL_CRITICS.filter((c) => uiInScope || !c.ui)
-// Review mode. TRACE-Bench-lite measured it (F1, record TR-34201765532f): on CODE-ONLY
-// review one all-lens reviewer matched the critic panel's recall and false-block rate at
-// ~5x lower cost. So a round with no browser-facing critic in scope (uiInScope: false) uses
+// Review mode. TRACE-Bench-lite measured it (F1, record TR-34201765532f; qualified:
+// one 19-fixture run, 5 of 10 critics, diff-level block/no-block with the bench's own
+// single-pass prompt): on CODE-ONLY review one all-lens reviewer matched the critic panel's
+// recall and false-block rate at ~5x lower cost. So a round with no browser-facing critic in scope (uiInScope: false) uses
 // ONE reviewer covering every in-scope lens by default; rounds that drive the app keep the
 // panel (that case was not measured). Either way each finding names its lens and still goes
 // to its own separate skeptic. Override with args.reviewMode: 'panel' | 'single-pass'.
 const reviewMode = (a && ['panel', 'single-pass'].includes(a.reviewMode) && a.reviewMode) || (uiInScope ? 'panel' : 'single-pass')
+if (a && a.reviewMode !== undefined && a.reviewMode !== reviewMode) log(`ignored args.reviewMode=${JSON.stringify(a.reviewMode)} (expected 'panel' or 'single-pass') — using ${reviewMode}`)
+if (reviewMode === 'single-pass' && uiInScope) log('WARNING: single-pass forced with browser-facing lenses in scope — that combination was not measured')
 
 const FINDINGS_SCHEMA = {
   type: 'object',
@@ -223,6 +226,9 @@ const priorDigest = priorRecords.length
 
 // Phase 1 — every critic reviews independently and in parallel (a barrier: we want
 // the full set before deduping and verifying).
+const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim()
+const slug = (s) => norm(s).replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'untitled'
+
 phase('Review')
 // Shared prompt parts (identical for both modes).
 const readOnlyBrief = `This is a READ-ONLY review: do not create, edit or delete any file in the repo (scratch copies outside it are fine). Read CLAUDE.md and the relevant memory topic page(s), inspect ${focus} (read the code; if a localhost flow is in scope, drive it via Playwright/Chrome MCP and check console + network)`
@@ -242,14 +248,31 @@ const withoutLens = (f) => {
   delete g.lens
   return g
 }
+// In single-pass mode the reviewer picks each finding's lens, and the priors digest does
+// not show one. A finding that re-raises a prior claim takes that claim's lens when it is
+// otherwise the same claim (same title slug and claim type) — so verdict reuse and
+// `revises` keep working exactly as in panel mode, whatever lens the reviewer chose.
+const lensOf = (f) => {
+  const prior = f.revisits ? priorById.get(f.revisits) : null
+  const m = prior && /^critic:([^:]+):(.+)$/.exec(String(prior.claim_id || ''))
+  if (m && m[2] === slug(f.title) && prior.claim_type === f.claimType && CRITICS.some((c) => c.key === m[1])) return m[1]
+  return f.lens
+}
+let unassignedFindings = 0
 const reviews = reviewMode === 'single-pass'
   ? await agent(
       `You are the reviewer for this project, covering EVERY lens below in a single pass. ${readOnlyBrief}, then review through each lens in turn and tag every finding with the key of the lens it belongs to:\n${CRITICS.map((c) => `- ${c.key} (${c.label}): ${c.lens}`).join('\n')}\n${reviewTail}`,
       { label: 'critic:all-lenses-0', phase: 'Review', schema: SINGLE_FINDINGS_SCHEMA, model: FANOUT_MODEL },
-    ).then((r) =>
-      // A reviewer that died leaves EVERY lens unreviewed — reported per lens below.
-      CRITICS.map((c) => ({ critic: c.key, label: c.label, findings: r ? (r.findings || []).filter((f) => f.lens === c.key).map(withoutLens) : [], failed: !r })),
     )
+      .catch(() => null) // like parallel(): a throwing reviewer is a failed reviewer, not a crashed round
+      .then((r) => {
+        const found = r ? (r.findings || []).map((f) => ({ ...f, lens: lensOf(f) })) : []
+        const unassigned = found.filter((f) => !CRITICS.some((c) => c.key === f.lens))
+        unassignedFindings = unassigned.length
+        if (unassigned.length) log(`WARNING: ${unassigned.length} finding(s) named no in-scope lens and were dropped: ${unassigned.map((f) => JSON.stringify(f.title)).join(', ')}`)
+        // A reviewer that died leaves EVERY lens unreviewed — reported per lens below.
+        return CRITICS.map((c) => ({ critic: c.key, label: c.label, findings: found.filter((f) => f.lens === c.key).map(withoutLens), failed: !r }))
+      })
   : await parallel(
       CRITICS.map((c, i) => () =>
         agent(
@@ -268,7 +291,6 @@ if (failedReviewers.length) log(`WARNING: ${failedReviewers.length} critic(s) re
 // same model family, so their errors are correlated (TRACE Prop. 4: n_eff → 1 as ρ → 1).
 // Only a critic that brings DIFFERENT evidence corroborates — that evidence is kept
 // separately and handed to the skeptic as an extra ledger entry.
-const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim()
 const all = reviews
   .filter(Boolean)
   .flatMap((r) => r.findings.map((f) => ({ ...f, critic: r.critic, criticLabel: r.label })))
@@ -280,7 +302,9 @@ for (const f of all) {
   if (existing) {
     existing.alsoFlaggedBy.push({ critic: f.critic, evidence: f.evidence })
     const ev = norm(f.evidence)
-    if (ev && !evidenceSeen.get(k).has(ev)) {
+    // Corroboration needs a SEPARATE agent: in single-pass mode one reviewer filing the same
+    // claim under two lenses is not independent evidence.
+    if (reviewMode === 'panel' && ev && !evidenceSeen.get(k).has(ev)) {
       evidenceSeen.get(k).add(ev)
       existing.independentEvidence.push({ critic: f.critic, evidence: f.evidence })
     }
@@ -290,11 +314,10 @@ for (const f of all) {
   }
 }
 const deduped = [...byKey.values()]
-log(`${deduped.length} findings from ${CRITICS.length} critics (${all.length} before merge-dedup)`)
+log(`${deduped.length} findings from ${CRITICS.length} lenses, ${reviewMode} (${all.length} before merge-dedup)`)
 
 const criticByKey = new Map(ALL_CRITICS.map((c) => [c.key, c]))
 const sameTree = (t) => !!(treeId && t && t === treeId)
-const slug = (s) => norm(s).replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'untitled'
 const ownClaimId = (f) => `critic:${f.critic}:${slug(f.title)}`
 // A critic's `revisits` link is an LLM assertion, never trusted on its own: it binds only
 // when the prior record is deterministically the SAME claim (same lens, same normalized
@@ -411,6 +434,8 @@ return {
   failedReviewers, // critics that returned nothing — the round is incomplete if non-empty
   counts: {
     critics: CRITICS.length,
+    reviewAgents: reviewMode === 'single-pass' ? 1 : CRITICS.length,
+    unassignedFindings,
     failedReviewers: failedReviewers.length,
     confirmedBlockers: confirmed.filter((f) => f.severity === 'blocker').length,
     confirmedImportant: confirmed.filter((f) => f.severity === 'important').length,

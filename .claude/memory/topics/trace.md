@@ -152,9 +152,11 @@ passes that evidence to the verifier; agreement alone never upgrades a finding.
 
 **F1 response (fan-out shrunk where it was measured):** on code-only review the bench found
 one all-lens reviewer as good as the critic panel at ~5x lower cost (record
-TR-34201765532f). So a code-only round (`uiInScope: false`) runs the Review stage as ONE
-reviewer (`reviewMode: 'single-pass'`); rounds that drive the app keep one critic per lens
-until the bench measures them. The skeptic per finding (D2) is unchanged in both modes.
+TR-34201765532f — qualified: one run on the 19-fixture bench, 5 of the 10 critics, measured as diff-level block/no-block with the bench's own single-pass prompt — not this round's production prompt). So a code-only round (`uiInScope: false`) runs the Review
+stage as ONE reviewer (`reviewMode: 'single-pass'`); rounds that drive the app keep one critic
+per lens until the bench measures them. The skeptic per finding (D2) is unchanged in both
+modes; D1 (separate contexts) then holds between the reviewer and the skeptics only, so one
+reviewer's cross-lens duplicates never count as independent corroboration.
 
 ## Stop conditions (paper §5.4) — used by `/loop` and `/multi-agent-dev`
 Stop *re-running* when every claim is (1) a qualified proposal (accept/qualify, acted on),

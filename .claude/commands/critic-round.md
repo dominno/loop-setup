@@ -1,11 +1,12 @@
 ---
-description: Run the multi-agent critic round as a deterministic Workflow — critics fan out as parallel subagents (own context each), each blocker/important finding gets a typed TRACE verdict (accept/qualify/revise/defer/reject) from a separate skeptic, then a synthesized severity matrix is returned and its verdict records appended. Read-only on code.
+description: Run the multi-agent critic round as a deterministic Workflow — critics fan out as parallel subagents (own context each; a code-only round uses one all-lens reviewer), each blocker/important finding gets a typed TRACE verdict (accept/qualify/revise/defer/reject) from a separate skeptic, then a synthesized severity matrix is returned and its verdict records appended. Read-only on code.
 argument-hint: [focus, e.g. "checkout flow on localhost"]
 ---
 
 Run a **genuine multi-agent critic round** — not a single agent simulating critics.
 Use the **Workflow tool** so each critic runs as its own subagent in its own context
-and every blocker/important finding is verified by a *separate* skeptic.
+and every blocker/important finding is verified by a *separate* skeptic. (One measured
+exception: a code-only round, `uiInScope: false`, runs one all-lens reviewer — see Notes.)
 
 Focus:
 $ARGUMENTS
@@ -21,7 +22,7 @@ $ARGUMENTS
    - `args: { "focus": "$ARGUMENTS", "priorRecords": <step-2 JSON>, "treeId": "<tree-id>" }`
    This command explicitly opts into multi-agent orchestration — calling Workflow
    here is expected.
-4. The workflow returns `{ focus, treeId, counts, confirmed, deferred, revised, niceToHaves, refuted, traceRecords, reuseActions }`.
+4. The workflow returns `{ focus, treeId, reviewMode, failedReviewers, counts, confirmed, deferred, revised, niceToHaves, refuted, traceRecords, reuseActions }`.
    Render `confirmed` (verdict `accept` or `qualify`) as the critic matrix and list
    `niceToHaves` separately:
 
@@ -48,8 +49,8 @@ $ARGUMENTS
 - Exception, measured: a code-only round (`uiInScope: false` — no browser lens in scope)
   runs ONE all-lens reviewer instead of the critic fan-out (`reviewMode: 'single-pass'`):
   TRACE-Bench-lite found it as good as the panel on code-only review at ~5x lower cost
-  (F1). Each finding still names its lens and still gets its own separate skeptic. Pass
-  `reviewMode: 'panel'` to force the fan-out.
+  (F1; qualified: one run on the 19-fixture bench, 5 of the 10 critics, measured as diff-level block/no-block with the bench's own single-pass prompt — not this round's production prompt). Each finding still names its lens and still gets its own separate
+  skeptic. Pass `reviewMode: 'panel'` to force the fan-out.
 - Agreement between critics is **not** extra evidence (they share a model); only a
   critic bringing *different* evidence corroborates. Verdict semantics, the evidence
   standard per claim type, and the consumer actions: `.claude/memory/topics/trace.md`.

@@ -451,6 +451,35 @@ describe("critic-panel review modes (F1: single-pass on code-only rounds)", () =
     expect(result.confirmed).toHaveLength(0);
   });
 
+  it("single-pass: a finding that re-raises a prior claim takes that claim's lens, so verdict reuse still fires", async () => {
+    const prior = { record_id: "TR-dddddddddddd", claim_id: "critic:security:input-has-no-accessible-name", claim_text: "x", claim_type: "factual", final_status: "accept", missing: [], provenance: { tree: TREE } };
+    const { result, calls } = await runWorkflow("critic-panel.js", { focus: "x", uiInScope: false, priorRecords: [prior], treeId: TREE }, (label) =>
+      label === "critic:all-lenses-0" ? { findings: [finding({ lens: "regression", revisits: prior.record_id, revisitReason: "still-present" })] } : null,
+    );
+    expect(calls.filter((c) => c.label.startsWith("verify:"))).toHaveLength(0);
+    expect(result.reuseActions).toEqual([expect.objectContaining({ record_id: prior.record_id, action: "REUSE" })]);
+    expect(result.confirmed[0].critic).toBe("security");
+  });
+
+  it("single-pass: a reviewer that throws is a failed reviewer (like the panel), not a crashed round", async () => {
+    const { result } = await runWorkflow("critic-panel.js", { focus: "x", uiInScope: false }, (label) => {
+      if (label === "critic:all-lenses-0") throw new Error("budget exhausted");
+      return null;
+    });
+    expect(result.failedReviewers.length).toBe(result.counts.critics);
+    expect(result.counts.reviewAgents).toBe(1);
+  });
+
+  it("single-pass: a finding with no in-scope lens is counted, not silently lost; cross-lens duplicates are not corroboration", async () => {
+    const { result } = await runWorkflow("critic-panel.js", { focus: "x", uiInScope: false }, (label) =>
+      label === "critic:all-lenses-0"
+        ? { findings: [finding({ lens: "designer" }), finding({ lens: "security", evidence: "a.ts:1" }), finding({ lens: "regression", evidence: "b.ts:2" })] }
+        : verdict({ evidenceChecked: [{ kind: "file_line", ref: "a.ts:1" }] }),
+    );
+    expect(result.counts.unassignedFindings).toBe(1);
+    expect(result.counts.independentlyCorroborated).toBe(0);
+  });
+
   it("a round that drives the app keeps the panel (one critic per lens), and the mode can be forced", async () => {
     const ui = await runWorkflow("critic-panel.js", { focus: "x" }, () => ({ findings: [] }));
     expect(ui.result.reviewMode).toBe("panel");
