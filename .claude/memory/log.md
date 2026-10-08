@@ -308,3 +308,15 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
   lower cost on diff review). Responses proposed, not applied (bench-checkers step 6).
 - Admission: qualified 3 (TR-e1e16632e534, TR-f1ebb8958183 → trace.md; TR-7085756f8495 →
   workflow.md).
+
+## [2026-10-08] ingest | F4/F1 responses and the verifier re-bench
+- F4 response: the loop verifier checks changes against documented contracts and holds an
+  item that contradicts one for a human (defer). F1 response: a code-only critic round runs
+  one all-lens reviewer (skeptics unchanged). A separate checker rated it `qualify`; its
+  findings (reuse lens, failure handling, loop escalation of human defers, overstated F1
+  wording) are fixed. The CLAUDE.md wording for the F1 exception awaits confirmation.
+- Verifier re-bench (run 6e7bcc95, 3 repeats, 57/57 transcripts, 0 excluded):
+  TR-44152fe382c5 `accept`, WrongAcceptRate 0 / FalseHoldRate 0 / invariance 1.00, F2 only —
+  the L3 measured-checker gate is met mechanically, but the record carries a HOLD note: the
+  rule is in-sample, so L3 should wait for held-out fixtures.
+- Admission: qualified 1 (TR-5e53f695a9e6 → trace.md).

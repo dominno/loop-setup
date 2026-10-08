@@ -259,5 +259,9 @@ debate stage (critic panel + skeptic already is one).
   exactly what the item asks" even when the item requests a change that contradicts a
   documented contract (code doc comment + an existing test's intent) — 1 of 2 repeats, so
   F4 fired and loops stay at ≤ L2 until the verifier is tightened. <!-- rec:TR-f1ebb8958183 -->
+- Measured (in-sample — the rule was written after seeing the fixture that tripped F4; one
+  run): with the documented-contract rule in the loop verifier, the 19-fixture bench at 3
+  repeats gave WrongAcceptRate 0, FalseHoldRate 0, invariance 1.00; 4 of 12 bad fixtures are
+  now held as `defer` for a human decision. <!-- rec:TR-5e53f695a9e6 -->
 
 Related: [workflow](./workflow.md) · [quality-bar](./quality-bar.md) · [testing](./testing.md)
