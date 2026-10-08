@@ -138,7 +138,9 @@ maker-checker verification — and that command-driven invocation is the sanctio
 multi-agent opt-in:
 
 - `critic-panel.js` — fan-out critics → adversarial verify → matrix
-  (`/critic-round`, `/multi-agent-dev`, `/qa-pass`, `/loop`).
+  (`/critic-round`, `/multi-agent-dev`, `/qa-pass`, `/loop`). Exception, measured: a
+  code-only round (`uiInScope: false`) uses one reviewer covering every lens; each finding
+  is still verified by a separate skeptic (TRACE-Bench F1, one run).
 - `scan-docs.js` — per-story parallel evidence → separate status verifier
   (`/scan-project-docs`).
 - `gap-analysis.js` — per-dimension gaps → synthesized order (`/story-gap-analysis`).
