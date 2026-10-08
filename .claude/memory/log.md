@@ -331,3 +331,15 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
   test going red on a patched tree that adds a new code file.
 - Admission: qualified 2 (TR-00fe5f1e955b → trace.md, TR-57403effdd24 → workflow.md),
   rejected 1 (TR-f86ffa871cce — an instrument bug pending a fix decision, not durable).
+
+## [2026-10-08] ingest | bench-instrument fixes + confirmatory verifier run
+- Instrument fixes (commit 7e3c127): the F0 scan reads only what an agent received
+  (`receivedText`), and the tree leak guard (`leakyFiles`) counts as code only tracked code
+  files plus untracked files a fixture patch writes. Code-only critic round: 0 blockers,
+  1 important (TR-df1a6adc08d1 qualify — the first version let any untracked code-path file
+  whitelist its own tokens) → fixed, separate checker `accept`, CLEAR.
+- Confirmatory run 486c8b06 (verifier, 3 repeats, 29 fixtures; 87/87 prompts verified
+  against the minted args): TR-df7ab02dc866 `accept` — WrongAcceptRate 0, FalseHoldRate 0,
+  invariance 1.00, nothing excluded (the old F0 scan also flags 0), F2 only. The L3
+  measured-checker item of loop-checklist.md is met; no loop's trust level was changed.
+- Admission: qualified 2 (TR-3ce4efb91999 → trace.md, TR-b3b37a1408f4 → workflow.md).

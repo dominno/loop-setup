@@ -127,5 +127,9 @@
 - Cost (one run): a verifier-only TRACE-Bench-lite run at repeat 3 over 29 fixtures spawned
   87 agents (~5.8M subagent tokens, ~49 min); each verifier applies the diff and runs the
   repo's checks, so cost tracks the verify chain's runtime. <!-- rec:TR-57403effdd24 -->
+- Workflow subagent transcripts indent every line after the first of the agent's prompt
+  (its first user message) by two spaces — strip `\n  ` before checking that a prompt
+  carries an exact args string, e.g. a bench patch (observed 2026-10-08).
+  <!-- rec:TR-b3b37a1408f4 -->
 
 Related: [build-and-verify](./build-and-verify.md) · [testing](./testing.md) · [trace](./trace.md)

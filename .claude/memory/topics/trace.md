@@ -281,5 +281,12 @@ debate stage (critic panel + skeptic already is one).
   own leak-guard unit test going red on the patched tree, not by the diff. One bad run was
   excluded by F0, so the full-bench record is `qualify` and does not meet the L3 gate.
   <!-- rec:TR-00fe5f1e955b -->
+- Measured (confirmatory run after both instrument fixes; 29 fixtures incl. the 10 held-out,
+  3 repeats, nothing excluded): WrongAcceptRate 0, FalseHoldRate 0, invariance 1.00, only F2
+  → the latest bench record is `accept` and the L3 measured-checker item is met. Qualified:
+  two runs on the same fixtures; FalseHold 0 relies on the leak-guard fix made after the
+  previous run (WrongAccept 0 does not); ~30% of verdicts are `defer`, so an L3 loop would
+  still escalate often; it is one item of `loop-checklist.md`, not a license to run
+  unattended. <!-- rec:TR-3ce4efb91999 -->
 
 Related: [workflow](./workflow.md) · [quality-bar](./quality-bar.md) · [testing](./testing.md)
