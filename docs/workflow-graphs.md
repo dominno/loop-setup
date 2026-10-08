@@ -53,8 +53,12 @@ flowchart LR
 > `<trace-evidence-gate>` block (byte-identical to `scripts/trace/lib.mjs`).
 >
 > `uiInScope: false` drops the 5 UI-facing critics (First-Time User, UX Flow, Designer,
-> Artistic Direction, Accessibility) from the Review fan-out for non-UI (backend / docs /
-> config) changes — the 10-node graph above is the default/full case.
+> Artistic Direction, Accessibility) for non-UI (backend / docs / config) changes, and such a
+> code-only round also switches the Review stage to **one** all-lens reviewer
+> (`reviewMode: 'single-pass'`, 🟢 Sonnet, label `critic:all-lenses-0`) — TRACE-Bench-lite
+> measured it equal to the panel on code-only review at ~5x lower cost (F1). Each finding
+> keeps its lens and still gets its own skeptic, so everything after Review is unchanged.
+> The 10-node graph above is the default/full case (`args.reviewMode` overrides).
 
 ## `improve-skills` — meta-critic over our own prompts (`/improve-skills`)
 

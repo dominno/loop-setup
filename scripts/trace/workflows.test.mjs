@@ -72,7 +72,7 @@ const onlySecurity = (findings) => (label) => (label.startsWith("critic:security
 
 describe("critic-panel (real body, stub agents)", () => {
   it("a missing skeptic verdict defers the finding — never confirmed, never refuted", async () => {
-    const { result } = await runWorkflow("critic-panel.js", { focus: "x", uiInScope: false }, (label) =>
+    const { result } = await runWorkflow("critic-panel.js", { focus: "x", uiInScope: false, reviewMode: "panel" }, (label) =>
       label.startsWith("critic:") ? onlySecurity([finding()])(label) : null,
     );
     expect(result.confirmed).toHaveLength(0);
@@ -83,7 +83,7 @@ describe("critic-panel (real body, stub agents)", () => {
   });
 
   it("re-typing cannot lower the bar: a measured claim re-typed to factual still needs a measurement", async () => {
-    const { result } = await runWorkflow("critic-panel.js", { focus: "x", uiInScope: false }, (label) =>
+    const { result } = await runWorkflow("critic-panel.js", { focus: "x", uiInScope: false, reviewMode: "panel" }, (label) =>
       label.startsWith("critic:") ? onlySecurity([finding({ claimType: "measured" })])(label) : verdict({ claimType: "factual" }),
     );
     expect(result.confirmed).toHaveLength(0);
@@ -93,7 +93,7 @@ describe("critic-panel (real body, stub agents)", () => {
   });
 
   it("a self-demoted qualify on reading-only evidence does not license a factual claim", async () => {
-    const { result } = await runWorkflow("critic-panel.js", { focus: "x", uiInScope: false }, (label) =>
+    const { result } = await runWorkflow("critic-panel.js", { focus: "x", uiInScope: false, reviewMode: "panel" }, (label) =>
       label.startsWith("critic:")
         ? onlySecurity([finding()])(label)
         : verdict({ verdict: "qualify", qualifier: "probably", evidenceChecked: [{ kind: "reading", ref: "skimmed" }] }),
@@ -116,7 +116,7 @@ describe("critic-panel (real body, stub agents)", () => {
   it("reuses a prior verdict only for the SAME claim on an identical tree (no skeptic call)", async () => {
     const { result, calls } = await runWorkflow(
       "critic-panel.js",
-      { focus: "x", uiInScope: false, priorRecords: [prior], treeId: TREE },
+      { focus: "x", uiInScope: false, reviewMode: "panel", priorRecords: [prior], treeId: TREE },
       onlySecurity([finding({ revisits: prior.record_id, revisitReason: "still-present" })]),
     );
     expect(calls.filter((c) => c.label.startsWith("verify:"))).toHaveLength(0);
@@ -127,7 +127,7 @@ describe("critic-panel (real body, stub agents)", () => {
   it("drops a revisits link to a DIFFERENT claim: the finding is adjudicated fresh, with its own claim_id", async () => {
     const { result, calls } = await runWorkflow(
       "critic-panel.js",
-      { focus: "x", uiInScope: false, priorRecords: [prior], treeId: TREE },
+      { focus: "x", uiInScope: false, reviewMode: "panel", priorRecords: [prior], treeId: TREE },
       (label) =>
         label.startsWith("critic:")
           ? onlySecurity([finding({ title: "GreetingForm exceeds 300 lines", revisits: prior.record_id, revisitReason: "still-present" })])(label)
@@ -143,7 +143,7 @@ describe("critic-panel (real body, stub agents)", () => {
   it("an identical claim on a CHANGED tree is re-verified and recorded as a revision", async () => {
     const { result, calls } = await runWorkflow(
       "critic-panel.js",
-      { focus: "x", uiInScope: false, priorRecords: [prior], treeId: "fedcba9876543210" },
+      { focus: "x", uiInScope: false, reviewMode: "panel", priorRecords: [prior], treeId: "fedcba9876543210" },
       (label) => (label.startsWith("critic:") ? onlySecurity([finding({ revisits: prior.record_id, revisitReason: "still-present" })])(label) : verdict()),
     );
     expect(calls.filter((c) => c.label.startsWith("verify:"))).toHaveLength(1);
@@ -241,12 +241,12 @@ describe("loop-iteration fail-closed paths", () => {
 
 describe("critic-panel round integrity", () => {
   it("a critic that died is reported, not mistaken for 'no findings'", async () => {
-    const { result } = await runWorkflow("critic-panel.js", { focus: "x", uiInScope: false }, (label) => (label.startsWith("critic:security") ? null : { findings: [] }));
+    const { result } = await runWorkflow("critic-panel.js", { focus: "x", uiInScope: false, reviewMode: "panel" }, (label) => (label.startsWith("critic:security") ? null : { findings: [] }));
     expect(result.failedReviewers).toEqual(["security"]);
   });
   it("a prior of a DIFFERENT claim type is not reused even with the same title", async () => {
     const prior = { record_id: "TR-dddddddddddd", claim_id: "critic:security:input-has-no-accessible-name", claim_type: "measured", claim_text: "x", final_status: "accept", missing: [], reason: "r", provenance: { commit: "abc1234", workflow: "critic-panel", tree: TREE } };
-    const { calls } = await runWorkflow("critic-panel.js", { focus: "x", uiInScope: false, priorRecords: [prior], treeId: TREE }, (label) =>
+    const { calls } = await runWorkflow("critic-panel.js", { focus: "x", uiInScope: false, reviewMode: "panel", priorRecords: [prior], treeId: TREE }, (label) =>
       label.startsWith("critic:") ? onlySecurity([finding({ revisits: prior.record_id, revisitReason: "still-present" })])(label) : verdict(),
     );
     expect(calls.filter((c) => c.label.startsWith("verify:"))).toHaveLength(1);
@@ -254,7 +254,7 @@ describe("critic-panel round integrity", () => {
 
   it("a prior defer is never reused — it is re-adjudicated", async () => {
     const prior = { record_id: "TR-cccccccccccc", claim_id: "critic:security:input-has-no-accessible-name", claim_type: "factual", claim_text: "x", final_status: "defer", missing: ["m"], reason: "r", provenance: { commit: "abc1234", workflow: "critic-panel", tree: TREE } };
-    const { calls } = await runWorkflow("critic-panel.js", { focus: "x", uiInScope: false, priorRecords: [prior], treeId: TREE }, (label) =>
+    const { calls } = await runWorkflow("critic-panel.js", { focus: "x", uiInScope: false, reviewMode: "panel", priorRecords: [prior], treeId: TREE }, (label) =>
       label.startsWith("critic:") ? onlySecurity([finding({ revisits: prior.record_id, revisitReason: "still-present" })])(label) : verdict(),
     );
     expect(calls.filter((c) => c.label.startsWith("verify:"))).toHaveLength(1);
@@ -368,7 +368,7 @@ describe("round-3 fixes (real bodies, stub agents)", () => {
     };
     const { result, calls } = await runWorkflow(
       "critic-panel.js",
-      { focus: "x", uiInScope: false, priorRecords: briefRecords([stored]), treeId: TREE },
+      { focus: "x", uiInScope: false, reviewMode: "panel", priorRecords: briefRecords([stored]), treeId: TREE },
       onlySecurity([finding({ revisits: stored.record_id, revisitReason: "still-present" })]),
     );
     expect(calls.filter((c) => c.label.startsWith("verify:"))).toHaveLength(0);
@@ -428,5 +428,48 @@ describe("round-3 fixes (real bodies, stub agents)", () => {
     expect(score.arms.verifier.perRepeat).toHaveLength(2);
     expect(score.arms.singlePass).toMatchObject({ agents: 3, recall: 1, falseBlockRate: 0 });
     expect(score.arms.panel).toMatchObject({ critics: 2, agents: 6 });
+  });
+});
+
+describe("critic-panel review modes (F1: single-pass on code-only rounds)", () => {
+  it("a code-only round (uiInScope: false) uses ONE all-lens reviewer; its findings keep their lens and each still gets a separate skeptic", async () => {
+    const { result, calls } = await runWorkflow("critic-panel.js", { focus: "x", uiInScope: false }, (label) =>
+      label === "critic:all-lenses-0" ? { findings: [finding({ lens: "security" }), finding({ lens: "regression", title: "Route changed", severity: "important" })] } : verdict({ evidenceChecked: [{ kind: "file_line", ref: "src/a.ts:1" }] }),
+    );
+    expect(result.reviewMode).toBe("single-pass");
+    expect(calls.filter((c) => c.label.startsWith("critic:"))).toHaveLength(1);
+    expect(calls.filter((c) => c.label.startsWith("verify:"))).toHaveLength(2);
+    expect(result.confirmed.map((f) => f.critic).sort()).toEqual(["regression", "security"]);
+    expect(result.confirmed[0].lens).toBeUndefined();
+    expect(result.traceRecords.map((r) => r.claim_id).sort()).toEqual(["critic:regression:route-changed", "critic:security:input-has-no-accessible-name"]);
+    expectWritable(result.traceRecords);
+  });
+
+  it("a dead single reviewer leaves every lens unreviewed — reported, never a clean pass", async () => {
+    const { result } = await runWorkflow("critic-panel.js", { focus: "x", uiInScope: false }, () => null);
+    expect(result.failedReviewers.length).toBe(result.counts.critics);
+    expect(result.confirmed).toHaveLength(0);
+  });
+
+  it("a round that drives the app keeps the panel (one critic per lens), and the mode can be forced", async () => {
+    const ui = await runWorkflow("critic-panel.js", { focus: "x" }, () => ({ findings: [] }));
+    expect(ui.result.reviewMode).toBe("panel");
+    expect(ui.calls.filter((c) => c.label.startsWith("critic:"))).toHaveLength(10);
+    const forced = await runWorkflow("critic-panel.js", { focus: "x", reviewMode: "single-pass" }, () => ({ findings: [] }));
+    expect(forced.calls.filter((c) => c.label.startsWith("critic:"))).toHaveLength(1);
+  });
+});
+
+describe("loop verifier prompt (F4)", () => {
+  it("tells the verifier to hold an item that contradicts a documented contract for a human, never to license it", async () => {
+    const items = [{ id: "LP-009", description: "x" }];
+    const diff = "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-a\n+b\n";
+    const { calls } = await runWorkflow("loop-iteration.js", { items, level: "L2" }, (label) =>
+      label.startsWith("impl:") ? { changedFiles: ["src/a.ts"], diff, checksPassed: true, notes: "" } : verdict({ evidenceChecked: [{ kind: "diff", ref: "src/a.ts" }] }),
+    );
+    const prompt = calls.find((c) => c.label.startsWith("verify:")).prompt;
+    expect(prompt).toMatch(/DOCUMENTED CONTRACTS/);
+    expect(prompt).toMatch(/a human decision to change/);
+    expect(prompt).toMatch(/never accept or qualify because the diff "does what the item asks"/);
   });
 });

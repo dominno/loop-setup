@@ -155,6 +155,13 @@ const ALL_CRITICS = [
 ]
 // </critic-roster>
 const CRITICS = ALL_CRITICS.filter((c) => uiInScope || !c.ui)
+// Review mode. TRACE-Bench-lite measured it (F1, record TR-34201765532f): on CODE-ONLY
+// review one all-lens reviewer matched the critic panel's recall and false-block rate at
+// ~5x lower cost. So a round with no browser-facing critic in scope (uiInScope: false) uses
+// ONE reviewer covering every in-scope lens by default; rounds that drive the app keep the
+// panel (that case was not measured). Either way each finding names its lens and still goes
+// to its own separate skeptic. Override with args.reviewMode: 'panel' | 'single-pass'.
+const reviewMode = (a && ['panel', 'single-pass'].includes(a.reviewMode) && a.reviewMode) || (uiInScope ? 'panel' : 'single-pass')
 
 const FINDINGS_SCHEMA = {
   type: 'object',
@@ -217,14 +224,40 @@ const priorDigest = priorRecords.length
 // Phase 1 — every critic reviews independently and in parallel (a barrier: we want
 // the full set before deduping and verifying).
 phase('Review')
-const reviews = await parallel(
-  CRITICS.map((c, i) => () =>
-    agent(
-      `You are the **${c.label}** for this project. This is a READ-ONLY review: do not create, edit or delete any file in the repo (scratch copies outside it are fine). Read CLAUDE.md and the relevant memory topic page(s), inspect ${focus} (read the code; if a localhost flow is in scope, drive it via Playwright/Chrome MCP and check console + network), then review strictly through your lens:\n${c.lens}\n${priorEvidence ? `\nEvidence already gathered by the Lead — verify against it instead of re-deriving from scratch:\n${typeof priorEvidence === 'string' ? priorEvidence : JSON.stringify(priorEvidence)}\n` : ''}\nType every finding with a claimType and never state it stronger than your evidence — a separate skeptic holds each type to this standard:\n${claimTypeGuide}\n${priorDigest ? `\nThese claims were already adjudicated (TRACE records). Do NOT re-raise a rejected claim unless you bring NEW evidence. If a finding of yours matches one of them, set revisits to its record_id and revisitReason to "still-present" (the same issue persists, nothing new) or "new-evidence" (put the new evidence first):\n${priorDigest}\n` : ''}\nReturn only findings you can back with concrete evidence. An empty list is a valid, honest answer.`,
-      { label: `critic:${c.key}-${i}`, phase: 'Review', schema: FINDINGS_SCHEMA, model: FANOUT_MODEL },
-    ).then((r) => ({ critic: c.key, label: c.label, findings: (r && r.findings) || [], failed: !r })),
-  ),
-)
+// Shared prompt parts (identical for both modes).
+const readOnlyBrief = `This is a READ-ONLY review: do not create, edit or delete any file in the repo (scratch copies outside it are fine). Read CLAUDE.md and the relevant memory topic page(s), inspect ${focus} (read the code; if a localhost flow is in scope, drive it via Playwright/Chrome MCP and check console + network)`
+const reviewTail = `${priorEvidence ? `\nEvidence already gathered by the Lead — verify against it instead of re-deriving from scratch:\n${typeof priorEvidence === 'string' ? priorEvidence : JSON.stringify(priorEvidence)}\n` : ''}\nType every finding with a claimType and never state it stronger than your evidence — a separate skeptic holds each type to this standard:\n${claimTypeGuide}\n${priorDigest ? `\nThese claims were already adjudicated (TRACE records). Do NOT re-raise a rejected claim unless you bring NEW evidence. If a finding of yours matches one of them, set revisits to its record_id and revisitReason to "still-present" (the same issue persists, nothing new) or "new-evidence" (put the new evidence first):\n${priorDigest}\n` : ''}\nReturn only findings you can back with concrete evidence. An empty list is a valid, honest answer.`
+const ITEM = FINDINGS_SCHEMA.properties.findings.items
+const SINGLE_FINDINGS_SCHEMA = {
+  ...FINDINGS_SCHEMA,
+  properties: {
+    findings: {
+      ...FINDINGS_SCHEMA.properties.findings,
+      items: { ...ITEM, required: [...ITEM.required, 'lens'], properties: { ...ITEM.properties, lens: { type: 'string', enum: CRITICS.map((c) => c.key), description: 'the key of the lens this finding belongs to' } } },
+    },
+  },
+}
+const withoutLens = (f) => {
+  const g = { ...f }
+  delete g.lens
+  return g
+}
+const reviews = reviewMode === 'single-pass'
+  ? await agent(
+      `You are the reviewer for this project, covering EVERY lens below in a single pass. ${readOnlyBrief}, then review through each lens in turn and tag every finding with the key of the lens it belongs to:\n${CRITICS.map((c) => `- ${c.key} (${c.label}): ${c.lens}`).join('\n')}\n${reviewTail}`,
+      { label: 'critic:all-lenses-0', phase: 'Review', schema: SINGLE_FINDINGS_SCHEMA, model: FANOUT_MODEL },
+    ).then((r) =>
+      // A reviewer that died leaves EVERY lens unreviewed — reported per lens below.
+      CRITICS.map((c) => ({ critic: c.key, label: c.label, findings: r ? (r.findings || []).filter((f) => f.lens === c.key).map(withoutLens) : [], failed: !r })),
+    )
+  : await parallel(
+      CRITICS.map((c, i) => () =>
+        agent(
+          `You are the **${c.label}** for this project. ${readOnlyBrief}, then review strictly through your lens:\n${c.lens}\n${reviewTail}`,
+          { label: `critic:${c.key}-${i}`, phase: 'Review', schema: FINDINGS_SCHEMA, model: FANOUT_MODEL },
+        ).then((r) => ({ critic: c.key, label: c.label, findings: (r && r.findings) || [], failed: !r })),
+      ),
+    )
 // A critic that died returned nothing — that is NOT "no findings". Surface it so a round
 // with a silent lens is never mistaken for a clean pass.
 const failedReviewers = reviews.filter((r) => !r || r.failed).map((r, i) => (r ? r.critic : `critic-${i}`))
@@ -374,6 +407,7 @@ const reuseActions = settled
 return {
   focus,
   treeId,
+  reviewMode, // 'panel' (one critic per lens) or 'single-pass' (one all-lens reviewer)
   failedReviewers, // critics that returned nothing — the round is incomplete if non-empty
   counts: {
     critics: CRITICS.length,

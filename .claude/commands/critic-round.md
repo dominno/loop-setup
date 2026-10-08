@@ -45,6 +45,11 @@ $ARGUMENTS
 - This is the heavier, deterministic path (the workflow spawns ~10 critic agents +
   one verifier per blocker/important finding, minus reused verdicts). That is intended:
   real independent review, not one context role-playing ten critics.
+- Exception, measured: a code-only round (`uiInScope: false` — no browser lens in scope)
+  runs ONE all-lens reviewer instead of the critic fan-out (`reviewMode: 'single-pass'`):
+  TRACE-Bench-lite found it as good as the panel on code-only review at ~5x lower cost
+  (F1). Each finding still names its lens and still gets its own separate skeptic. Pass
+  `reviewMode: 'panel'` to force the fan-out.
 - Agreement between critics is **not** extra evidence (they share a model); only a
   critic bringing *different* evidence corroborates. Verdict semantics, the evidence
   standard per claim type, and the consumer actions: `.claude/memory/topics/trace.md`.

@@ -150,6 +150,12 @@ critics is weak evidence** (Prop. 4: n_eff = n/(1+(n−1)ρ̄) → 1 as ρ̄ →
 therefore counts corroboration only when another critic brings *different* evidence, and
 passes that evidence to the verifier; agreement alone never upgrades a finding.
 
+**F1 response (fan-out shrunk where it was measured):** on code-only review the bench found
+one all-lens reviewer as good as the critic panel at ~5x lower cost (record
+TR-34201765532f). So a code-only round (`uiInScope: false`) runs the Review stage as ONE
+reviewer (`reviewMode: 'single-pass'`); rounds that drive the app keep one critic per lens
+until the bench measures them. The skeptic per finding (D2) is unchanged in both modes.
+
 ## Stop conditions (paper §5.4) — used by `/loop` and `/multi-agent-dev`
 Stop *re-running* when every claim is (1) a qualified proposal (accept/qualify, acted on),
 (2) rejected, (3) deferred with named `missing`, or (4) **diminishing returns**: a re-run
