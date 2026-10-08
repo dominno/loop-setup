@@ -11,3 +11,4 @@ store keeps the full history (`pnpm trace show <record>`).
 
 | record | candidate fact | missing (what would admit it) | since |
 |---|---|---|---|
+| TR-3439a2c9a95a | Parallel subagents sharing the session scratchpad can remove each other's scratch worktrees — give each its own `mktemp -d` dir | a reproduction: two subagents creating and cleaning up worktrees under one scratchpad, one removing the other's | 2026-10-08 |

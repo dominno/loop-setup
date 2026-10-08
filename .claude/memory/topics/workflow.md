@@ -117,5 +117,9 @@
   `/improve-skills` pass over 21 prompt/workflow files spawned 112 agents (~9.4M subagent
   tokens, ~82 min) because every blocker/important finding gets its own strong-tier
   verifier — scope `args.targets` narrowly when budget matters. <!-- rec:TR-6ab38b2e15ac -->
+- Cost reference (one run each; critic-panel cost scales with its blocker/important
+  findings — 24 here): a critic-panel round with the 5 non-UI critics spawned 29 agents
+  (~2.9M subagent tokens, ~51 min); TRACE-Bench-lite (verifier + single-pass, repeat 2,
+  11 fixtures) spawned 33 agents (~2.0M tokens, ~10 min). <!-- rec:TR-3ef3eac264d4 -->
 
 Related: [build-and-verify](./build-and-verify.md) · [testing](./testing.md) · [trace](./trace.md)

@@ -224,5 +224,20 @@ debate stage (critic panel + skeptic already is one).
 - Test titles and assertion messages are printed to any agent that runs `pnpm test`, so
   tests over bench ground truth print only opaque tokens or counts.
   <!-- rec:TR-4483488be093 -->
+- Node's spawn `timeout` option kills only the direct child. To kill a detached judge with
+  its children, kill the process group with your own timer and do NOT forward `timeout`:
+  Node refreshes loop time per `setTimeout`, so equal-delay timers can fire in different
+  passes and the child's exit then cancels the group kill. <!-- rec:TR-b219013814f2 -->
+- `git apply --numstat -z <patch>` names only the destination of a rename/copy; union it
+  with `git apply --numstat -z -R <patch>` to see both sides (`pnpm trace denylist-check`
+  does). <!-- rec:TR-269d82f78a84 -->
+- `git apply` strips any one leading path component and accepts traditional `---`/`+++`
+  sections (tab timestamps included) after a `diff --git` section, so an `a/`/`b/` regex
+  misses files git will write — check the paths git reports before applying.
+  <!-- rec:TR-00c2a9c72e0c -->
+- "Does HEAD already contain this patch?" is a REVERSE check against HEAD in a throwaway
+  index (`GIT_INDEX_FILE=<tmp> git read-tree HEAD`, then `git apply --cached -R --check`);
+  a forward check is wrong — a pure-addition hunk applies again at an offset.
+  <!-- rec:TR-4a5419c74c07 -->
 
 Related: [workflow](./workflow.md) · [quality-bar](./quality-bar.md) · [testing](./testing.md)

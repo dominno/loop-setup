@@ -267,3 +267,21 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
   TR-b8824029fbed, TR-4483488be093 → trace.md; TR-462e7e971072 → testing.md),
   qualified 1 (TR-6ab38b2e15ac → workflow.md), quarantined 0, rejected 1
   (TR-e72828345c91, duplicate). `pnpm trace lint`: ok, 57 records.
+
+## [2026-10-08] ingest | Third checker round on TRACE-lite + clean bench re-run
+- Third critic-panel round (wf_d01e03e0-e1f, 5 non-UI critics) over the round-2 fixes:
+  0 blockers, 24 important (~9 distinct issues); the round-1/2 findings it no longer raised
+  were CLEARed. Fixed: mixed-format patches past the denylist (git's own parse, pre-apply,
+  HEAD-sourced denylist), unreachable `bench-judge --recover`, F0 coverage gaps (run ids),
+  `--brief` dropping qualifiers, `act --from` on empty lists, unbounded REAUDIT.
+- Separate checkers (subagents) re-verified each cluster on scratch clones and found
+  second-order defects in the fixes (panel labels with digits, committed fixtures reverted
+  by --recover, process-group kill on timeout, unpinned mutants) — all fixed and pinned;
+  their confirmations are the CLEAR notes. The denylist cluster's checker was stopped by a
+  safety classifier before testing, so those six records stay on HOLD.
+- TRACE-Bench-lite re-run (wf_1f8c24eb-1f2): 33/33 transcripts scanned, no exclusions,
+  verifier WrongAcceptRate 0 / FalseHoldRate 0 / invariance 1.00, single-pass recall 1.00 —
+  recorded `accept` (TR-bdc16b430394); the L3 measured-checker gate is satisfied.
+- Admission: committed 5 (TR-b219013814f2, TR-269d82f78a84, TR-00c2a9c72e0c,
+  TR-4a5419c74c07 → trace.md; TR-4a808ff82551 → testing.md), qualified 1 (TR-3ef3eac264d4 →
+  workflow.md), quarantined 1 (TR-3439a2c9a95a), rejected 1 (TR-690c19ec53fb, duplicate).
