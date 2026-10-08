@@ -40,7 +40,9 @@ $ARGUMENTS
    (fixture ids, defect text) and excludes those runs (**F0**), prints the metrics, and
    appends a counts-only `measured` TRACE record (`claim_id bench:trace-bench-lite`,
    revising the previous run's record). `--record` refuses to run without
-   `--transcripts`: an unscanned run is not a measurement.
+   `--transcripts`: an unscanned run is not a measurement. `bench-args` mints a run id that
+   every agent label and the result carry, so a run is covered only by its OWN non-empty
+   transcripts — another run's transcript dir cannot vouch for it (F0 coverage).
 5. **Report** a table per arm (WrongAcceptRate, FalseHoldRate, defer rate, gate
    downgrades, invariance; single-pass vs panel recall / false-block; n_eff), the
    excluded runs (contaminated / no verdict), the external-judge gap (`judgeOnly` /

@@ -17,6 +17,7 @@ import {
   insideRepo,
   markUnscanned,
   numstatPaths,
+  runKeyFromLabel,
   latestByClaim,
   loadEntries,
   loadSchema,
@@ -504,6 +505,20 @@ describe("round-3 fixes", () => {
     expect(insideRepo("/repo/sub", "/repo", "/")).toBe(true);
   });
 
+  it("agent labels map back to runs, including critic keys with digits and the run id", () => {
+    expect(runKeyFromLabel("bench-panel:fx-0000abcd:qa-e2e-5-5@0a1b2c3d")).toEqual({ arm: "panel", token: "fx-0000abcd", critic: "qa-e2e", runId: "0a1b2c3d" });
+    expect(runKeyFromLabel("bench-verify:fx-0000abcd-r1-3@0a1b2c3d")).toMatchObject({ arm: "verifier", repeat: 1, runId: "0a1b2c3d" });
+    expect(runKeyFromLabel("critic:security-1")).toBeNull();
+  });
+
+  it("a transcript from another run (different run id) or an empty one covers nothing", () => {
+    const run = { arm: "single-pass", fixtureId: "fx-00000001", runId: "0a1b2c3d", block: true };
+    const label = "bench-single:fx-00000001-0";
+    expect(markUnscanned([run], [{ label: `${label}@ffffffff`, text: "x" }])[0].unscanned).toBe(true);
+    expect(markUnscanned([run], [{ label: `${label}@0a1b2c3d`, text: "  " }])[0].unscanned).toBe(true);
+    expect(markUnscanned([run], [{ label: `${label}@0a1b2c3d`, text: "x" }])[0].unscanned).toBeUndefined();
+  });
+
   it("runs no scanned transcript belongs to are excluded (F0 coverage), and the record is a qualify", () => {
     const manifest = { fixtures: [{ id: "B1", kind: "bad" }, { id: "G1", kind: "good" }] };
     const runs = [
@@ -511,7 +526,7 @@ describe("round-3 fixes", () => {
       { arm: "verifier", repeat: 0, fixtureId: "fx-00000002", verdict: "accept" },
       { arm: "verifier", repeat: 1, fixtureId: "fx-00000002", verdict: "accept", noVerdict: true },
     ];
-    const marked = markUnscanned(runs, [{ label: "bench-verify:fx-00000001-r0-0" }, { label: "critic:security-1" }]);
+    const marked = markUnscanned(runs, [{ label: "bench-verify:fx-00000001-r0-0", text: "x" }, { label: "critic:security-1", text: "x" }]);
     expect(marked.map((r) => !!r.unscanned)).toEqual([false, true, false]); // a no-verdict run is excluded anyway
     const score = scoreBench(manifest, { runs: marked });
     expect(score.unscannedRuns).toBe(1);

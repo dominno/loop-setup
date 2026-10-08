@@ -1006,18 +1006,22 @@ export function contaminatedRuns(transcripts, manifest) {
 /**
  * The bench run an agent label belongs to (trace-bench.js labels its agents
  * bench-verify:<token>-r<repeat>-<i>, bench-single:<token>-<i>,
- * bench-panel:<token>:<critic>-<i>-<j>), or null for any other agent.
+ * bench-panel:<token>:<critic>-<i>-<j>, each suffixed @<runId> when the args carried a
+ * run id), or null for any other agent.
  */
 export function runKeyFromLabel(label) {
+  const RUN = "(?:@([0-9a-f]{8}))?$";
   let m;
-  if ((m = /^bench-verify:(fx-[0-9a-f]{8})-r(\d+)-\d+$/.exec(label))) return { arm: "verifier", token: m[1], repeat: Number(m[2]) };
-  if ((m = /^bench-single:(fx-[0-9a-f]{8})-\d+$/.exec(label))) return { arm: "single-pass", token: m[1] };
-  if ((m = /^bench-panel:(fx-[0-9a-f]{8}):([a-z-]+)-\d+-\d+$/.exec(label))) return { arm: "panel", token: m[1], critic: m[2] };
+  if ((m = new RegExp(`^bench-verify:(fx-[0-9a-f]{8})-r(\\d+)-\\d+${RUN}`).exec(label))) return { arm: "verifier", token: m[1], repeat: Number(m[2]), runId: m[3] };
+  if ((m = new RegExp(`^bench-single:(fx-[0-9a-f]{8})-\\d+${RUN}`).exec(label))) return { arm: "single-pass", token: m[1], runId: m[2] };
+  // Critic keys may contain digits (qa-e2e).
+  if ((m = new RegExp(`^bench-panel:(fx-[0-9a-f]{8}):([a-z0-9-]+)-\\d+-\\d+${RUN}`).exec(label))) return { arm: "panel", token: m[1], critic: m[2], runId: m[3] };
   return null;
 }
 
+// A transcript belongs to a run only if the run ids agree too (both absent = legacy runs).
 const runMatchesKey = (r, k) =>
-  k.arm === r.arm && k.token === r.fixtureId && (k.repeat === undefined || k.repeat === (r.repeat ?? 0)) && (k.critic === undefined || k.critic === r.critic);
+  k.arm === r.arm && k.token === r.fixtureId && (k.repeat === undefined || k.repeat === (r.repeat ?? 0)) && (k.critic === undefined || k.critic === r.critic) && k.runId === r.runId;
 
 /** Mark runs whose agent saw ground truth (scoreBench then excludes them and raises F0). */
 export function markContaminated(runs, keys) {
@@ -1030,7 +1034,8 @@ export function markContaminated(runs, keys) {
  * dir must not yield a clean-looking measurement.
  */
 export function markUnscanned(runs, transcripts) {
-  const keys = transcripts.map((t) => runKeyFromLabel(t.label)).filter(Boolean);
+  // An empty transcript was not scanned in any meaningful sense — it covers nothing.
+  const keys = transcripts.filter((t) => String(t.text || "").trim()).map((t) => runKeyFromLabel(t.label)).filter(Boolean);
   return runs.map((r) => (r.noVerdict || keys.some((k) => runMatchesKey(r, k)) ? r : { ...r, unscanned: true }));
 }
 
@@ -1122,9 +1127,10 @@ export function staleFixtures(manifest, applies) {
 }
 
 /** The workflow args for .claude/workflows/trace-bench.js — no ground truth leaks to agents. */
-export function benchArgs(manifest, { arms, repeat, critics, only }) {
+export function benchArgs(manifest, { arms, repeat, critics, only, runId }) {
   const fx = manifest.fixtures.filter((f) => !only || only.includes(f.id));
   return {
+    ...(runId ? { runId } : {}),
     fixtures: fx.map((f) => ({ id: opaqueFixtureId(f.id), item: f.item, patch: f.patch })),
     arms: arms || ["verifier", "single-pass"],
     repeat: repeat || 1,

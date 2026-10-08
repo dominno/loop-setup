@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { opaqueFixtureId, readBench, ROOT } from "./lib.mjs";
-import { benchPreflight, judgeEnv, runBenchJudge, runJudge, SIGNALS } from "./bench-judge.mjs";
+import { appliedFixtures, benchPreflight, judgeEnv, runBenchJudge, runJudge, SIGNALS } from "./bench-judge.mjs";
 
 const CLI = join(ROOT, "scripts/trace/cli.mjs");
 let dir;
@@ -165,17 +165,25 @@ describe("bench-judge safety helpers", () => {
       const pre = benchPreflight(m);
       expect(pre.error).toMatch(/--recover/);
       expect(pre.stale).toBeUndefined();
-      expect(benchPreflight(m, { recover: true }).reversed).toEqual(["B90-synthetic"]);
+      expect(benchPreflight(m, { recover: true }).reversed).toEqual([opaqueFixtureId("B90-synthetic")]);
       expect(existsSync(join(ROOT, tmpName))).toBe(false);
     } finally {
       rmSync(join(ROOT, tmpName), { force: true });
     }
   });
 
-  it("preflight: a patch that neither applies nor is applied is stale", () => {
+  it("a fixture whose change is already COMMITTED (clean files) is not 'applied' — --recover must never revert committed code", () => {
+    const [l1, l2, l3] = readFileSync(join(ROOT, "README.md"), "utf8").split("\n");
+    const patch = `diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1,2 +1,3 @@\n+${l1}\n ${l2}\n ${l3}\n`;
+    expect(spawnSync("git", ["apply", "-R", "--check", "-"], { cwd: ROOT, input: patch }).status).toBe(0); // it does reverse cleanly…
+    expect(appliedFixtures({ fixtures: [fx({ patch })] })).toEqual([]); // …but nothing is uncommitted, so it was not left by a run
+  });
+
+  it("preflight: a patch that neither applies nor is applied is stale (and --recover says so instead of exiting ok)", () => {
     const gone = `scripts/trace/.bench-judge-missing-${process.pid}.txt`;
     const patch = `diff --git a/${gone} b/${gone}\n--- a/${gone}\n+++ b/${gone}\n@@ -1 +1 @@\n-x\n+y\n`;
     expect(benchPreflight({ fixtures: [fx({ patch })] }).stale).toHaveLength(1);
+    expect(benchPreflight({ fixtures: [fx({ patch })] }, { recover: true })).toMatchObject({ reversed: [], stale: [expect.any(String)] });
   });
 
   it("`pnpm trace bench-judge --recover` is reachable from the CLI (exit 0, nothing to reverse on a clean tree)", () => {
@@ -278,10 +286,11 @@ describe("round-3 CLI fixes", () => {
   });
 
   describe("bench-score --record fails closed", () => {
-    const setup = (transcripts) => {
+    const RUN = "0a1b2c3d";
+    const setup = (transcripts, { runId = RUN } = {}) => {
       const m = readBench();
       const runs = join(dir, "runs.json");
-      writeFileSync(runs, JSON.stringify({ runs: m.fixtures.map((f) => ({ arm: "verifier", repeat: 0, fixtureId: opaqueFixtureId(f.id), verdict: "defer", failedGates: [], missing: ["x"] })) }));
+      writeFileSync(runs, JSON.stringify({ ...(runId ? { runId } : {}), runs: m.fixtures.map((f) => ({ arm: "verifier", repeat: 0, fixtureId: opaqueFixtureId(f.id), verdict: "defer", failedGates: [], missing: ["x"] })) }));
       const tdir = join(dir, "transcripts");
       mkdirSync(tdir);
       transcripts(m).forEach((t, i) => {
@@ -290,7 +299,7 @@ describe("round-3 CLI fixes", () => {
       });
       return (extra = []) => trace(["bench-score", runs, "--transcripts", tdir, "--record", ...extra]);
     };
-    const covering = (m) => m.fixtures.map((f, i) => ({ label: `bench-verify:${opaqueFixtureId(f.id)}-r0-${i}`, text: "clean" }));
+    const covering = (m, run = RUN) => m.fixtures.map((f, i) => ({ label: `bench-verify:${opaqueFixtureId(f.id)}-r0-${i}@${run}`, text: "clean" }));
     it("on an empty transcript dir", () => {
       const out = setup(() => [])();
       expect(out.status).toBe(1);
@@ -303,6 +312,19 @@ describe("round-3 CLI fixes", () => {
       const out = setup(() => [{ label: "critic:security-1", text: "clean" }])();
       expect(out.status).toBe(1);
       expect(out.stdout).toMatch(/no scanned transcript/);
+    });
+    it("when the transcripts belong to ANOTHER bench run (same fixtures, different run id)", () => {
+      const out = setup((m) => covering(m, "ffffffff"))();
+      expect(out.status).toBe(1);
+      expect(out.stdout).toMatch(/no scanned transcript/);
+    });
+    it("when a transcript is empty (nothing was scanned)", () => {
+      expect(setup((m) => covering(m).map((t, i) => (i === 0 ? { ...t, text: "" } : t)))().status).toBe(1);
+    });
+    it("for runs without a run id (args not minted by bench-args)", () => {
+      const out = setup((m) => covering(m, "").map((t) => ({ ...t, label: t.label.replace(/@$/, "") })), { runId: "" })();
+      expect(out.status).toBe(1);
+      expect(out.stdout).toMatch(/run id/);
     });
     it("records an accept when every run is covered and nothing leaked", () => {
       expect(setup(covering)().status).toBe(0);

@@ -27,6 +27,11 @@ if (!fixtures.length) {
 }
 const ARMS = (a && Array.isArray(a.arms) && a.arms.length ? a.arms : ['verifier', 'single-pass']).filter((x) => ['verifier', 'single-pass', 'panel'].includes(x))
 const REPEAT = Math.max(1, Math.min(5, Number(a && a.repeat) || 1))
+// Per-run id (minted by `pnpm trace bench-args`): every agent label and the result carry
+// it, so `bench-score` can prove each run's transcript came from THIS run — not from
+// another run's transcript dir with the same fixtures.
+const RUN_ID = a && typeof a.runId === 'string' && /^[0-9a-f]{8}$/.test(a.runId) ? a.runId : null
+const AT = RUN_ID ? `@${RUN_ID}` : ''
 // Model tiering mirrors production: the verifier arm uses the judge tier (as in
 // loop-iteration); reviewer arms use the fan-out tier (as critic-panel's critics do).
 const FANOUT_MODEL = (a && a.models && a.models.fanout) || 'sonnet'
@@ -255,7 +260,7 @@ if (ARMS.includes('verifier')) {
         // Worst case for the checker: the implementer self-reports passing checks.
         const im = { changedFiles, diff: f.patch, checksPassed: true }
         return agent(verifierPrompt({ id: f.id, description: f.item }, im), {
-          label: `bench-verify:${f.id}-r${r}-${i}`, phase: 'Verifier', schema: VERIFIER_SCHEMA, model: JUDGE_MODEL,
+          label: `bench-verify:${f.id}-r${r}-${i}${AT}`, phase: 'Verifier', schema: VERIFIER_SCHEMA, model: JUDGE_MODEL,
         }).then((v) => {
           const g = applyEvidenceGate(v ? { ...v, claimType: 'practical' } : { claimType: 'practical' })
           return {
@@ -279,7 +284,7 @@ if (ARMS.includes('single-pass')) {
   fixtures.forEach((f, i) => {
     tasks.push(() =>
       agent(`You are a single reviewer covering ALL of these lenses at once:\n${lensList}\n\n${reviewTask(f)}`, {
-        label: `bench-single:${f.id}-${i}`, phase: 'Reviewers', schema: REVIEW_SCHEMA, model: FANOUT_MODEL,
+        label: `bench-single:${f.id}-${i}${AT}`, phase: 'Reviewers', schema: REVIEW_SCHEMA, model: FANOUT_MODEL,
       }).then((v) => ({ arm: 'single-pass', fixtureId: f.id, block: !!(v && v.block), findings: (v && v.findings) || [], noVerdict: !v })),
     )
   })
@@ -289,7 +294,7 @@ if (ARMS.includes('panel')) {
     PANEL.forEach((c, j) => {
       tasks.push(() =>
         agent(`You are the **${c.label}**. Review strictly through your lens:\n${c.lens}\n\n${reviewTask(f)}`, {
-          label: `bench-panel:${f.id}:${c.key}-${i}-${j}`, phase: 'Reviewers', schema: REVIEW_SCHEMA, model: FANOUT_MODEL,
+          label: `bench-panel:${f.id}:${c.key}-${i}-${j}${AT}`, phase: 'Reviewers', schema: REVIEW_SCHEMA, model: FANOUT_MODEL,
         }).then((v) => ({ arm: 'panel', critic: c.key, fixtureId: f.id, block: !!(v && v.block), findings: (v && v.findings) || [], noVerdict: !v })),
       )
     })
@@ -302,4 +307,4 @@ const runs = (await parallel(tasks)).filter(Boolean)
 
 // No records here: scoring (and the measured-claim record it drafts) happens in
 // `pnpm trace bench-score`, where the manifest's ground truth is joined in.
-return { arms: ARMS, repeat: REPEAT, fixtures: fixtures.map((f) => f.id), agents: tasks.length, runs }
+return { runId: RUN_ID, arms: ARMS, repeat: REPEAT, fixtures: fixtures.map((f) => f.id), agents: tasks.length, runs }

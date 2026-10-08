@@ -2,6 +2,7 @@
 // TRACE-lite CLI — the only sanctioned writer of .claude/memory/trace/records.jsonl.
 // Usage: pnpm trace <command> [...]   (see `pnpm trace help`)
 import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -375,8 +376,9 @@ async function main() {
       const { benchPreflight } = await import("./bench-judge.mjs");
       const pre = benchPreflight(manifest, { recover: cmd === "bench-judge" && !!flags.recover });
       if (pre.reversed) {
-        out({ reversed: pre.reversed }, true);
-        return 0;
+        out(pre, true);
+        // Something that neither applies nor reverses cleanly may still be a seeded defect.
+        return pre.stale && pre.stale.length ? 1 : 0;
       }
       if (pre.error) {
         out(pre, true);
@@ -385,6 +387,7 @@ async function main() {
     }
     if (cmd === "bench-args") {
       const args = benchArgs(manifest, {
+        runId: randomBytes(4).toString("hex"),
         arms: list(flags.arms),
         repeat: flags.repeat ? Number(flags.repeat) : undefined,
         critics: list(flags.critics),
@@ -404,7 +407,8 @@ async function main() {
     let runs = refs.flatMap((ref) => {
       const raw = readJsonInput(ref);
       const res = raw && raw.runs ? raw : raw?.result || raw;
-      return Array.isArray(res?.runs) ? res.runs : [];
+      // Each run carries its workflow run's id, so coverage can tie it to its own transcripts.
+      return Array.isArray(res?.runs) ? res.runs.map((r) => ({ ...r, runId: res.runId || undefined })) : [];
     });
     // Contamination scan (F0): any agent whose transcript contains a real fixture id or
     // defect text saw ground truth; its runs are excluded. Required for --record.
@@ -431,9 +435,16 @@ async function main() {
       return 1;
     }
     const keys = contaminatedRuns(transcripts, manifest);
-    runs = markUnscanned(markContaminated(runs, keys), transcripts);
+    runs = markContaminated(runs, keys);
+    if (tdirs.length) runs = markUnscanned(runs, transcripts);
     const score = scoreBench(manifest, { runs, unattributedLeaks: keys.filter((k) => k.arm === "unknown").length });
     score.transcriptsScanned = transcripts.length;
+    if (!tdirs.length) score.flags.push("F0 coverage: no --transcripts given — the contamination scan did not run; these numbers are not a measurement");
+    if (flags.record && runs.some((r) => !r.runId)) {
+      out(score, true);
+      out("--record refused: run(s) without a run id (args not from `pnpm trace bench-args`) cannot be tied to their own transcripts (F0)");
+      return 1;
+    }
     if (flags.record && score.unattributedLeaks) {
       out(score, true);
       out("--record refused: ground truth leaked into a transcript that cannot be tied to a run (F0)");

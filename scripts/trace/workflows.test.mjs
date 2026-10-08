@@ -365,17 +365,20 @@ describe("round-3 fixes (real bodies, stub agents)", () => {
     expect(result.applied).toHaveLength(1);
   });
 
-  it("trace-bench runs and agent labels match what the scorer and the F0 coverage scan expect", async () => {
+  it("trace-bench runs and agent labels (every arm, run id included) match what the scorer and the F0 coverage scan expect", async () => {
     const patch = "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-a\n+b\n";
     const manifest = { fixtures: [{ id: "B90-x", kind: "bad", item: "x", patch }, { id: "G90-y", kind: "good", item: "y", patch }] };
-    const { result, calls } = await runWorkflow("trace-bench.js", benchArgs(manifest, { arms: ["verifier", "single-pass"], repeat: 2 }), (label) =>
+    const args = benchArgs(manifest, { arms: ["verifier", "single-pass", "panel"], repeat: 2, critics: ["qa-e2e", "security"], runId: "0a1b2c3d" });
+    const { result, calls } = await runWorkflow("trace-bench.js", args, (label) =>
       label.startsWith("bench-verify:") ? verdict({ evidenceChecked: [{ kind: "diff", ref: "src/a.ts" }] }) : { block: label.includes(opaqueFixtureId("B90-x")), findings: [] },
     );
-    const runs = markUnscanned(result.runs, calls.map((c) => ({ label: c.label, text: "" })));
+    expect(result.runId).toBe("0a1b2c3d");
+    const runs = markUnscanned(result.runs.map((r) => ({ ...r, runId: result.runId })), calls.map((c) => ({ label: c.label, text: "scanned" })));
     const score = scoreBench(manifest, { runs });
     expect(score.unscannedRuns).toBe(0);
     expect(score.arms.verifier).toMatchObject({ wrongAcceptRate: 1, falseHoldRate: 0 });
     expect(score.arms.verifier.perRepeat).toHaveLength(2);
     expect(score.arms.singlePass).toMatchObject({ agents: 2, recall: 1, falseBlockRate: 0 });
+    expect(score.arms.panel).toMatchObject({ critics: 2, agents: 4 });
   });
 });
