@@ -4,8 +4,8 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { opaqueFixtureId, readBench, ROOT } from "./lib.mjs";
+import { dirname, join } from "node:path";
+import { encodeBench, opaqueFixtureId, readBench, ROOT } from "./lib.mjs";
 import { appliedFixtures, benchPreconditionStep, benchPreflight, judgeEnv, runBenchJudge, runJudge, SIGNALS } from "./bench-judge.mjs";
 
 const CLI = join(ROOT, "scripts/trace/cli.mjs");
@@ -134,6 +134,10 @@ describe("bench-judge safety helpers", () => {
     await expect(runBenchJudge({ fixtures: [fx()] }, { ...quiet, judge: async () => true })).rejects.toThrow(/baseline failed/);
   });
 
+  it("runBenchJudge aborts when the baseline judge did not run at all (a timeout is not a pass)", async () => {
+    await expect(runBenchJudge({ fixtures: [fx()] }, { ...quiet, judge: async () => null })).rejects.toThrow(/did not run/);
+  });
+
   it("runBenchJudge: a judge that did not run is ok:false, and the patch is reversed", async () => {
     let calls = 0;
     const res = await runBenchJudge({ fixtures: [fx()] }, { ...quiet, judge: async () => (calls++ === 0 ? false : null) });
@@ -230,12 +234,21 @@ describe("bench-judge safety helpers", () => {
     const grandchild = () => Number(readFileSync(pidFile, "utf8"));
     return { d, command: `sh ${script}`, grandchild, ready: () => existsSync(pidFile) && readFileSync(pidFile, "utf8").trim() !== "" };
   };
-  // Gone, or a zombie waiting to be reaped (some containers never reap orphans).
+  // Gone, or a zombie waiting to be reaped (some containers never reap orphans). Without
+  // /proc (macOS), ask the kernel directly — never default to "dead".
   const dead = (pid) => {
+    if (existsSync("/proc/self/stat")) {
+      try {
+        return readFileSync(`/proc/${pid}/stat`, "utf8").replace(/^.*\) /s, "").startsWith("Z");
+      } catch {
+        return true; // no /proc entry: the process is gone
+      }
+    }
     try {
-      return readFileSync(`/proc/${pid}/stat`, "utf8").replace(/^.*\) /s, "").startsWith("Z");
-    } catch {
-      return true;
+      process.kill(pid, 0);
+      return false;
+    } catch (e) {
+      return e.code === "ESRCH";
     }
   };
   const settle = async (pids) => {
@@ -251,7 +264,15 @@ describe("bench-judge safety helpers", () => {
     try {
       let child;
       const t0 = Date.now();
-      expect(await runJudge(j.command, { timeoutMs: 400, onChild: (c) => (child = c) })).toBeNull();
+      // Busy-wait a few ms after spawn: if spawn's own `timeout` were forwarded, it would fire
+      // in an earlier timer pass than ours, kill only the direct child, and the child's exit
+      // would cancel our group kill — orphaning the grandchild.
+      const onChild = (c) => {
+        child = c;
+        const until = Date.now() + 8;
+        while (Date.now() < until);
+      };
+      expect(await runJudge(j.command, { timeoutMs: 400, onChild })).toBeNull();
       expect(Date.now() - t0).toBeLessThan(5000);
       expect(await settle([child.pid, j.grandchild()])).toEqual([true, true]);
     } finally {
@@ -374,6 +395,9 @@ describe("round-3 CLI fixes", () => {
     writeFileSync(file, JSON.stringify({ actions: [], reuseActions: [{ record_id: id, consumer: "critic-panel", action: "REUSE", note: "n" }] }));
     expect(trace(["act", "--from", file]).status).toBe(0);
     expect(JSON.parse(trace(["show", id]).stdout).actions).toHaveLength(1);
+    writeFileSync(file, JSON.stringify({ actions: [{ record_id: id, consumer: "loop", action: "HOLD" }], reuseActions: [{ record_id: id, consumer: "critic-panel", action: "REUSE", note: "m" }] }));
+    expect(trace(["act", "--from", file]).status).toBe(0);
+    expect(JSON.parse(trace(["show", id]).stdout).actions.map((a) => a.action).sort()).toEqual(["HOLD", "REUSE", "REUSE"]);
   });
 
   it("bench-unpack refuses an in-repo directory (the guard is wired, not just the helper)", () => {
@@ -479,5 +503,92 @@ describe("round-3 CLI fixes", () => {
       expect(out.status).toBe(1);
       expect(says(out, /bench ground truth/)).toBe(true);
     });
+  });
+});
+
+// End-to-end CLI wiring that touches HEAD, the working tree or the fixture bundle runs in a
+// throwaway repo holding a COPY of the trace tooling — never in the real tree.
+function tempRepo({ manifest } = {}) {
+  const d = mkdtempSync(join(tmpdir(), "trace-repo-"));
+  const copy = (rel) => {
+    mkdirSync(dirname(join(d, rel)), { recursive: true });
+    writeFileSync(join(d, rel), readFileSync(join(ROOT, rel)));
+  };
+  for (const f of ["lib.mjs", "cli.mjs", "bench-judge.mjs"]) copy(`scripts/trace/${f}`);
+  for (const f of [".claude/workflows/loop-iteration.js", ".claude/trace/schema-v1.json", ".claude/memory/topics/trace.md"]) copy(f);
+  const bundle = join(d, ".claude/trace/bench/fixtures.bundle");
+  const setBundle = (m) => {
+    mkdirSync(dirname(bundle), { recursive: true });
+    writeFileSync(bundle, encodeBench(m));
+  };
+  if (manifest) setBundle(manifest);
+  const git = (...a) => spawnSync("git", ["-c", "user.email=t@example.com", "-c", "user.name=t", "-c", "commit.gpgsign=false", ...a], { cwd: d, encoding: "utf8" });
+  git("init", "-q");
+  git("add", "-A");
+  git("commit", "-qm", "init");
+  const cli = (args, input) =>
+    spawnSync(process.execPath, [join(d, "scripts/trace/cli.mjs"), ...args], { cwd: d, encoding: "utf8", input, env: { ...process.env, TRACE_STORE: join(d, "store.jsonl") } });
+  return { d, git, cli, setBundle, cleanup: () => rmSync(d, { recursive: true, force: true }) };
+}
+
+describe("CLI wiring, end to end in a throwaway repo", () => {
+  it("denylist-check reads the denylist from HEAD — a weakened working-tree copy cannot pass a protected path", () => {
+    const r = tempRepo();
+    try {
+      const wf = join(r.d, ".claude/workflows/loop-iteration.js");
+      const src = readFileSync(wf, "utf8");
+      const weakened = src.replace("const hitsDenylist = (files) =>", "const hitsDenylist = () => false; const unusedDenylist = (files) =>");
+      expect(weakened).not.toBe(src);
+      writeFileSync(wf, weakened); // uncommitted: HEAD still has the real denylist
+      const p = join(r.d, "x.patch");
+      writeFileSync(p, "diff --git a/.claude/loop.md b/.claude/loop.md\n--- a/.claude/loop.md\n+++ b/.claude/loop.md\n@@ -1 +1 @@\n-a\n+b\n");
+      expect(r.cli(["denylist-check", "--patch", p]).status).toBe(1);
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  it("bench-args stops on a left-applied fixture, and `bench-judge --recover` reverses it and stops (never runs the judges)", () => {
+    const file = "a-seeded.txt";
+    const patch = `diff --git a/${file} b/${file}\nnew file mode 100644\n--- /dev/null\n+++ b/${file}\n@@ -0,0 +1 @@\n+seeded\n`;
+    const good = `diff --git a/b-good.txt b/b-good.txt\nnew file mode 100644\n--- /dev/null\n+++ b/b-good.txt\n@@ -0,0 +1 @@\n+fine\n`;
+    const manifest = {
+      fixtures: [
+        { id: "B90-synthetic", kind: "bad", item: "x", defect: "seeded synthetic defect", claimType: "factual", patch, judge: { kind: "command", command: "false", catches: true } },
+        { id: "G90-synthetic", kind: "good", item: "y", claimType: "factual", patch: good, judge: { kind: "none", catches: false } },
+      ],
+    };
+    const r = tempRepo({ manifest });
+    try {
+      expect(spawnSync("git", ["apply", "-"], { cwd: r.d, input: patch }).status).toBe(0); // a killed run left it applied
+      expect(existsSync(join(r.d, file))).toBe(true);
+      expect(r.cli(["bench-args"]).status).toBe(1);
+      const rec = r.cli(["bench-judge", "--recover"]);
+      expect(rec.status).toBe(0); // with a judge of `false`, running on would fail the baseline
+      expect(JSON.parse(rec.stdout).reversed).toEqual([opaqueFixtureId("B90-synthetic")]);
+      expect(existsSync(join(r.d, file))).toBe(false);
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  it("reaudit --act screens its notes and exits 1 when the batch is refused", () => {
+    const r = tempRepo();
+    try {
+      const cited = "src/B90-synthetic-x.ts";
+      mkdirSync(join(r.d, "src"), { recursive: true });
+      writeFileSync(join(r.d, cited), "export const a = 1;\n");
+      r.git("add", "-A");
+      r.git("commit", "-qm", "cited file");
+      const draft = { writer_id: "test", claim_id: "cli:cited", claim_text: "a claim", claim_type: "factual", evidence: [{ kind: "file_line", ref: `${cited}:1` }], final_status: "accept", reason: "r", provenance: { workflow: "test" } };
+      expect(r.cli(["write", "-"], JSON.stringify(draft)).status).toBe(0);
+      // Later the fixture bundle names that path's token as ground truth, and the cited file changes.
+      r.setBundle({ fixtures: [{ id: "B90-synthetic-x", kind: "bad", item: "x", defect: "d", claimType: "factual", patch: "diff --git a/q b/q\n", judge: { kind: "none", catches: false } }] });
+      writeFileSync(join(r.d, cited), "export const a = 2;\n");
+      expect(r.cli(["reaudit", "--act"]).status).toBe(1);
+      expect(readFileSync(join(r.d, "store.jsonl"), "utf8").trim().split("\n")).toHaveLength(1); // nothing appended
+    } finally {
+      r.cleanup();
+    }
   });
 });
