@@ -239,5 +239,8 @@ debate stage (critic panel + skeptic already is one).
   index (`GIT_INDEX_FILE=<tmp> git read-tree HEAD`, then `git apply --cached -R --check`);
   a forward check is wrong — a pure-addition hunk applies again at an offset.
   <!-- rec:TR-4a5419c74c07 -->
+- `git diff --src-prefix=a/ --dst-prefix=b/` emits `a/`/`b/` headers even under
+  `diff.noprefix` or `diff.mnemonicPrefix`, so the loop implementer asks for them explicitly
+  (the denylist parser accepts only `a/`/`b/`). <!-- rec:TR-40be9c919489 -->
 
 Related: [workflow](./workflow.md) · [quality-bar](./quality-bar.md) · [testing](./testing.md)

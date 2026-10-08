@@ -161,7 +161,8 @@ function diffPathScan(diff) {
       }
       if (oldN > 0 || newN > 0) unparsable = true
     } else if (line.startsWith('diff --git ')) {
-      if ((m = /^diff --git a\/(.+?) b\/(.+)$/.exec(line)) || (m = /^diff --git "a\/(.+?)" "b\/(.+?)"$/.exec(line))) paths.push(m[1], m[2])
+      // git C-quotes a side only when its path needs it, so either side may be quoted alone.
+      if ((m = /^diff --git (?:a\/(.+?)|"a\/(.+?)") (?:b\/(.+)|"b\/(.+)")$/.exec(line))) paths.push(m[1] || m[2], m[3] || m[4])
       else unparsable = true
     } else if (line.startsWith('--- ') || line.startsWith('+++ ')) {
       side(line.slice(4))

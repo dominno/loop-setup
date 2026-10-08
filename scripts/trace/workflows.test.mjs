@@ -393,6 +393,18 @@ describe("round-3 fixes (real bodies, stub agents)", () => {
     expect(result.rejected[0].failedGates[0]).toMatch(/\.env\.local/);
   });
 
+  it("a rename whose header quotes only one side (a non-ASCII name) is parsed, not escalated", async () => {
+    const { result } = await gate('diff --git a/src/a.ts "b/src/\\303\\251.ts"\nsimilarity index 100%\nrename from src/a.ts\nrename to "src/\\303\\251.ts"\n');
+    expect(result.applied).toHaveLength(1);
+  });
+
+  it("a copy into a protected path, and a rename OUT of one behind a harmless header, are escalated", async () => {
+    const copy = await gate("diff --git a/src/a.ts b/.github/workflows/ci.yml\nsimilarity index 100%\ncopy from src/a.ts\ncopy to .github/workflows/ci.yml\n");
+    expect(copy.result.rejected[0].status).toBe("escalated-denylist");
+    const away = await gate("diff --git a/src/a.ts b/src/lib.bak\nsimilarity index 100%\nrename from scripts/trace/lib.mjs\nrename to src/lib.bak\n");
+    expect(away.result.rejected[0].status).toBe("escalated-denylist");
+  });
+
   it("hunk content that looks like a header ('--- …' removed text) is not mistaken for one", async () => {
     const { result } = await gate(ok);
     expect(result.applied).toHaveLength(1);

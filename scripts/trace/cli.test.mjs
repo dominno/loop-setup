@@ -424,6 +424,11 @@ describe("round-3 CLI fixes", () => {
     it("catches a gitignored .env created by a traditional section with a timestamp", () => {
       expect(check(`${clean}--- /dev/null\t2026-01-01\n+++ b/.env.local\t2026-01-01\n@@ -0,0 +1 @@\n+K=1\n`).status).toBe(1);
     });
+    it("catches a patch that touches only the loop's state files (no exemption for an implementer patch)", () => {
+      const out = check("diff --git a/.claude/memory/loop-plan.md b/.claude/memory/loop-plan.md\n--- a/.claude/memory/loop-plan.md\n+++ b/.claude/memory/loop-plan.md\n@@ -1 +1 @@\n-a\n+b\ndiff --git a/.claude/memory/trace/records.jsonl b/.claude/memory/trace/records.jsonl\n--- a/.claude/memory/trace/records.jsonl\n+++ b/.claude/memory/trace/records.jsonl\n@@ -1 +1,2 @@\n a\n+b\n");
+      expect(out.status).toBe(1);
+      expect(JSON.parse(out.stdout).hits.sort()).toEqual([".claude/memory/loop-plan.md", ".claude/memory/trace/records.jsonl"]);
+    });
     it("catches a rename that moves a protected file away (both sides are checked)", () => {
       expect(check("diff --git a/.claude/loop.md b/docs/x.md\nsimilarity index 100%\nrename from .claude/loop.md\nrename to docs/x.md\n").status).toBe(1);
     });
@@ -508,7 +513,7 @@ describe("round-3 CLI fixes", () => {
 
 // End-to-end CLI wiring that touches HEAD, the working tree or the fixture bundle runs in a
 // throwaway repo holding a COPY of the trace tooling — never in the real tree.
-function tempRepo({ manifest } = {}) {
+function tempRepo({ manifest, repo = "commit" } = {}) {
   const d = mkdtempSync(join(tmpdir(), "trace-repo-"));
   const copy = (rel) => {
     mkdirSync(dirname(join(d, rel)), { recursive: true });
@@ -523,9 +528,12 @@ function tempRepo({ manifest } = {}) {
   };
   if (manifest) setBundle(manifest);
   const git = (...a) => spawnSync("git", ["-c", "user.email=t@example.com", "-c", "user.name=t", "-c", "commit.gpgsign=false", ...a], { cwd: d, encoding: "utf8" });
-  git("init", "-q");
-  git("add", "-A");
-  git("commit", "-qm", "init");
+  // repo: "commit" (default), "init" (an unborn HEAD) or "none" (not a git repo at all).
+  if (repo !== "none") git("init", "-q");
+  if (repo === "commit") {
+    git("add", "-A");
+    git("commit", "-qm", "init");
+  }
   const cli = (args, input) =>
     spawnSync(process.execPath, [join(d, "scripts/trace/cli.mjs"), ...args], { cwd: d, encoding: "utf8", input, env: { ...process.env, TRACE_STORE: join(d, "store.jsonl") } });
   return { d, git, cli, setBundle, cleanup: () => rmSync(d, { recursive: true, force: true }) };
@@ -543,6 +551,33 @@ describe("CLI wiring, end to end in a throwaway repo", () => {
       const p = join(r.d, "x.patch");
       writeFileSync(p, "diff --git a/.claude/loop.md b/.claude/loop.md\n--- a/.claude/loop.md\n+++ b/.claude/loop.md\n@@ -1 +1 @@\n-a\n+b\n");
       expect(r.cli(["denylist-check", "--patch", p]).status).toBe(1);
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  const srcPatch = "diff --git a/src/a.ts b/src/a.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/a.ts\n@@ -0,0 +1 @@\n+x\n";
+  it("denylist-check fails closed (exit 2) without a HEAD to read the denylist from, or outside a git repo", () => {
+    for (const repo of ["init", "none"]) {
+      const r = tempRepo({ repo });
+      try {
+        const p = join(r.d, "x.patch");
+        writeFileSync(p, srcPatch);
+        expect(r.cli(["denylist-check", "--patch", p]).status).toBe(2);
+      } finally {
+        r.cleanup();
+      }
+    }
+  });
+
+  it("denylist-check judges the patch, not the tree: an unrelated uncommitted .claude/ edit does not block an innocent patch", () => {
+    const r = tempRepo();
+    try {
+      writeFileSync(join(r.d, ".claude/notes.md"), "uncommitted wiki edit\n"); // what /dream leaves behind
+      writeFileSync(join(r.d, "CLAUDE.md"), "uncommitted\n");
+      const p = join(r.d, "x.patch");
+      writeFileSync(p, srcPatch);
+      expect(r.cli(["denylist-check", "--patch", p]).status).toBe(0);
     } finally {
       r.cleanup();
     }

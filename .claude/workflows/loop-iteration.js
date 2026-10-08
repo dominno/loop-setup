@@ -220,7 +220,8 @@ function diffPathScan(diff) {
       }
       if (oldN > 0 || newN > 0) unparsable = true
     } else if (line.startsWith('diff --git ')) {
-      if ((m = /^diff --git a\/(.+?) b\/(.+)$/.exec(line)) || (m = /^diff --git "a\/(.+?)" "b\/(.+?)"$/.exec(line))) paths.push(m[1], m[2])
+      // git C-quotes a side only when its path needs it, so either side may be quoted alone.
+      if ((m = /^diff --git (?:a\/(.+?)|"a\/(.+?)") (?:b\/(.+)|"b\/(.+)")$/.exec(line))) paths.push(m[1] || m[2], m[3] || m[4])
       else unparsable = true
     } else if (line.startsWith('--- ') || line.startsWith('+++ ')) {
       side(line.slice(4))
@@ -241,7 +242,7 @@ const outcomes = await pipeline(
   items,
   (item, i) =>
     agent(
-      `Implement the SMALLEST safe fix for this loop work item in your isolated worktree and run the smallest relevant checks (tests/typecheck/lint). Stay in scope; NEVER touch denylist paths (auth, payments, secrets/.env, infra, CI config, migrations, .claude/, CLAUDE.md). Then capture the ACTUAL change with \`git diff\` and return it as \`diff\` (the real patch, not a summary), the changed files, and whether the checks passed.\n\n${JSON.stringify(item)}`,
+      `Implement the SMALLEST safe fix for this loop work item in your isolated worktree and run the smallest relevant checks (tests/typecheck/lint). Stay in scope; NEVER touch denylist paths (auth, payments, secrets/.env, infra, CI config, migrations, .claude/, CLAUDE.md). Then capture the ACTUAL change with \`git diff --src-prefix=a/ --dst-prefix=b/\` (explicit prefixes: the gate parses only a/ and b/, whatever the git config says) and return it as \`diff\` (the real patch, not a summary), the changed files, and whether the checks passed.\n\n${JSON.stringify(item)}`,
       { label: `impl:${item.id || 'item'}-${i}`, phase: 'Implement', schema: IMPL_SCHEMA, isolation: 'worktree' },
     ),
   (impl, item, i) => {

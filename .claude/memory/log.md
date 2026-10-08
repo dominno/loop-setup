@@ -285,3 +285,13 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
 - Admission: committed 5 (TR-b219013814f2, TR-269d82f78a84, TR-00c2a9c72e0c,
   TR-4a5419c74c07 → trace.md; TR-4a808ff82551 → testing.md), qualified 1 (TR-3ef3eac264d4 →
   workflow.md), quarantined 1 (TR-3439a2c9a95a), rejected 1 (TR-690c19ec53fb, duplicate).
+
+## [2026-10-08] ingest | Denylist cluster verified; explicit diff prefixes
+- A separate checker (documented cases only, fresh clone) rebuilt every failing patch from
+  the 8 denylist records — all now escalated by the workflow gate and refused by
+  `denylist-check --patch` (git failures exit 2); 5 ordinary git-generated patches pass. The
+  8 records are CLEARed. Its follow-ups are fixed and pinned: a rename header quoting only
+  one side is parsed (was a fail-closed false positive), the implementer asks git for
+  explicit a/ b/ prefixes, and tests now cover unborn HEAD / non-repo exit 2, a dirty
+  `.claude/` tree with an innocent patch, copy-only and rename-out patches, state-file patches.
+- Admission: committed 1 (TR-40be9c919489 → trace.md).
