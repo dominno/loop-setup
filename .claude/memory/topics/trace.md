@@ -185,9 +185,10 @@ the live store. Pre-registered — results that count **against** our design:
 - **F5** `consumerCoverage` < 0.5 over ≥ 10 current claims → records are an archive, not
   an instrument; cut fields (emitted by `pnpm trace metrics`; only decision actions count —
   REUSE/REAUDIT are bookkeeping).
-- **F0** (validity precondition) a bench agent's transcript contains ground truth, or an
-  agent returned no verdict → those runs are excluded, and the measurement record is
-  `qualify`, not `accept`. F1 needs the `panel` arm; F3 needs `repeat ≥ 2`.
+- **F0** (validity precondition) ground truth reached a bench agent — a marker in what it
+  *received* (prompt, tool results, injected context) — or an agent returned no verdict →
+  those runs are excluded, and the measurement record is `qualify`, not `accept`. F1 needs
+  the `panel` arm; F3 needs `repeat ≥ 2`.
 
 **Contamination rule (learned the hard way — the first bench run was contaminated):**
 bench agents run inside this repo and grep it, so fixture ground truth must never be
@@ -195,7 +196,17 @@ plain text in the tree. Fixtures live gzip+base64-encoded in
 `.claude/trace/bench/fixtures.bundle`; agents get opaque `fx-…` tokens, never real ids;
 raw runs stay in the scratchpad (their verdict prose names the defects); bench records
 carry counts only; a unit test scans the whole tree for leaked ids/defect text; and
-`bench-score --transcripts` excludes any run whose agent saw ground truth anyway.
+`bench-score --transcripts` excludes any run whose agent received ground truth anyway.
+Two precision rules, both from the held-out run (TR-039e311f20a2), where the instrument —
+not the checker — caused the one excluded run and the one false hold: (1) the scan reads
+only what the agent received (`receivedText`): its own messages and the echo of its
+structured output are the measured output — a verifier that rewrites a defect description
+from the diff alone found the defect, it was not told it (the bundle is gzip+base64, so
+ground truth can only arrive as input; an unparsable line counts as received); (2) the
+tree guard (`leakyFiles`) counts as "code" the tracked code files plus the untracked files a
+fixture patch writes, so a fixture applied as a new file in a verifier's worktree does not
+turn `pnpm test` red, while any other untracked file cannot whitelist its own tokens — ids
+and defect text stay markers everywhere.
 
 ## Not adopted (deliberately)
 The 8-stage reference writer and formulation gate (our inputs are diffs/flows, not

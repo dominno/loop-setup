@@ -5,6 +5,7 @@
 //
 // Everything above the "store I/O" section is pure (no fs / git) so it is unit-tested
 // directly; the CLI (cli.mjs) wires it to the filesystem and git.
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { gunzipSync, gzipSync } from "node:zlib";
 import {
@@ -636,7 +637,7 @@ export function scoreBench(manifest, results, thresholds = { invariance: 0.8 }) 
     flags: [],
   };
   if (out.contaminatedRuns) {
-    out.flags.push(`F0 contamination: ${out.contaminatedRuns} run(s) had ground truth in their agent's transcript and were excluded — fix the leak before trusting this bench`);
+    out.flags.push(`F0 contamination: ${out.contaminatedRuns} run(s) received ground truth (prompt, tool results or injected context) and were excluded — fix the leak before trusting this bench`);
   }
   if (out.unscannedRuns) {
     out.flags.push(`F0 coverage: ${out.unscannedRuns} run(s) have no scanned agent transcript and were excluded — point --transcripts at this run's workflow transcript dir`);
@@ -993,13 +994,72 @@ export function leakMarkers(manifest, codeText) {
 }
 
 /**
+ * The part of an agent transcript (JSONL) that the agent RECEIVED: its prompt, tool
+ * results and injected context. Its own messages (`assistant` entries) and the echo of its
+ * structured output are what the bench measures — a checker that rewrites a defect
+ * description from the diff alone found the defect, it was not told it. (The bundle is
+ * gzip+base64, so ground truth can only reach an agent through what it receives.) A line
+ * that does not parse counts as received (fail closed).
+ */
+export function receivedText(transcript) {
+  return String(transcript || "")
+    .split("\n")
+    .filter((line) => {
+      let e;
+      try {
+        e = JSON.parse(line);
+      } catch {
+        return true;
+      }
+      return !(e && (e.type === "assistant" || (e.type === "attachment" && e.attachment?.type === "structured_output")));
+    })
+    .join("\n");
+}
+
+/**
+ * Tracked or untracked (non-ignored) files in `root` that carry a leak marker — the
+ * tree-wide guard behind contracts.test.mjs. Code (whose vocabulary is not distinctive,
+ * see patchOnlyTokens) is the tracked CODE_PATHS files plus the untracked files a fixture
+ * patch WRITES — so a fixture applied in a verifier's worktree counts as code, not as a
+ * leak, while any other untracked file (a dump under scripts/, say) cannot whitelist its
+ * own tokens. Fixture ids and defect text stay markers everywhere.
+ */
+export function leakyFiles(manifest, root = ROOT) {
+  const ls = (flags, paths) =>
+    execFileSync("git", ["ls-files", "-z", ...flags, "--", ...paths], { cwd: root, encoding: "utf8" })
+      .split("\0")
+      .filter(Boolean);
+  const read = (p) => {
+    try {
+      return readFileSync(join(root, p), "utf8");
+    } catch {
+      return null; // deleted in the working tree, or not a regular file
+    }
+  };
+  const targets = new Set((manifest.fixtures || []).flatMap((f) => [...String(f.patch || "").matchAll(/^\+\+\+ b\/(.+)$/gm)].map((m) => m[1])));
+  const codeFiles = [...ls(["--cached"], CODE_PATHS), ...ls(["--others", "--exclude-standard"], CODE_PATHS).filter((p) => targets.has(p))];
+  const code = codeFiles.map(read).filter((x) => x !== null).join("\n");
+  const markers = leakMarkers(manifest, code);
+  const files = ls(["--cached", "--others", "--exclude-standard"], ["."])
+    .filter((p) => !p.endsWith(".bundle") && !p.startsWith("node_modules/"))
+    .filter((p) => {
+      const text = read(p);
+      return text !== null && markers.some((m) => text.includes(m)); // report the file, never the marker
+    });
+  return { markers: markers.length, files };
+}
+
+/**
  * Which bench agents saw ground truth: transcripts = [{ label, text }]. Returns the run
  * keys ({ arm, token, repeat?, critic? }) parsed from the leaking agents' labels.
  */
 export function contaminatedRuns(transcripts, manifest) {
   const markers = leakMarkers(manifest);
   return transcripts
-    .filter((t) => markers.some((m) => t.text.includes(m)))
+    .filter((t) => {
+      const received = receivedText(t.text);
+      return markers.some((m) => received.includes(m));
+    })
     .map((t) => runKeyFromLabel(t.label) || { arm: "unknown", label: t.label });
 }
 

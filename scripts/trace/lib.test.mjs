@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, readdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync, readdirSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -13,6 +14,7 @@ import {
   benchRecordDraft,
   BRIEF_WINDOW,
   briefRecords,
+  contaminatedRuns,
   effectivePanelSize,
   insideRepo,
   loadWorkflowBlock,
@@ -22,6 +24,7 @@ import {
   runKeyFromLabel,
   unmatchedLeaks,
   latestByClaim,
+  leakyFiles,
   loadEntries,
   loadSchema,
   meanPairwiseCorrelation,
@@ -561,5 +564,66 @@ describe("round-3 fixes", () => {
   it("loadWorkflowBlock evaluates a trusted copy when given one (denylist-check reads HEAD, not the working tree)", () => {
     const source = "// <loop-denylist>\nconst hitsDenylist = () => 'from-source'\n// </loop-denylist>\n";
     expect(loadWorkflowBlock("loop-iteration.js", "loop-denylist", ["hitsDenylist"], { source }).hitsDenylist()).toBe("from-source");
+  });
+});
+
+// Both fixes come from the held-out bench run: the instrument, not the checker, produced
+// its one excluded run and its one false hold.
+describe("bench instrument: leak guard and F0 scan", () => {
+  const synth = {
+    fixtures: [
+      {
+        id: "B99-synthetic-only",
+        kind: "bad",
+        defect: "Synthetic defect prose that exists only inside this unit test file",
+        patch: "diff --git a/src/new.ts b/src/new.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/new.ts\n@@ -0,0 +1 @@\n+export const freshlyAddedHelper = 1;\n",
+      },
+    ],
+  };
+
+  it("leak guard: a fixture applied as a new, untracked code file is code, not a leak — prose and ids still are", () => {
+    const d = mkdtempSync(join(tmpdir(), "leak-guard-"));
+    try {
+      spawnSync("git", ["init", "-q"], { cwd: d });
+      mkdirSync(join(d, "src"));
+      mkdirSync(join(d, "docs"));
+      // Clean tree: a patch-only token in prose is a leak.
+      writeFileSync(join(d, "docs/notes.md"), "see freshlyAddedHelper\n");
+      expect(leakyFiles(synth, d).files).toEqual(["docs/notes.md"]);
+      // An untracked dump under a code path is NOT code: it must not whitelist itself
+      // (or the prose above) — only files the fixture patches create count.
+      mkdirSync(join(d, "scripts"));
+      writeFileSync(join(d, "scripts/dump.txt"), synth.fixtures[0].patch);
+      expect(leakyFiles(synth, d).files.sort()).toEqual(["docs/notes.md", "scripts/dump.txt"]);
+      rmSync(join(d, "scripts/dump.txt"));
+      // The fixture applied (what a verifier's worktree holds): its new file is not a leak.
+      writeFileSync(join(d, "src/new.ts"), "export const freshlyAddedHelper = 1;\n");
+      expect(leakyFiles(synth, d).files).not.toContain("src/new.ts");
+      // A fixture id or defect prose is ground truth wherever it lands, code included.
+      writeFileSync(join(d, "src/dump.ts"), "// B99-synthetic-only\n");
+      expect(leakyFiles(synth, d).files).toContain("src/dump.ts");
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  it("F0 counts a marker only where the agent RECEIVED it — its own messages and structured-output echo are its measured output", () => {
+    const label = "bench-verify:fx-0000beef-r0-0";
+    const defect = synth.fixtures[0].defect.slice(0, 60);
+    const line = (o) => JSON.stringify(o);
+    const own = [
+      line({ type: "user", message: { role: "user", content: "review this diff" } }),
+      line({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: defect }] } }),
+      line({ type: "attachment", attachment: { type: "structured_output", data: { reason: defect } } }),
+    ].join("\n");
+    expect(contaminatedRuns([{ label, text: own }], synth)).toEqual([]);
+    // Received through a tool result, even after the agent wrote it itself: a leak.
+    const toolResult = line({ type: "user", message: { role: "user", content: [{ type: "tool_result", content: `... ${defect} ...` }] } });
+    expect(contaminatedRuns([{ label, text: `${own}\n${toolResult}` }], synth)).toHaveLength(1);
+    // Injected context (any attachment but the structured-output echo): a leak.
+    const injected = line({ type: "attachment", attachment: { type: "instructions", content: synth.fixtures[0].id } });
+    expect(contaminatedRuns([{ label, text: injected }], synth)).toHaveLength(1);
+    // A line that does not parse counts as received (fail closed).
+    expect(contaminatedRuns([{ label, text: `{"type":"assistant", ${defect}` }], synth)).toHaveLength(1);
   });
 });

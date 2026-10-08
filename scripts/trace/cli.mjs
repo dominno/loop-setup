@@ -407,8 +407,9 @@ async function main() {
       // Each run carries its workflow run's id, so coverage can tie it to its own transcripts.
       return Array.isArray(res?.runs) ? res.runs.map((r) => ({ ...r, runId: res.runId || undefined })) : [];
     });
-    // Contamination scan (F0): any agent whose transcript contains a real fixture id or
-    // defect text saw ground truth; its runs are excluded. Required for --record.
+    // Contamination scan (F0): any agent that RECEIVED a real fixture id or defect text (in
+    // its prompt, tool results or injected context — see receivedText) saw ground truth;
+    // its runs are excluded. Required for --record.
     const tdirs = flags.transcripts ? String(flags.transcripts).split(",") : [];
     if (!tdirs.length && flags.record) {
       out("--record needs --transcripts <workflow transcript dir> — an unscanned run cannot be recorded as a measurement");

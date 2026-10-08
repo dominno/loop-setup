@@ -2,7 +2,6 @@
 // the canonical policy is checked here, so `pnpm test` (CI) fails on drift instead of a
 // reviewer having to notice it.
 import { describe, it, expect } from "vitest";
-import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -18,9 +17,8 @@ import {
   briefRecords,
   contaminatedRuns,
   encodeBench,
-  leakMarkers,
+  leakyFiles,
   loadWorkflowBlock,
-  CODE_PATHS,
   manifestViolations,
   markContaminated,
   opaqueFixtureId,
@@ -135,27 +133,9 @@ describe("TRACE-Bench-lite fixtures", () => {
   });
 
   it("no ground truth is readable as plain text anywhere in the tree (bench agents grep it)", () => {
-    const tracked = execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], { cwd: ROOT, encoding: "utf8" })
-      .split("\0")
-      .filter((p) => p && !p.endsWith(".bundle") && !p.startsWith("node_modules/"));
-    const product = execFileSync("git", ["ls-files", "-z", "--", ...CODE_PATHS], { cwd: ROOT, encoding: "utf8" })
-      .split("\0")
-      .filter(Boolean)
-      .map((p) => readFileSync(join(ROOT, p), "utf8"))
-      .join("\n");
-    const markers = leakMarkers(manifest, product);
-    expect(markers.length).toBeGreaterThan(manifest.fixtures.length); // patch-only tokens are included
-    const leakyFiles = new Set();
-    for (const p of tracked) {
-      let text;
-      try {
-        text = readFileSync(join(ROOT, p), "utf8");
-      } catch {
-        continue;
-      }
-      if (markers.some((m) => text.includes(m))) leakyFiles.add(p); // report the file, never the marker
-    }
-    expect([...leakyFiles]).toEqual([]);
+    const { markers, files } = leakyFiles(manifest);
+    expect(markers).toBeGreaterThan(manifest.fixtures.length); // patch-only tokens are included
+    expect(files).toEqual([]); // files only, never the marker
   });
 
   // Whether each patch still APPLIES is deliberately not checked here: product edits near
