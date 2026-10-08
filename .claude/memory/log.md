@@ -320,3 +320,14 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
   the L3 measured-checker gate is met mechanically, but the record carries a HOLD note: the
   rule is in-sample, so L3 should wait for held-out fixtures.
 - Admission: qualified 1 (TR-5e53f695a9e6 → trace.md).
+
+## [2026-10-08] ingest | held-out bench of the loop verifier's contract rule
+- Held-out run 5259d857 (verifier, 3 repeats, 29 fixtures incl. 6 bad + 4 good written
+  blind to the rule; 87/87 transcripts scanned): TR-039e311f20a2 `qualify` —
+  WrongAcceptRate 0, FalseHoldRate 0.03, invariance 0.97; flags F0 (1 run excluded) + F2.
+  HOLD action: the L3 gate is not met. Both blemishes trace to the bench instrument: the
+  F0 hit is an agent reproducing a defect-description prefix that quotes patch code (first
+  seen in its own output, never its input), and the one false hold is the leak-guard unit
+  test going red on a patched tree that adds a new code file.
+- Admission: qualified 2 (TR-00fe5f1e955b → trace.md, TR-57403effdd24 → workflow.md),
+  rejected 1 (TR-f86ffa871cce — an instrument bug pending a fix decision, not durable).

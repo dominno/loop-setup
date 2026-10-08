@@ -124,5 +124,8 @@
 - Cost (one run): TRACE-Bench-lite with verifier (repeat 2) + single-pass + a 5-critic
   panel over 19 fixtures spawned 152 agents (~9.5M subagent tokens, ~59 min); the panel arm
   (~5 agents per fixture) dominates. <!-- rec:TR-7085756f8495 -->
+- Cost (one run): a verifier-only TRACE-Bench-lite run at repeat 3 over 29 fixtures spawned
+  87 agents (~5.8M subagent tokens, ~49 min); each verifier applies the diff and runs the
+  repo's checks, so cost tracks the verify chain's runtime. <!-- rec:TR-57403effdd24 -->
 
 Related: [build-and-verify](./build-and-verify.md) · [testing](./testing.md) · [trace](./trace.md)

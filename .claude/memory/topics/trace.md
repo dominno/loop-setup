@@ -263,5 +263,12 @@ debate stage (critic panel + skeptic already is one).
   run): with the documented-contract rule in the loop verifier, the 19-fixture bench at 3
   repeats gave WrongAcceptRate 0, FalseHoldRate 0, invariance 1.00; 4 of 12 bad fixtures are
   now held as `defer` for a human decision. <!-- rec:TR-5e53f695a9e6 -->
+- Measured out of sample (one run; 6 bad + 4 good fixtures written by an independent agent
+  blind to the contract rule, 3 repeats): the loop verifier licensed none of the 17 scored
+  bad runs — 4 of the 6 held as `defer` for a human decision, 2 as `revise`, and 4 of the 6
+  escape every deterministic check — and held 1 of 12 good runs, a hold caused by the bench's
+  own leak-guard unit test going red on the patched tree, not by the diff. One bad run was
+  excluded by F0, so the full-bench record is `qualify` and does not meet the L3 gate.
+  <!-- rec:TR-00fe5f1e955b -->
 
 Related: [workflow](./workflow.md) · [quality-bar](./quality-bar.md) · [testing](./testing.md)
