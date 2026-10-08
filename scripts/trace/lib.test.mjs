@@ -18,6 +18,7 @@ import {
   markUnscanned,
   numstatPaths,
   runKeyFromLabel,
+  unmatchedLeaks,
   latestByClaim,
   loadEntries,
   loadSchema,
@@ -517,6 +518,13 @@ describe("round-3 fixes", () => {
     expect(markUnscanned([run], [{ label: `${label}@ffffffff`, text: "x" }])[0].unscanned).toBe(true);
     expect(markUnscanned([run], [{ label: `${label}@0a1b2c3d`, text: "  " }])[0].unscanned).toBe(true);
     expect(markUnscanned([run], [{ label: `${label}@0a1b2c3d`, text: "x" }])[0].unscanned).toBeUndefined();
+  });
+
+  it("leaks that belong to no scored run (unknown label, or another run's id) count as unattributed", () => {
+    const runs = [{ arm: "single-pass", fixtureId: "fx-00000001", runId: "0a1b2c3d" }];
+    const key = { arm: "single-pass", token: "fx-00000001" };
+    expect(unmatchedLeaks(runs, [{ ...key, runId: "0a1b2c3d" }])).toBe(0);
+    expect(unmatchedLeaks(runs, [{ ...key, runId: "ffff9999" }, { ...key }, { arm: "unknown", label: "x" }])).toBe(3);
   });
 
   it("runs no scanned transcript belongs to are excluded (F0 coverage), and the record is a qualify", () => {

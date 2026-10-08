@@ -81,18 +81,35 @@ export async function runJudge(command, { spawn, env = judgeEnv(), onChild = () 
 }
 
 /**
- * Fixture patches left applied to the working tree by an interrupted run: the patch
- * reverses cleanly AND its files have uncommitted changes. (A fixture whose change was
- * later COMMITTED also reverses cleanly — that is a stale fixture, and --recover must
- * never revert committed code.)
+ * True when HEAD already CONTAINS the patch: it reverses cleanly against HEAD's committed
+ * files (checked in a throwaway index). Reverse, not forward — a pure-addition hunk would
+ * still apply forward to HEAD at an offset even after it was committed.
  */
-export function appliedFixtures(manifest, { reverseApplies, dirty } = {}) {
+function headContains(patch) {
+  const dir = mkdtempSync(join(tmpdir(), "trace-bench-head-"));
+  try {
+    const env = { ...process.env, GIT_INDEX_FILE: join(dir, "index") };
+    if (git(["read-tree", "HEAD"], { env }).status !== 0) return true; // cannot tell → never treat it as leftover
+    return git(["apply", "--cached", "-R", "--check", "-"], { env, input: patch, stdio: ["pipe", "pipe", "pipe"] }).status === 0;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Fixture patches left applied to the working tree by an interrupted run: the patch
+ * reverses cleanly on the working tree, its files have uncommitted changes, AND HEAD does
+ * not contain it. A fixture whose change was later COMMITTED fails the last test — it is
+ * stale, and --recover must never revert committed code, even when the same file also
+ * has an unrelated uncommitted edit.
+ */
+export function appliedFixtures(manifest, { reverseApplies, dirty, inHead = headContains } = {}) {
   const check =
     reverseApplies ||
     ((patch) => git(["apply", "-R", "--check", "-"], { input: patch, stdio: ["pipe", "pipe", "pipe"] }).status === 0);
   const { parseDiffPaths } = loadWorkflowBlock("loop-iteration.js", "loop-denylist", ["parseDiffPaths"]);
   const isDirty = dirty || ((paths) => git(["status", "--porcelain", "--", ...paths]).stdout.trim() !== "");
-  return manifest.fixtures.filter((f) => isDirty([...new Set(parseDiffPaths(f.patch))]) && check(f.patch));
+  return manifest.fixtures.filter((f) => isDirty([...new Set(parseDiffPaths(f.patch))]) && check(f.patch) && !inHead(f.patch));
 }
 
 /** Reverse every applied fixture patch (recovery after a SIGKILL/crash mid-run). */
@@ -119,14 +136,14 @@ export function benchPreflight(manifest, { recover = false, applied = appliedFix
     // Report what is still neither applicable nor reversible, so an applied-then-edited
     // seeded defect is never silently left behind by an "ok" recover.
     const stale = staleFixtures(manifest, check);
-    return stale.length ? { reversed, stale, error: "these fixtures neither apply nor reverse cleanly — inspect their files (a seeded defect may still be in the tree) or regenerate them" } : { reversed };
+    return stale.length ? { reversed, stale, error: "these fixtures do not apply to the working tree and were not left applied by a run — inspect their files (an edited seeded defect may still be there, or the change was committed) or regenerate them" } : { reversed };
   }
   const left = applied(manifest);
   if (left.length) {
     return { error: `${left.length} fixture patch(es) are still applied to the working tree (an interrupted bench-judge run?) — run \`pnpm trace bench-judge --recover\` first`, applied: left.map((f) => opaqueFixtureId(f.id)) };
   }
   const stale = staleFixtures(manifest, check);
-  if (stale.length) return { error: "stale fixtures — their patches no longer apply to the working tree; regenerate them (bench-unpack → edit → bench-pack)", stale };
+  if (stale.length) return { error: "stale fixtures — their patches no longer apply to the working tree; regenerate them (bench-unpack → edit → bench-pack). If a bench-judge run was interrupted and its files edited since, a seeded defect may still be in them — inspect first", stale };
   return {};
 }
 

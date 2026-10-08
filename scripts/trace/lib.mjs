@@ -1023,6 +1023,16 @@ export function runKeyFromLabel(label) {
 const runMatchesKey = (r, k) =>
   k.arm === r.arm && k.token === r.fixtureId && (k.repeat === undefined || k.repeat === (r.repeat ?? 0)) && (k.critic === undefined || k.critic === r.critic) && k.runId === r.runId;
 
+/**
+ * Leaks that belong to no scored run: unparsable labels, and bench labels from ANOTHER run
+ * (a different or missing run id) found in the same transcript dir. Neither can be tied
+ * to a measured run, so both count as unattributed (fail closed: a leaking environment
+ * must stay visible, never silently ignored).
+ */
+export function unmatchedLeaks(runs, keys) {
+  return keys.filter((k) => k.arm === "unknown" || !runs.some((r) => runMatchesKey(r, k))).length;
+}
+
 /** Mark runs whose agent saw ground truth (scoreBench then excludes them and raises F0). */
 export function markContaminated(runs, keys) {
   return runs.map((r) => (keys.some((k) => runMatchesKey(r, k)) ? { ...r, contaminated: true } : r));
@@ -1139,7 +1149,7 @@ export function benchArgs(manifest, { arms, repeat, critics, only, runId }) {
 }
 
 /** A TRACE-lite record draft for a scored bench run (a measured claim about our checkers). */
-export function benchRecordDraft(score, { resultsRef, priorRecordId }) {
+export function benchRecordDraft(score, { resultsRef, priorRecordId, runIds = [] }) {
   const v = score.arms.verifier || {};
   const s = score.arms.singlePass || {};
   const p = score.arms.panel || {};
@@ -1157,7 +1167,8 @@ export function benchRecordDraft(score, { resultsRef, priorRecordId }) {
     subject: ".claude/trace/bench/fixtures.json",
     // Counts only — never fixture ids or defect text: the record store is in the tree the
     // next bench run's agents can grep (contamination rule above).
-    evidence: [{ kind: "measurement", ref: `pnpm trace bench-score ${resultsRef}`, result: JSON.stringify({ arms: score.arms, externalJudgeGap: Object.fromEntries(Object.entries(score.externalJudgeGap || {}).map(([k, ids]) => [k, ids.length])), contaminatedRuns: score.contaminatedRuns }).slice(0, 4000) }],
+    // The run ids are recorded so a later --record of the SAME run (e.g. reused args) is refused.
+    evidence: [{ kind: "measurement", ref: `pnpm trace bench-score ${resultsRef}${runIds.length ? ` [runs ${runIds.join(",")}]` : ""}`, result: JSON.stringify({ arms: score.arms, externalJudgeGap: Object.fromEntries(Object.entries(score.externalJudgeGap || {}).map(([k, ids]) => [k, ids.length])), contaminatedRuns: score.contaminatedRuns }).slice(0, 4000) }],
     failed_gates: score.flags.map((x) => x.split(":")[0]),
     missing: [],
     // Excluded runs (contamination or no verdict) shrink the sample: the numbers hold

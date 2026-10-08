@@ -18,6 +18,7 @@ import {
   loadWorkflowBlock,
   markContaminated,
   markUnscanned,
+  unmatchedLeaks,
   insideRepo,
   numstatPaths,
   CODE_PATHS,
@@ -437,12 +438,24 @@ async function main() {
     const keys = contaminatedRuns(transcripts, manifest);
     runs = markContaminated(runs, keys);
     if (tdirs.length) runs = markUnscanned(runs, transcripts);
-    const score = scoreBench(manifest, { runs, unattributedLeaks: keys.filter((k) => k.arm === "unknown").length });
+    const score = scoreBench(manifest, { runs, unattributedLeaks: unmatchedLeaks(runs, keys) });
     score.transcriptsScanned = transcripts.length;
     if (!tdirs.length) score.flags.push("F0 coverage: no --transcripts given — the contamination scan did not run; these numbers are not a measurement");
     if (flags.record && runs.some((r) => !r.runId)) {
       out(score, true);
       out("--record refused: run(s) without a run id (args not from `pnpm trace bench-args`) cannot be tied to their own transcripts (F0)");
+      return 1;
+    }
+    const runIds = [...new Set(runs.map((r) => r.runId).filter(Boolean))].sort();
+    // One args file per Workflow run: two runs sharing a run id could vouch for each other.
+    const recordedRunIds = new Set(
+      [...state.records.values()]
+        .filter((r) => r.claim_id === "bench:trace-bench-lite")
+        .flatMap((r) => r.evidence.flatMap((e) => (/\[runs ([0-9a-f,]+)\]/.exec(e.ref || "") || ["", ""])[1].split(",").filter(Boolean))),
+    );
+    if (flags.record && runIds.some((id) => recordedRunIds.has(id))) {
+      out(score, true);
+      out("--record refused: this run id is already recorded — run `pnpm trace bench-args` afresh for every Workflow invocation (F0)");
       return 1;
     }
     if (flags.record && score.unattributedLeaks) {
@@ -460,7 +473,7 @@ async function main() {
       const prior = latestByClaim(state.records, state.superseded).get("bench:trace-bench-lite");
       const commit = git(["rev-parse", "--short=12", "HEAD"]) || undefined;
       const branch = git(["rev-parse", "--abbrev-ref", "HEAD"]) || undefined;
-      const res = writeRecords([benchRecordDraft(score, { resultsRef, priorRecordId: prior && prior.record_id })], { storePath, now, policyVersion, commit, branch, schema, forbidden: benchForbidden() });
+      const res = writeRecords([benchRecordDraft(score, { resultsRef, priorRecordId: prior && prior.record_id, runIds })], { storePath, now, policyVersion, commit, branch, schema, forbidden: benchForbidden() });
       out(res, true);
       return res.every((r) => r.stored) ? 0 : 1;
     }

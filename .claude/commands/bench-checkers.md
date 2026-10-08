@@ -42,7 +42,9 @@ $ARGUMENTS
    revising the previous run's record). `--record` refuses to run without
    `--transcripts`: an unscanned run is not a measurement. `bench-args` mints a run id that
    every agent label and the result carry, so a run is covered only by its OWN non-empty
-   transcripts — another run's transcript dir cannot vouch for it (F0 coverage).
+   transcripts — another run's transcript dir cannot vouch for it (F0 coverage). That
+   holds only with fresh args per Workflow invocation: re-run step 2 for every run, never
+   reuse an args file (`--record` refuses a run id that is already recorded).
 5. **Report** a table per arm (WrongAcceptRate, FalseHoldRate, defer rate, gate
    downgrades, invariance; single-pass vs panel recall / false-block; n_eff), the
    excluded runs (contaminated / no verdict), the external-judge gap (`judgeOnly` /

@@ -177,6 +177,19 @@ describe("bench-judge safety helpers", () => {
     const patch = `diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1,2 +1,3 @@\n+${l1}\n ${l2}\n ${l3}\n`;
     expect(spawnSync("git", ["apply", "-R", "--check", "-"], { cwd: ROOT, input: patch }).status).toBe(0); // it does reverse cleanly…
     expect(appliedFixtures({ fixtures: [fx({ patch })] })).toEqual([]); // …but nothing is uncommitted, so it was not left by a run
+    // …and even with an unrelated uncommitted edit in the same file, HEAD already contains it.
+    expect(appliedFixtures({ fixtures: [fx({ patch })] }, { dirty: () => true })).toEqual([]);
+  });
+
+  it("a fixture patch left applied (uncommitted, not in HEAD) is detected; one HEAD contains is not", () => {
+    const m = { fixtures: [fx()] };
+    expect(spawnSync("git", ["apply", "-"], { cwd: ROOT, input: newFilePatch }).status).toBe(0);
+    try {
+      expect(appliedFixtures(m).map((f) => f.id)).toEqual(["B90-synthetic"]);
+      expect(appliedFixtures(m, { inHead: () => true })).toEqual([]);
+    } finally {
+      rmSync(join(ROOT, tmpName), { force: true });
+    }
   });
 
   it("preflight: a patch that neither applies nor is applied is stale (and --recover says so instead of exiting ok)", () => {
@@ -326,9 +339,18 @@ describe("round-3 CLI fixes", () => {
       expect(out.status).toBe(1);
       expect(out.stdout).toMatch(/run id/);
     });
-    it("records an accept when every run is covered and nothing leaked", () => {
-      expect(setup(covering)().status).toBe(0);
+    it("on a leak in a transcript of ANOTHER run in the same dir (never silently ignored)", () => {
+      const out = setup((m) => [...covering(m), { label: `bench-verify:${opaqueFixtureId(m.fixtures[0].id)}-r0-0@ffff9999`, text: `saw ${m.fixtures[0].id}` }])();
+      expect(out.status).toBe(1);
+      expect(out.stdout).toMatch(/cannot be tied to a run/);
+    });
+    it("records an accept when every run is covered and nothing leaked — and refuses the same run id twice", () => {
+      const record = setup(covering);
+      expect(record().status).toBe(0);
       expect(JSON.parse(readFileSync(store, "utf8").trim().split("\n")[0])).toMatchObject({ claim_id: "bench:trace-bench-lite", final_status: "accept" });
+      const again = record();
+      expect(again.status).toBe(1);
+      expect(again.stdout).toMatch(/already recorded/);
     });
   });
 });
