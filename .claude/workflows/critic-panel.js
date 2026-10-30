@@ -228,6 +228,14 @@ const priorDigest = priorRecords.length
 // the full set before deduping and verifying).
 const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim()
 const slug = (s) => norm(s).replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'untitled'
+// An agent() that throws (token budget spent, harness error) is a FAILED agent, not a crashed
+// round: log it and hand the next stage the same null a dead agent returns, so that stage's
+// fail-safe null path runs. Uncaught, parallel() turns the whole thunk into a null slot that
+// is filtered out — a skeptic's finding would vanish with no record.
+const agentFailed = (label) => (e) => {
+  log(`agent failed: ${label}: ${String((e && e.message) || e).slice(0, 200)}`)
+  return null
+}
 
 phase('Review')
 // Shared prompt parts (identical for both modes).
@@ -264,7 +272,7 @@ const reviews = reviewMode === 'single-pass'
       `You are the reviewer for this project, covering EVERY lens below in a single pass. ${readOnlyBrief}, then review through each lens in turn and tag every finding with the key of the lens it belongs to:\n${CRITICS.map((c) => `- ${c.key} (${c.label}): ${c.lens}`).join('\n')}\n${reviewTail}`,
       { label: 'critic:all-lenses-0', phase: 'Review', schema: SINGLE_FINDINGS_SCHEMA, model: FANOUT_MODEL },
     )
-      .catch(() => null) // like parallel(): a throwing reviewer is a failed reviewer, not a crashed round
+      .catch(agentFailed('critic:all-lenses-0')) // a throwing reviewer is a failed reviewer, not a crashed round
       .then((r) => {
         const found = r ? (r.findings || []).map((f) => ({ ...f, lens: lensOf(f) })) : []
         const unassigned = found.filter((f) => !CRITICS.some((c) => c.key === f.lens))
@@ -278,12 +286,15 @@ const reviews = reviewMode === 'single-pass'
         agent(
           `You are the **${c.label}** for this project. ${readOnlyBrief}, then review strictly through your lens:\n${c.lens}\n${reviewTail}`,
           { label: `critic:${c.key}-${i}`, phase: 'Review', schema: FINDINGS_SCHEMA, model: FANOUT_MODEL },
-        ).then((r) => ({ critic: c.key, label: c.label, findings: (r && r.findings) || [], failed: !r })),
+        )
+          .catch(agentFailed(`critic:${c.key}-${i}`))
+          .then((r) => ({ critic: c.key, label: c.label, findings: (r && r.findings) || [], failed: !r })),
       ),
     )
 // A critic that died returned nothing — that is NOT "no findings". Surface it so a round
-// with a silent lens is never mistaken for a clean pass.
-const failedReviewers = reviews.filter((r) => !r || r.failed).map((r, i) => (r ? r.critic : `critic-${i}`))
+// with a silent lens is never mistaken for a clean pass. `reviews` is index-aligned with
+// CRITICS in both modes (a dead parallel() thunk is a null slot), so each is named by its key.
+const failedReviewers = reviews.map((r, i) => (!r || r.failed ? CRITICS[i].key : null)).filter(Boolean)
 if (failedReviewers.length) log(`WARNING: ${failedReviewers.length} critic(s) returned no result: ${failedReviewers.join(', ')} — the round is incomplete`)
 
 // Flatten, then dedup on (severity + exact normalized title). On a collision, MERGE
@@ -361,12 +372,13 @@ const settledAll = await parallel(
     return agent(
       `Adversarially adjudicate this ${f.severity} finding from the ${f.criticLabel}. Try to REFUTE it by inspecting the actual code/flow, then return a TYPED verdict:\n- accept: holds as stated, and you verified evidence of the kind its claim type needs\n- qualify: holds, but only at a weaker strength (say which in qualifier)\n- revise: does not hold as stated, but a restated claim or bounded fix does (put it in repair)\n- defer: cannot be settled with the evidence available (name exactly what is missing)\n- reject: refuted\nDefault to defer when you cannot check the evidence, and to reject when the evidence does not hold up — never accept on the critic's word.\n\nClaim type: ${t} — ${CLAIM_TYPE_DEFS[t] || ''}. An accept needs evidence of kind ${EVIDENCE_POLICY[t].acceptNeeds.join('/')} that YOU checked; otherwise it is capped at ${EVIDENCE_POLICY[t].onFail}. Re-type the claim if the critic mistyped it.\n\nCritical questions for this lens (answer each in counterReasons):\n${(c && c.cq ? c.cq : ['Does the cited evidence actually show the claim?']).map((q) => `- ${q}`).join('\n')}\n${f.independentEvidence.length ? `\nIndependent evidence from other critics (different evidence, not mere agreement):\n${f.independentEvidence.map((e) => `- ${e.critic}: ${e.evidence}`).join('\n')}\n` : ''}${prior ? `\nThis claim revisits prior record ${prior.record_id} (verdict ${prior.final_status}${prior.missing && prior.missing.length ? `, missing: ${prior.missing.join('; ')}` : ''}; reason: ${prior.reason}). Decide whether the evidence now changes that verdict; if nothing material changed, return the prior verdict.\n` : ''}\nTitle: ${f.title}\nEvidence: ${f.evidence}\nRecommendation: ${f.recommendation}`,
       { label: `verify:${f.critic}:${i}`, phase: 'Verify', schema: VERDICT_SCHEMA, model: JUDGE_MODEL },
-    ).then((v) => {
+    ).catch(agentFailed(`verify:${f.critic}:${i}`)).then((v) => {
       // Fail safe: a missing/failed verdict becomes defer (never confirmed, never
       // "refuted" — an unreadable verdict is evidence of nothing). The deterministic
       // evidence gate then caps any licensing verdict the cited evidence cannot carry —
       // under BOTH the critic's and the skeptic's claim type, so re-typing a claim can
-      // never lower its bar.
+      // never lower its bar. A dead skeptic (threw, or returned nothing) is also marked
+      // 'agent-failed': an infra failure to re-run, not evidence anyone has to supply.
       const g = applyEvidenceGateStrict(v || {}, [v && v.claimType, t])
       return {
         ...f,
@@ -376,7 +388,7 @@ const settledAll = await parallel(
         qualifier: g.qualifier,
         missing: g.missing,
         repair: g.repair,
-        failedGates: g.failedGates,
+        failedGates: v ? g.failedGates : [...g.failedGates, 'agent-failed'],
         evidenceChecked: g.evidenceChecked,
         counterReasons: (v && v.counterReasons) || [],
         preGateVerdict: (v && v.verdict) || null,

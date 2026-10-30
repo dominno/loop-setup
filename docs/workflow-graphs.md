@@ -13,7 +13,9 @@ inherits the session model instead of being downgraded. All tiers are overridabl
 
 > Legend: 🟢 fast tier (Sonnet) · 🔵 strong tier (Opus) · ⚪ inherits session model ·
 > ▫️ plain code (no agent). Barriers (`parallel`) collect all nodes before the next
-> stage; pipelines (`pipeline`) flow each item through independently.
+> stage; pipelines (`pipeline`) flow each item through independently. Dotted edges are
+> agent-failure paths: an agent that throws or returns nothing is caught and recorded (a
+> failed reviewer, an `agent-failed` defer, or a `noVerdict` bench run), never dropped.
 
 ---
 
@@ -35,7 +37,7 @@ flowchart LR
     c10[Regression]
   end
   R --> dedup[▫️ merge-dedup<br/>agreement ≠ evidence; keep only<br/>independent evidence]
-  dedup --> reuse{▫️ same claim (lens+title+type),<br/>licensing verdict, still-present,<br/>identical tree?}
+  dedup --> reuse{"▫️ same claim (lens+title+type),<br/>licensing verdict, still-present,<br/>identical tree?"}
   reuse -- yes --> reused[▫️ reuse prior verdict<br/>→ REUSE action]
   reuse -- no --> V
   subgraph V["Verify — one skeptic per blocker/important · 🔵 Opus"]
@@ -46,6 +48,10 @@ flowchart LR
   V --> gate[▫️ strict evidence gate<br/>accept+qualify floor, under critic AND skeptic type]
   gate --> out([confirmed accept/qualify · deferred · revised · refuted<br/>+ failedReviewers + traceRecords + reuseActions])
   reused --> out
+  R -.->|a critic threw or returned nothing| fr[▫️ failedReviewers, named by lens key<br/>round incomplete, never a clean pass]
+  fr --> out
+  V -.->|a skeptic threw or returned nothing| af[▫️ defer: verdict-missing + agent-failed<br/>infra failure: re-run, never refuted]
+  af --> out
 ```
 
 > Prior verdicts come in via `args.priorRecords` (`pnpm -s trace query --latest --writer
@@ -81,9 +87,13 @@ flowchart LR
   subgraph V["Verify — 2-axis skeptic per finding · 🔵 Opus"]
     v1[real? + editSafe? + saferEdit]
   end
-  V --> map[▫️ two axes → TRACE verdict<br/>then evidence gate (normative: cited rule)]
-  map --> out([applyReady + needsDesign + deferred + refuted<br/>+ traceRecords])
+  V --> map["▫️ two axes → TRACE verdict<br/>then evidence gate (normative: cited rule)"]
+  map --> out([applyReady + needsDesign + deferred + refuted<br/>+ failedReviewers + traceRecords])
   skip --> out
+  R -.->|a lens threw or returned nothing| fr[▫️ failedReviewers, named by lens key<br/>pass incomplete]
+  fr --> out
+  V -.->|a skeptic threw or returned nothing| af[▫️ defer: verdict-missing + agent-failed<br/>infra failure: re-run, never refuted]
+  af --> out
 ```
 
 ## `scan-docs` — evidence-based story status (`/scan-project-docs`)
@@ -93,10 +103,11 @@ flowchart LR
   stories([stories]) --> P
   subgraph P["pipeline — per story, independent"]
     e[🟢 gather code+test evidence] --> nr{▫️ report returned?}
-    nr -- no --> d0[defer: status unchanged]
+    nr -- "no: the agent threw or returned nothing" --> d0[defer: status unchanged<br/>no-evidence-report + agent-failed]
     nr -- yes --> v[🔵 strict status verifier<br/>cites evidenceChecked + missing]
+    v -.->|the verifier threw or returned nothing| d1[defer: status capped<br/>verdict-missing + agent-failed]
   end
-  P --> map[▫️ proposed vs verified status →<br/>verdict, then evidence gate (factual)]
+  P --> map["▫️ proposed vs verified status →<br/>verdict, then evidence gate (factual)"]
   map --> out([per-story status records + traceRecords])
 ```
 
@@ -146,10 +157,12 @@ flowchart LR
   subgraph P["pipeline — per item, independent"]
     impl[⚪ implementer<br/>isolated worktree, real git diff] --> dl{▫️ denylist gate<br/>.claude / CLAUDE.md / scripts/trace / auth / secrets…<br/>or unparsable diff paths}
     dl -- hit --> escd[escalated-denylist<br/>defer: human approval]
-    dl -- clear --> nd{▫️ diff returned?}
-    nd -- no --> dfr[deferred: no diff]
+    dl -- clear --> nd{▫️ report + diff returned?}
+    nd -- "no report: the implementer threw or returned nothing" --> daf[deferred: agent-failed<br/>re-dispatch]
+    nd -- "empty diff" --> dfr[deferred: no-diff]
     nd -- yes --> ver[🔵 verifier: typed verdict on the real diff]
     ver --> eg[▫️ evidence gate<br/>practical: accept/qualify need the diff]
+    ver -.->|the verifier threw or returned nothing| vaf[deferred: verdict-missing + agent-failed]
   end
   P --> out([applied + deferred + held L3-qualify + rejected + escalate<br/>+ traceRecords])
   esc0 --> out
@@ -171,9 +184,11 @@ flowchart LR
       pc[one agent per critic per fixture]
     end
   end
-  T --> runs([raw runs])
+  T --> runs([raw runs + agents started])
+  T -.->|an agent threw or returned nothing| nv[▫️ noVerdict run<br/>counted, never dropped]
+  nv --> runs
   runs --> scan[▫️ transcript leak scan<br/>contaminated runs excluded · F0]
-  scan --> score[▫️ pnpm trace bench-score<br/>joins manifest ground truth]
+  scan --> score[▫️ pnpm trace bench-score<br/>joins manifest ground truth<br/>no-verdict runs excluded, missing runs counted · F0]
   score --> rep([WrongAcceptRate · invariance · judge gap · n_eff<br/>+ F0–F5 flags + counts-only record])
 ```
 

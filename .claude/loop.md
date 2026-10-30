@@ -81,9 +81,12 @@ instructions — the self-modification guard below still applies to everything e
    `escalated` node with the `missing`/`repair` as the human ask); re-order by priority;
    `drop` obsolete nodes; **re-check every `deferred` node's `missing`** — reset it to
    `ready` only when you can cite the evidence that arrived (a record id or check output,
-   in the node's notes); a fourth defer escalates it; never reset an `escalated` node —
-   only the human it waits on can; and recompute which nodes are `ready`. New evidence may re-shape the DAG here
-   — that is the point. Also **repair broken states** (see the plan's rules): reset any
+   in the node's notes); a node deferred by a record whose `failed_gates` include
+   `agent-failed` (an infra failure, not a verdict) may be reset citing that record's id,
+   and the reset counts as an attempt like any defer; a fourth defer escalates it;
+   never reset an `escalated` node — only the human it waits on can; and recompute
+   which nodes are `ready`. New evidence may re-shape the DAG here — that is the point.
+   Also **repair broken states** (see the plan's rules): reset any
    stale `in-progress` node left by an interrupted prior run, and **cascade-resolve** any
    node whose `after:` dep became `dropped`/`escalated` (drop, re-point, or escalate it)
    so nothing is left silently `blocked`. Node creation is the *only* loop action exempt

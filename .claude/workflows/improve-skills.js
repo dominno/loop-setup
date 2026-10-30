@@ -178,6 +178,15 @@ function traceVerdict(v) {
   return v.editSafe === true ? 'accept' : 'revise'
 }
 
+// An agent() that throws (token budget spent, harness error) is a FAILED agent, not a crashed
+// pass: log it and hand the next stage the same null a dead agent returns, so that stage's
+// fail-safe null path runs. Uncaught, parallel() turns the whole thunk into a null slot that
+// is filtered out — a skeptic's finding would vanish with no record.
+const agentFailed = (label) => (e) => {
+  log(`agent failed: ${label}: ${String((e && e.message) || e).slice(0, 200)}`)
+  return null
+}
+
 // Phase 1 — every meta-critic reviews the prompt surface independently, in parallel
 // (a barrier: we want the full set before deduping and verifying).
 phase('Review')
@@ -186,11 +195,14 @@ const reviews = await parallel(
     agent(
       `You are the **${c.label}** auditing this project's OWN Claude Code configuration — its custom prompts, skills, and multi-agent orchestration. This is a READ-ONLY review: do not create, edit or delete any file in the repo. You are NOT reviewing product/application code; you are reviewing the instructions that drive the agent.\n\nRead these files (the prompt surface): ${targetList}\n${c.code ? 'Focus on the workflow orchestration scripts (.claude/workflows/*.js).' : 'Focus on the prose prompts (commands, CLAUDE.md, skills-index, loop files).'}\n\nReview strictly through your lens:\n${c.lens}\n\nScope: ${scope}\n\nFor each issue return concrete evidence (a quote or file:line) AND a specific proposedEdit (what to change to what). Propose improvements to the prompts/workflows themselves — do not propose product-code changes. An empty list is a valid, honest answer.`,
       { label: `meta:${c.key}-${i}`, phase: 'Review', schema: FINDINGS_SCHEMA, model: FANOUT_MODEL },
-    ).then((r) => ({ critic: c.key, label: c.label, findings: (r && r.findings) || [], failed: !r })),
+    )
+      .catch(agentFailed(`meta:${c.key}-${i}`))
+      .then((r) => ({ critic: c.key, label: c.label, findings: (r && r.findings) || [], failed: !r })),
   ),
 )
-// A meta-critic that died is not "no findings" — surface it.
-const failedReviewers = reviews.filter((r) => !r || r.failed).map((r, i) => (r ? r.critic : `lens-${i}`))
+// A meta-critic that died is not "no findings" — surface it. `reviews` is index-aligned with
+// LENSES (a dead parallel() thunk is a null slot), so each is named by its key.
+const failedReviewers = reviews.map((r, i) => (!r || r.failed ? LENSES[i].key : null)).filter(Boolean)
 if (failedReviewers.length) log(`WARNING: ${failedReviewers.length} lens(es) returned no result: ${failedReviewers.join(', ')} — the pass is incomplete`)
 
 // Flatten, then dedup on (severity + file + exact normalized title). On a collision,
@@ -245,7 +257,7 @@ if (budgetStop) {
       agent(
         `You are a SEPARATE skeptic (not the critic who raised this). Read the actual file and try to REFUTE this ${f.severity} finding about the project's own prompts/workflows.\n\nJudge two things independently:\n1. real — is the problem genuine? Default real:false if the evidence does not hold up.\n2. editSafe — would the proposed edit be a real improvement that does NOT weaken instruction-following, remove a safety/confirmation gate, or break a workflow? Default editSafe:false if you cannot confirm it is safe.\nIf the problem is real but the edit is not safe, propose a saferEdit. If you cannot decide from the files, list what is missing instead of guessing. In evidenceChecked cite what you actually checked: the file:line you read (kind "file_line") and the rule or standard you judged it against (kind "rule": a CLAUDE.md rule, a trace.md / loop.md policy line, or this lens's standard) — a finding accepted without a cited rule is deferred by the evidence gate.\n\nFile: ${f.file}\nTitle: ${f.title}\nEvidence: ${f.evidence}\nProposed edit: ${f.proposedEdit}`,
         { label: `verify:${f.critic}:${i}`, phase: 'Verify', schema: VERDICT_SCHEMA, model: JUDGE_MODEL },
-      ).then((v) => {
+      ).catch(agentFailed(`verify:${f.critic}:${i}`)).then((v) => {
         // Fail safe: a missing/failed verdict must NOT confirm the finding or its edit —
         // and must not count as a refutation either: it is deferred.
         const derived = traceVerdict(v)
@@ -255,6 +267,9 @@ if (budgetStop) {
           verdict: derived,
           claimType: 'normative',
           evidenceChecked: (v && v.evidenceChecked) || [],
+          // A dead skeptic (threw, or returned nothing) gave no verdict, and that is an infra
+          // failure ('agent-failed'): re-run it, never wait for evidence.
+          failedGates: v ? [] : ['verdict-missing', 'agent-failed'],
           missing: derived === 'defer'
             ? ((v && Array.isArray(v.missing) && v.missing.filter(Boolean).length) ? v.missing : ['a verdict from the verifier (none was returned)'])
             : [],

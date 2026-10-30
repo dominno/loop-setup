@@ -252,6 +252,14 @@ const REVIEW_SCHEMA = {
 
 const reviewTask = (f) => `Review this proposed change for the work item below. You may read the current repo files for context (the patch is NOT applied). Decide whether you would block merging it.\n\nWork item: ${f.item}\nDiff:\n${f.patch}`
 
+// An agent() that throws (token budget spent, harness error) is a FAILED run, not a vanished
+// one: log it and take the arm's null path (noVerdict), so the run is still counted. Uncaught,
+// parallel() turns the thunk into a null slot that is filtered out of `runs`.
+const agentFailed = (label) => (e) => {
+  log(`agent failed: ${label}: ${String((e && e.message) || e).slice(0, 200)}`)
+  return null
+}
+
 const tasks = []
 if (ARMS.includes('verifier')) {
   for (let r = 0; r < REPEAT; r += 1) {
@@ -260,9 +268,10 @@ if (ARMS.includes('verifier')) {
         const changedFiles = [...new Set(parseDiffPaths(f.patch))]
         // Worst case for the checker: the implementer self-reports passing checks.
         const im = { changedFiles, diff: f.patch, checksPassed: true }
+        const label = `bench-verify:${f.id}-r${r}-${i}${AT}`
         return agent(verifierPrompt({ id: f.id, description: f.item }, im), {
-          label: `bench-verify:${f.id}-r${r}-${i}${AT}`, phase: 'Verifier', schema: VERIFIER_SCHEMA, model: JUDGE_MODEL,
-        }).then((v) => {
+          label, phase: 'Verifier', schema: VERIFIER_SCHEMA, model: JUDGE_MODEL,
+        }).catch(agentFailed(label)).then((v) => {
           const g = applyEvidenceGate(v ? { ...v, claimType: 'practical' } : { claimType: 'practical' })
           return {
             arm: 'verifier', repeat: r, fixtureId: f.id,
@@ -283,20 +292,22 @@ if (ARMS.includes('verifier')) {
 const lensList = ALL_CRITICS.map((c) => `- ${c.label}: ${c.lens}`).join('\n')
 if (ARMS.includes('single-pass')) {
   fixtures.forEach((f, i) => {
+    const label = `bench-single:${f.id}-${i}${AT}`
     tasks.push(() =>
       agent(`You are a single reviewer covering ALL of these lenses at once:\n${lensList}\n\n${reviewTask(f)}`, {
-        label: `bench-single:${f.id}-${i}${AT}`, phase: 'Reviewers', schema: REVIEW_SCHEMA, model: FANOUT_MODEL,
-      }).then((v) => ({ arm: 'single-pass', fixtureId: f.id, block: !!(v && v.block), findings: (v && v.findings) || [], noVerdict: !v })),
+        label, phase: 'Reviewers', schema: REVIEW_SCHEMA, model: FANOUT_MODEL,
+      }).catch(agentFailed(label)).then((v) => ({ arm: 'single-pass', fixtureId: f.id, block: !!(v && v.block), findings: (v && v.findings) || [], noVerdict: !v })),
     )
   })
 }
 if (ARMS.includes('panel')) {
   fixtures.forEach((f, i) => {
     PANEL.forEach((c, j) => {
+      const label = `bench-panel:${f.id}:${c.key}-${i}-${j}${AT}`
       tasks.push(() =>
         agent(`You are the **${c.label}**. Review strictly through your lens:\n${c.lens}\n\n${reviewTask(f)}`, {
-          label: `bench-panel:${f.id}:${c.key}-${i}-${j}${AT}`, phase: 'Reviewers', schema: REVIEW_SCHEMA, model: FANOUT_MODEL,
-        }).then((v) => ({ arm: 'panel', critic: c.key, fixtureId: f.id, block: !!(v && v.block), findings: (v && v.findings) || [], noVerdict: !v })),
+          label, phase: 'Reviewers', schema: REVIEW_SCHEMA, model: FANOUT_MODEL,
+        }).catch(agentFailed(label)).then((v) => ({ arm: 'panel', critic: c.key, fixtureId: f.id, block: !!(v && v.block), findings: (v && v.findings) || [], noVerdict: !v })),
       )
     })
   })

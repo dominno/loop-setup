@@ -401,9 +401,13 @@ async function main() {
     }
     const refs = pos.length ? pos : ["-"];
     const resultsRef = refs.join(" ");
+    // How many agents the workflow(s) started: a started run that never came back is counted
+    // as missing (F0 validity), so a silently shrunken sample is never recorded as an accept.
+    let expectedRuns = 0;
     let runs = refs.flatMap((ref) => {
       const raw = readJsonInput(ref);
       const res = raw && raw.runs ? raw : raw?.result || raw;
+      expectedRuns += Math.max(0, Number(res?.agents) || 0);
       // Each run carries its workflow run's id, so coverage can tie it to its own transcripts.
       return Array.isArray(res?.runs) ? res.runs.map((r) => ({ ...r, runId: res.runId || undefined })) : [];
     });
@@ -435,7 +439,7 @@ async function main() {
     const keys = contaminatedRuns(transcripts, manifest);
     runs = markContaminated(runs, keys);
     if (tdirs.length) runs = markUnscanned(runs, transcripts);
-    const score = scoreBench(manifest, { runs, unattributedLeaks: unmatchedLeaks(runs, keys) });
+    const score = scoreBench(manifest, { runs, unattributedLeaks: unmatchedLeaks(runs, keys), expectedRuns });
     score.transcriptsScanned = transcripts.length;
     if (!tdirs.length) score.flags.push("F0 coverage: no --transcripts given — the contamination scan did not run; these numbers are not a measurement");
     if (flags.record && runs.some((r) => !r.runId)) {

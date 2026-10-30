@@ -156,6 +156,14 @@ function conservativeStatus(proposed) {
   return UNVERIFIED_CAP.includes(proposed) ? proposed : 'Implemented'
 }
 
+// An agent() that throws (token budget spent, harness error) is a FAILED agent: log it and
+// hand the next stage the same null a dead agent returns, so that stage's fail-safe null path
+// runs. Uncaught, pipeline() drops the item to null and the story vanishes with no record.
+const agentFailed = (label) => (e) => {
+  log(`agent failed: ${label}: ${String((e && e.message) || e).slice(0, 200)}`)
+  return null
+}
+
 phase('Evidence')
 // Pipeline: each story flows through evidence → verify independently (no barrier).
 const records = await pipeline(
@@ -164,12 +172,12 @@ const records = await pipeline(
     agent(
       `Gather IMPLEMENTATION and TEST evidence for this user story by searching the codebase and tests (do not write any files):\n${JSON.stringify(story)}\n\nReport which files implement it, whether unit and E2E tests cover it, and the most defensible status. "Not started" is correct when no implementation is found.`,
       { label: `evidence:${story.id || 'story'}-${i}`, phase: 'Evidence', schema: EVIDENCE_SCHEMA, model: FANOUT_MODEL },
-    ),
+    ).catch(agentFailed(`evidence:${story.id || 'story'}-${i}`)),
   (evidence, story, i) => {
     // Guard the first-stage result like every sibling workflow does — a null/failed
     // evidence agent must not throw and abort the pipeline. With no maker report there is
     // nothing to verify: defer (status unchanged) instead of letting the checker "accept"
-    // an empty report as "Not started".
+    // an empty report as "Not started". A dead agent is an infra failure ('agent-failed').
     const ev = evidence || {}
     if (!evidence) {
       return {
@@ -178,19 +186,22 @@ const records = await pipeline(
         finalStatus: null, justification: 'evidence agent returned nothing — not adjudicated; keep the current status',
         notes: '', proposedStatus: null, verdict: 'defer',
         missing: ['an evidence report for this story (the evidence agent returned nothing)'],
-        repair: '', qualifier: '', failedGates: ['no-evidence-report'], evidenceChecked: [],
+        repair: '', qualifier: '', failedGates: ['no-evidence-report', 'agent-failed'], evidenceChecked: [],
       }
     }
     return agent(
       `You are a strict status verifier for story ${story.id} (${story.title}). Confirm a status that is justified by REPO evidence only (code + tests). From repo evidence you can confirm at most "E2E tested"; "Browser verified" and "Done" require a separate browser pass and are OUT of scope here — never assign them. Downgrade if the proposed status overclaims. In evidenceChecked cite what YOU opened or ran (kind "file_line" for an implementation/test file you read, "command" for a command you ran) — the evidence agent's file list is a claim, not evidence you checked.\n\nProposed: ${JSON.stringify(ev)}`,
       { label: `verify:${story.id || 'story'}-${i}`, phase: 'Verify', schema: VERDICT_SCHEMA, model: JUDGE_MODEL },
-    ).then((v) => {
+    ).catch(agentFailed(`verify:${story.id || 'story'}-${i}`)).then((v) => {
       const derived = storyVerdict(ev.proposedStatus || 'Not started', v ? v.finalStatus : null, !!v)
       const g = applyEvidenceGate({
         verdict: derived,
         claimType: 'factual',
         evidenceChecked: (v && v.evidenceChecked) || [],
-        missing: v && Array.isArray(v.missing) ? v.missing : [],
+        // A dead verifier (threw, or returned nothing) gave no verdict: an infra failure
+        // ('agent-failed') whose missing is named here, not left to the gate's generic fallback.
+        failedGates: v ? [] : ['verdict-missing', 'agent-failed'],
+        missing: v ? (Array.isArray(v.missing) ? v.missing : []) : ['a status verdict from the verifier (none was returned)'],
         repair: derived === 'revise' && v ? `status is "${v.finalStatus}"` : '',
         qualifier: derived === 'qualify' && v ? `holds only at "${v.finalStatus}"` : '',
       })

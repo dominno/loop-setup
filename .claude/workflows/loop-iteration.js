@@ -236,6 +236,14 @@ function diffPathScan(diff) {
 const parseDiffPaths = (diff) => diffPathScan(diff).paths
 // </loop-denylist>
 
+// An agent() that throws (token budget spent, harness error) is a FAILED agent: log it and
+// hand the next stage the same null a dead agent returns, so that stage's fail-safe null path
+// runs. Uncaught, pipeline() drops the item to null and it vanishes with no record.
+const agentFailed = (label) => (e) => {
+  log(`agent failed: ${label}: ${String((e && e.message) || e).slice(0, 200)}`)
+  return null
+}
+
 phase('Implement')
 // Pipeline: each item flows implement → verify independently.
 const outcomes = await pipeline(
@@ -244,7 +252,7 @@ const outcomes = await pipeline(
     agent(
       `Implement the SMALLEST safe fix for this loop work item in your isolated worktree and run the smallest relevant checks (tests/typecheck/lint). Stay in scope; NEVER touch denylist paths (auth, payments, secrets/.env, infra, CI config, migrations, .claude/, CLAUDE.md). Then capture the ACTUAL change with \`git diff --src-prefix=a/ --dst-prefix=b/\` (explicit prefixes: the gate parses only a/ and b/, whatever the git config says) and return it as \`diff\` (the real patch, not a summary), the changed files, and whether the checks passed.\n\n${JSON.stringify(item)}`,
       { label: `impl:${item.id || 'item'}-${i}`, phase: 'Implement', schema: IMPL_SCHEMA, isolation: 'worktree' },
-    ),
+    ).catch(agentFailed(`impl:${item.id || 'item'}-${i}`)),
   (impl, item, i) => {
     const im = impl || {}
     const base = { id: item.id, changedFiles: im.changedFiles || [], diff: im.diff || '', checksPassed: !!im.checksPassed }
@@ -268,6 +276,16 @@ const outcomes = await pipeline(
       }
     }
     // Nothing to verify or apply without the real patch — defer (resolvable by a re-run).
+    // A dead implementer (threw, or returned nothing) is an infra failure, not an empty fix:
+    // 'agent-failed' (re-dispatch), distinct from a live implementer's empty diff ('no-diff').
+    if (!impl) {
+      return {
+        ...base, applied: false, status: 'deferred', verdict: 'defer', preGateVerdict: null,
+        failedGates: ['agent-failed'], missing: ['a diff from the implementer (the implementer agent failed — re-dispatch)'],
+        repair: '', qualifier: '', evidenceChecked: [], counterReasons: [],
+        reason: 'implementer agent failed — nothing to verify or apply',
+      }
+    }
     if (!String(im.diff || '').trim()) {
       return {
         ...base, applied: false, status: 'deferred', verdict: 'defer', preGateVerdict: null,
@@ -279,9 +297,10 @@ const outcomes = await pipeline(
     return agent(
       verifierPrompt(item, im),
       { label: `verify:${item.id || 'item'}-${i}`, phase: 'Verify', schema: VERIFIER_SCHEMA, model: JUDGE_MODEL },
-    ).then((v) => {
+    ).catch(agentFailed(`verify:${item.id || 'item'}-${i}`)).then((v) => {
       // Fail safe: no verdict / verifier died → defer (not applied). The evidence gate
-      // also defers an accept that does not cite the real diff.
+      // also defers an accept that does not cite the real diff. A dead verifier (threw, or
+      // returned nothing) is also marked 'agent-failed': re-dispatch, never wait for evidence.
       const g = applyEvidenceGate(v ? { ...v, claimType: 'practical' } : { claimType: 'practical' })
       // Unattended (L3) only an `accept` is applied; a `qualify` waits for a human to accept
       // its caveat (status 'held'). At L2 a human is watching, so qualify is applied.
@@ -293,7 +312,7 @@ const outcomes = await pipeline(
         status: licensed ? 'applied' : held ? 'held' : g.verdict === 'defer' ? 'deferred' : 'rejected',
         verdict: g.verdict,
         preGateVerdict: (v && v.verdict) || null,
-        failedGates: g.failedGates, missing: g.missing, repair: g.repair, qualifier: g.qualifier,
+        failedGates: v ? g.failedGates : [...g.failedGates, 'agent-failed'], missing: g.missing, repair: g.repair, qualifier: g.qualifier,
         evidenceChecked: g.evidenceChecked, counterReasons: (v && v.counterReasons) || [],
         reason: (v && v.reason) || 'verifier returned no verdict — deferred, not applied',
       }

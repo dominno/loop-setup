@@ -651,6 +651,13 @@ export function scoreBench(manifest, results, thresholds = { invariance: 0.8 }) 
   if (out.noVerdictRuns) {
     out.flags.push(`F0 validity: ${out.noVerdictRuns} run(s) returned no verdict and were excluded — the measured arm is smaller than it looks`);
   }
+  // Accounting: a run the workflow started (its `agents` count) but never returned measured
+  // nothing either — a silently shrunken sample must not read as a complete one.
+  const expectedRuns = Number(results?.expectedRuns) || 0;
+  out.missingRuns = Math.max(0, expectedRuns - all.length);
+  if (out.missingRuns) {
+    out.flags.push(`F0 validity: ${out.missingRuns} run(s) missing — the workflow started ${expectedRuns} agent(s) but returned ${all.length} run(s); the measured sample is smaller than it looks`);
+  }
 
   // --- verifier arm (loop-iteration's checker on seeded diffs) ---
   const ver = runs.filter((r) => r.arm === "verifier" && fixtures.has(r.fixtureId));
@@ -1231,10 +1238,10 @@ export function benchRecordDraft(score, { resultsRef, priorRecordId, runIds = []
     evidence: [{ kind: "measurement", ref: `pnpm trace bench-score ${resultsRef}${runIds.length ? ` [runs ${runIds.join(",")}]` : ""}`, result: JSON.stringify({ arms: score.arms, externalJudgeGap: Object.fromEntries(Object.entries(score.externalJudgeGap || {}).map(([k, ids]) => [k, ids.length])), contaminatedRuns: score.contaminatedRuns }).slice(0, 4000) }],
     failed_gates: score.flags.map((x) => x.split(":")[0]),
     missing: [],
-    // Excluded runs (contamination or no verdict) shrink the sample: the numbers hold
-    // only for the runs that were actually measured.
-    ...(score.contaminatedRuns || score.unscannedRuns || score.noVerdictRuns
-      ? { final_status: "qualify", qualifier: `measured on the clean runs only — ${score.contaminatedRuns || 0} contaminated, ${score.unscannedRuns || 0} unscanned and ${score.noVerdictRuns || 0} no-verdict run(s) were excluded` }
+    // Excluded runs (contamination or no verdict) and missing runs (started, never returned)
+    // shrink the sample: the numbers hold only for the runs that were actually measured.
+    ...(score.contaminatedRuns || score.unscannedRuns || score.noVerdictRuns || score.missingRuns
+      ? { final_status: "qualify", qualifier: `measured on the clean runs only — ${score.contaminatedRuns || 0} contaminated, ${score.unscannedRuns || 0} unscanned and ${score.noVerdictRuns || 0} no-verdict run(s) were excluded${score.missingRuns ? `; ${score.missingRuns} run(s) missing (started, never returned)` : ""}` }
       : { final_status: "accept" }),
     reason: "deterministic scoring of the raw bench runs against the manifest's ground truth; the flags are the pre-registered falsification criteria that fired",
     provenance: { workflow: "trace-bench" },

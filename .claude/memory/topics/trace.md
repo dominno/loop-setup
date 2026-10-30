@@ -90,6 +90,11 @@ denylist path still needs a human).
   the evidence as `priorEvidence`); the new verdict is a new record that `revises` the
   defer, and you act on that. A defer whose `missing` is a human decision (denylist,
   ambiguity) is resolved only by that human.
+- **`defer` with `agent-failed` in `failed_gates`** → an infra failure, not a verdict: the
+  agent threw or returned nothing (token budget spent, a terminal API error, a skip), so
+  nothing was weighed. Re-run the workflow that produced it; never wait for evidence and
+  never count it as refuted. Many of them in one run is an outage: report it, and re-run
+  once its cause is fixed.
 - **`revise`** → the claim as stated is not licensed; its `repair` is a *new* claim —
   adjudicate it (new record that `revises`) before acting, or HOLD.
 - **`reject`** → nothing to fix; HOLD/REJECT. In a plan node, `missing` becomes
@@ -186,9 +191,10 @@ the live store. Pre-registered — results that count **against** our design:
   an instrument; cut fields (emitted by `pnpm trace metrics`; only decision actions count —
   REUSE/REAUDIT are bookkeeping).
 - **F0** (validity precondition) ground truth reached a bench agent — a marker in what it
-  *received* (prompt, tool results, injected context) — or an agent returned no verdict →
-  those runs are excluded, and the measurement record is `qualify`, not `accept`. F1 needs
-  the `panel` arm; F3 needs `repeat ≥ 2`.
+  *received* (prompt, tool results, injected context) — or an agent returned no verdict, or
+  a run the workflow started never came back (`missingRuns`) → those runs are excluded, and
+  the measurement record is `qualify`, not `accept`. F1 needs the `panel` arm; F3 needs
+  `repeat ≥ 2`.
 
 **Contamination rule (learned the hard way — the first bench run was contaminated):**
 bench agents run inside this repo and grep it, so fixture ground truth must never be

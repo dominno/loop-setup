@@ -47,7 +47,9 @@ $ARGUMENTS
    reuse an args file (`--record` refuses a run id that is already recorded).
 5. **Report** a table per arm (WrongAcceptRate, FalseHoldRate, defer rate, gate
    downgrades, invariance; single-pass vs panel recall / false-block; n_eff), the
-   excluded runs (contaminated / no verdict), the external-judge gap (`judgeOnly` /
+   excluded runs (contaminated / no verdict) and the missing runs (`missingRuns`: started
+   by the workflow but never returned; no-verdict and missing runs each raise F0 validity
+   and make the record `qualify`), the external-judge gap (`judgeOnly` /
    `agentOnly` / `both` / `neither` — `agentOnly` is what the agent checkers add beyond
    tests; `neither` is undefended ground), and every fired flag with what it means for
    the design (`bench-score` emits F0–F4; F5 comes from `pnpm trace metrics`). Say which

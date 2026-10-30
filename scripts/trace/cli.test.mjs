@@ -441,10 +441,10 @@ describe("round-3 CLI fixes", () => {
 
   describe("bench-score --record fails closed", () => {
     const RUN = "0a1b2c3d";
-    const setup = (transcripts, { runId = RUN } = {}) => {
+    const setup = (transcripts, { runId = RUN, agents } = {}) => {
       const m = readBench();
       const runs = join(dir, "runs.json");
-      writeFileSync(runs, JSON.stringify({ ...(runId ? { runId } : {}), runs: m.fixtures.map((f) => ({ arm: "verifier", repeat: 0, fixtureId: opaqueFixtureId(f.id), verdict: "defer", failedGates: [], missing: ["x"] })) }));
+      writeFileSync(runs, JSON.stringify({ ...(runId ? { runId } : {}), ...(agents != null ? { agents } : {}), runs: m.fixtures.map((f) => ({ arm: "verifier", repeat: 0, fixtureId: opaqueFixtureId(f.id), verdict: "defer", failedGates: [], missing: ["x"] })) }));
       const tdir = join(dir, "transcripts");
       mkdirSync(tdir);
       transcripts(m).forEach((t, i) => {
@@ -498,6 +498,12 @@ describe("round-3 CLI fixes", () => {
     it("excludes a run whose OWN transcript leaked, and records a qualify (not a clean accept)", () => {
       expect(setup((m) => covering(m).map((t, i) => (i === 0 ? { ...t, text: `saw ${m.fixtures[0].id}` } : t)))().status).toBe(0);
       expect(JSON.parse(readFileSync(store, "utf8").trim().split("\n")[0])).toMatchObject({ final_status: "qualify" });
+    });
+    it("records a qualify, not an accept, when the workflow started more agents than it returned runs (a vanished run)", () => {
+      expect(setup(covering, { agents: readBench().fixtures.length + 1 })().status).toBe(0);
+      const rec = JSON.parse(readFileSync(store, "utf8").trim().split("\n")[0]);
+      expect(rec).toMatchObject({ claim_id: "bench:trace-bench-lite", final_status: "qualify" });
+      expect(rec.failed_gates).toContain("F0 validity");
     });
     it("refuses to record when the results path itself carries ground truth (the evidence ref is screened)", () => {
       const m = readBench();

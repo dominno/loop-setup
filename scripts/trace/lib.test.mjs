@@ -474,6 +474,30 @@ describe("bench scoring fails closed on unattributable leaks", () => {
   });
 });
 
+describe("bench run accounting (a run that never came back still counts)", () => {
+  const manifest = { fixtures: [{ id: "B1", kind: "bad" }, { id: "G1", kind: "good" }] };
+  const runs = [
+    { arm: "verifier", repeat: 0, fixtureId: "B1", verdict: "reject", preGateVerdict: "reject" },
+    { arm: "verifier", repeat: 0, fixtureId: "G1", verdict: "accept", preGateVerdict: "accept" },
+  ];
+
+  it("runs the workflow started but never returned are missingRuns: F0 validity, and the record is a qualify", () => {
+    const s = scoreBench(manifest, { runs, expectedRuns: 3 });
+    expect(s.missingRuns).toBe(1);
+    expect(s.flags.some((f) => f.startsWith("F0 validity: 1 run(s) missing"))).toBe(true);
+    const rec = benchRecordDraft(s, { resultsRef: "r.json" });
+    expect(rec.final_status).toBe("qualify");
+    expect(rec.qualifier).toMatch(/1 run\(s\) missing/);
+  });
+
+  it("when every started run came back nothing is missing, and a clean bench still records an accept", () => {
+    const s = scoreBench(manifest, { runs, expectedRuns: 2 });
+    expect(s.missingRuns).toBe(0);
+    expect(s.flags.some((f) => f.startsWith("F0"))).toBe(false);
+    expect(benchRecordDraft(s, { resultsRef: "r.json" }).final_status).toBe("accept");
+  });
+});
+
 describe("round-3 fixes", () => {
   it("REAUDIT is a decision: re-auditing an unchanged queue is a no-op, changed evidence is a new action", () => {
     const [a] = writeRecords([draft()], ctx());

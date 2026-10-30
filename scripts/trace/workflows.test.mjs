@@ -69,6 +69,12 @@ const verdict = (over = {}) => ({
 });
 // Only the security critic reports (others return nothing) — keeps scenarios focused.
 const onlySecurity = (findings) => (label) => (label.startsWith("critic:security") ? { findings } : { findings: [] });
+// agent() THROWS for every label with this prefix (as the real one does once the token budget
+// is spent, or on a harness error); every other label gets `reply`.
+const throwing = (prefix, reply) => (label, ...rest) => {
+  if (label.startsWith(prefix)) throw new Error(`agent died: ${label}`);
+  return reply(label, ...rest);
+};
 
 describe("critic-panel (real body, stub agents)", () => {
   it("a missing skeptic verdict defers the finding — never confirmed, never refuted", async () => {
@@ -500,5 +506,105 @@ describe("loop verifier prompt (F4)", () => {
     expect(prompt).toMatch(/DOCUMENTED CONTRACTS/);
     expect(prompt).toMatch(/a human decision to change/);
     expect(prompt).toMatch(/never accept or qualify because the diff "does what the item asks"/);
+  });
+});
+
+// parallel() and pipeline() turn a throwing stage into a null slot, and the workflows filter
+// null slots out — so before this, a checker or maker that THREW vanished from the result
+// with no record. Each case below must instead take the workflow's own fail-safe null path.
+describe("agent failures never vanish (a throwing agent takes the null path, marked agent-failed)", () => {
+  const diff = "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-a\n+b\n";
+
+  it("critic-panel (panel): a critic that throws is named by its lens key in failedReviewers", async () => {
+    const { result } = await runWorkflow("critic-panel.js", { focus: "x", uiInScope: false, reviewMode: "panel" }, throwing("critic:security", () => ({ findings: [] })));
+    expect(result.failedReviewers).toEqual(["security"]);
+  });
+
+  it("critic-panel: a blocker whose skeptic throws is deferred with verdict-missing + agent-failed, never dropped", async () => {
+    const { result } = await runWorkflow("critic-panel.js", { focus: "x", uiInScope: false, reviewMode: "panel" }, throwing("verify:", onlySecurity([finding()])));
+    expect(result.counts.deferred).toBe(1);
+    expect(result.deferred[0].failedGates).toEqual(["verdict-missing", "agent-failed"]);
+    expect(result.traceRecords).toHaveLength(1);
+    expect(result.traceRecords[0]).toMatchObject({ final_status: "defer", failed_gates: ["verdict-missing", "agent-failed"] });
+    expectWritable(result.traceRecords);
+  });
+
+  const metaFinding = { severity: "important", file: "CLAUDE.md", title: "Gate weakened", evidence: "CLAUDE.md:1", proposedEdit: "restore it" };
+  it("improve-skills: a lens that throws is named by its key; a finding whose skeptic throws is deferred (agent-failed)", async () => {
+    const dead = await runWorkflow("improve-skills.js", { targets: ["CLAUDE.md"] }, throwing("meta:safety-gating", () => ({ findings: [] })));
+    expect(dead.result.failedReviewers).toEqual(["safety-gating"]);
+    const { result } = await runWorkflow("improve-skills.js", { targets: ["CLAUDE.md"] }, throwing("verify:", (label) => (label.startsWith("meta:safety") ? { findings: [metaFinding] } : { findings: [] })));
+    expect(result.counts.deferred).toBe(1);
+    expect(result.refuted).toHaveLength(0);
+    expect(result.deferred[0].failedGates).toEqual(["verdict-missing", "agent-failed"]);
+    expect(result.traceRecords[0]).toMatchObject({ final_status: "defer", failed_gates: ["verdict-missing", "agent-failed"] });
+    expectWritable(result.traceRecords);
+  });
+
+  const story = { id: "US-001", title: "Greeting", source: "docs/prd.md" };
+  const evidence = { implementationFiles: ["src/lib/greeting.ts"], unitTests: "Present", e2eTests: "Present", proposedStatus: "E2E tested", notes: "" };
+  it("scan-docs: an evidence agent that throws keeps the story as one defer record (no-evidence-report + agent-failed)", async () => {
+    const { result } = await runWorkflow("scan-docs.js", { stories: [story] }, throwing("evidence:", () => null));
+    expect(result.count).toBe(1);
+    expect(result.records[0]).toMatchObject({ id: "US-001", verdict: "defer", finalStatus: null, failedGates: ["no-evidence-report", "agent-failed"] });
+    expect(result.traceRecords).toHaveLength(1);
+    expect(result.traceRecords[0].missing).toEqual(["an evidence report for this story (the evidence agent returned nothing)"]);
+    expectWritable(result.traceRecords);
+  });
+
+  it("scan-docs: a status verifier that throws or returns nothing defers the story with a named missing, not the 'unspecified' fallback", async () => {
+    const dies = throwing("verify:", () => evidence);
+    const silent = (label) => (label.startsWith("evidence:") ? evidence : null);
+    for (const reply of [dies, silent]) {
+      const { result } = await runWorkflow("scan-docs.js", { stories: [story] }, reply);
+      expect(result.count).toBe(1);
+      expect(result.records[0]).toMatchObject({
+        verdict: "defer",
+        finalStatus: "Implemented", // the fail-closed cap on the maker's self-proposed status
+        failedGates: ["verdict-missing", "agent-failed"],
+        missing: ["a status verdict from the verifier (none was returned)"],
+      });
+      expectWritable(result.traceRecords);
+    }
+  });
+
+  it("loop-iteration: a dead implementer (threw, or returned nothing) is deferred as agent-failed for re-dispatch; a live empty diff stays 'no-diff'", async () => {
+    const items = [{ id: "LP-010", description: "x" }];
+    for (const reply of [throwing("impl:", () => verdict()), (label) => (label.startsWith("impl:") ? null : verdict())]) {
+      const { result, calls } = await runWorkflow("loop-iteration.js", { items, level: "L2" }, reply);
+      expect(calls.some((c) => c.label.startsWith("verify:"))).toBe(false);
+      expect(result.applied).toHaveLength(0);
+      expect(result.escalate).toEqual([]);
+      expect(result.deferred).toHaveLength(1);
+      expect(result.deferred[0]).toMatchObject({
+        status: "deferred",
+        verdict: "defer",
+        failedGates: ["agent-failed"],
+        missing: ["a diff from the implementer (the implementer agent failed — re-dispatch)"],
+      });
+      expectWritable(result.traceRecords);
+    }
+    const empty = await runWorkflow("loop-iteration.js", { items, level: "L2" }, (label) => (label.startsWith("impl:") ? { changedFiles: [], diff: "", checksPassed: true, notes: "" } : verdict()));
+    expect(empty.result.deferred[0].failedGates).toEqual(["no-diff"]);
+  });
+
+  it("loop-iteration: a verifier that throws defers the item with verdict-missing + agent-failed — never applied, never dropped", async () => {
+    const items = [{ id: "LP-011", description: "x" }];
+    const { result } = await runWorkflow("loop-iteration.js", { items, level: "L2" }, throwing("verify:", () => ({ changedFiles: ["src/a.ts"], diff, checksPassed: true, notes: "" })));
+    expect(result.applied).toHaveLength(0);
+    expect(result.deferred).toHaveLength(1);
+    expect(result.deferred[0].failedGates).toEqual(["verdict-missing", "agent-failed"]);
+    expect(result.traceRecords[0]).toMatchObject({ final_status: "defer", failed_gates: ["verdict-missing", "agent-failed"] });
+    expectWritable(result.traceRecords);
+  });
+
+  it("trace-bench: a bench agent that throws is one noVerdict run, never a vanished one (every arm)", async () => {
+    const fixtures = [{ id: "fx-00000001", item: "x", patch: diff }, { id: "fx-00000002", item: "y", patch: diff }];
+    const ok = (label) => (label.startsWith("bench-verify:") ? verdict({ evidenceChecked: [{ kind: "diff", ref: "src/a.ts" }] }) : { block: false, findings: [], reason: "ok" });
+    for (const [arm, prefix] of [["verifier", "bench-verify:fx-00000001"], ["single-pass", "bench-single:fx-00000001"], ["panel", "bench-panel:fx-00000001:security"]]) {
+      const { result } = await runWorkflow("trace-bench.js", { fixtures, arms: [arm], repeat: 1, critics: ["security", "regression"] }, throwing(prefix, ok));
+      expect(result.runs, arm).toHaveLength(result.agents);
+      expect(result.runs.filter((r) => r.noVerdict), arm).toHaveLength(1);
+    }
   });
 });
