@@ -99,10 +99,14 @@ The full walkthrough (with snippets, the existing-wiki bridge, and a checklist) 
 in **[`docs/adoption-guide.md`](docs/adoption-guide.md)** — the short version:
 
 1. **Copy the portable workflow** — `CLAUDE.md` (merge into yours, don't
-   overwrite), `.claude/commands/`, `.claude/loop.md`, `.claude/memory/`,
-   `.claude/skills-index.md`, `.claude/settings.local.json`, `docs/*.md`, and
-   `.github/workflows/verify.yml`. **Do not** copy the starter app (`src/`, `e2e/`,
-   `package.json`, `pnpm-lock.yaml`, and the build configs) — that's only a demo.
+   overwrite), `.claude/commands/`, `.claude/workflows/`, `.claude/loop.md`,
+   `.claude/loop-checklist.md`, `.claude/memory/` (start `.claude/memory/trace/` and
+   `quarantine.md` empty), `.claude/trace/`, `.claude/skills-index.md`,
+   `.claude/settings.local.json`, `scripts/trace/`, `docs/*.md`, `docs/stories/`, and
+   `.github/workflows/verify.yml`. Then add `"trace": "node scripts/trace/cli.mjs"` to
+   your `package.json` scripts and `scripts/**/*.test.mjs` to your unit-test globs.
+   **Do not** copy the starter app (`src/`, `e2e/`, `package.json`, `pnpm-lock.yaml`,
+   and the build configs) — that's only a demo.
 2. **Wire the verification commands** — point `CLAUDE.md`'s *Main commands* at your
    real scripts and **trim `verify`** to the steps you actually have (it's a hard
    `&&` chain — a missing script breaks the gate). Adjust the package manager,

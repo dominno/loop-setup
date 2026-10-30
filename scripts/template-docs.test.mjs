@@ -1,15 +1,29 @@
-// Template-only doc gates: checks on this template's own instruction and guide prose.
-// It sits outside scripts/trace/ on purpose, so an adopter who copies scripts/trace/ does
-// not inherit assertions about wording they will rewrite. Prose is compared with
-// whitespace collapsed: re-wrapping a paragraph never trips a check, and a phrase split
-// across a line break still counts as present.
+// Template-only doc gates: checks on this template's own instruction and guide prose, and on
+// the ignore rules it ships. It sits outside scripts/trace/ on purpose, so an adopter who
+// copies scripts/trace/ does not inherit assertions about wording and choices they will
+// rewrite (the portable settings gates live in scripts/trace/config.test.mjs).
+// Prose is compared with whitespace collapsed: re-wrapping a paragraph never trips a check,
+// and a phrase split across a line break still counts as present.
 import { describe, it, expect } from "vitest";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ESLint } from "eslint";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const prose = (rel) => readFileSync(join(ROOT, rel), "utf8").replace(/\s+/g, " ");
+const read = (rel) => readFileSync(join(ROOT, rel), "utf8");
+const prose = (rel) => read(rel).replace(/\s+/g, " ");
+// The body of a markdown section: from its heading line to the next "## " heading.
+const section = (text, heading) => {
+  const start = text.indexOf(`\n${heading}\n`);
+  if (start < 0) return "";
+  const body = text.slice(start + heading.length + 2);
+  const end = body.search(/\n## /);
+  return end < 0 ? body : body.slice(0, end);
+};
+const git = (...args) => spawnSync("git", args, { cwd: ROOT, encoding: "utf8" });
+const inGitCheckout = git("rev-parse", "--is-inside-work-tree").stdout?.trim() === "true";
 
 describe("CLAUDE.md governing rules", () => {
   const claudeMd = prose("CLAUDE.md");
@@ -25,6 +39,8 @@ describe("CLAUDE.md governing rules", () => {
       "Mocks don't prove integration", // mock-only coverage is reported as unit-tested only
       "Lead session only", // workflow subagents never start, stop or kill servers
       "observed in full", // test results come from complete output seen this session
+      "stopping on a bound is not completing", // loop step 16: a fix-attempt bound is not a finish
+      "never accepted as clean", // completion gate: a round with a failed lens is re-run
     ];
     expect(anchors.filter((a) => !claudeMd.includes(a))).toEqual([]);
   });
@@ -33,5 +49,36 @@ describe("CLAUDE.md governing rules", () => {
     // An allow rule can be configured in any settings file, so the rule names none.
     const retired = ["pre-allowed in `settings.local.json`"];
     expect(retired.filter((p) => claudeMd.includes(p))).toEqual([]);
+  });
+});
+
+describe.skipIf(!inGitCheckout)("agent files stay out of git", () => {
+  it("ignores agent worktrees", () => {
+    expect(git("check-ignore", "-q", "--", ".claude/worktrees/x/a.ts").status).toBe(0);
+  });
+});
+
+describe("ESLint", () => {
+  it("ignores agent worktrees (flat config does not read .gitignore)", async () => {
+    expect(await new ESLint({ cwd: ROOT }).isPathIgnored(".claude/worktrees/x/src/a.ts")).toBe(true);
+  }, 30_000);
+});
+
+describe("adoption docs", () => {
+  it("list every portable path from the adoption guide in the README quickstart and the checklist", () => {
+    const guide = read("docs/adoption-guide.md");
+    const block = /\*\*Portable[^\n]*\n+```txt\n([\s\S]*?)```/.exec(guide)?.[1] ?? "";
+    const paths = new Set();
+    for (const line of block.split("\n")) {
+      // Columns are separated by 2+ spaces; the last one is the description.
+      for (const col of line.split(/\s{2,}/).slice(0, -1)) if (col.trim()) paths.add(col.trim().replace(/\*$/, ""));
+      // The scripts/trace/ row also names the package.json script and the unit-test glob.
+      for (const m of line.matchAll(/scripts\/[^\s"]+/g)) paths.add(m[0].replace(/\)$/, ""));
+    }
+    expect(paths.size).toBeGreaterThan(5);
+    const quickstart = section(read("README.md"), "## Quickstart: add to an existing project");
+    const checklist = /```txt\n([\s\S]*?)```/.exec(section(guide, "## Adoption checklist"))?.[1] ?? "";
+    const missing = (text) => [...paths].filter((p) => !text.includes(p));
+    expect({ quickstart: missing(quickstart), checklist: missing(checklist) }).toEqual({ quickstart: [], checklist: [] });
   });
 });

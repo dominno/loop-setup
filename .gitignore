@@ -147,3 +147,6 @@ vite.config.ts.timestamp-*
 /test-results/
 /blob-report/
 /playwright/.cache/
+
+# Claude Code: the checkouts of worktree-isolated agents
+.claude/worktrees/

@@ -1,7 +1,7 @@
 ---
 description: Self-learning pass — ingest durable learnings into the project knowledge wiki and lint it
 argument-hint: [ingest | query <question> | lint] (default: ingest this session)
-allowed-tools: Read, Grep, Glob, Edit(.claude/memory/**), Write(.claude/memory/**), Edit(.claude/skills-index.md), Bash(git diff:*), Bash(git log:*), Bash(pnpm trace:*), Bash(pnpm -s trace:*)
+allowed-tools: Read, Grep, Glob, Edit(.claude/memory/**), Write(.claude/memory/**), Edit(.claude/skills-index.md), Bash(git diff:*), Bash(git log:*), Bash(pnpm trace write:*), Bash(pnpm trace act:*), Bash(pnpm trace lint), Bash(pnpm trace reaudit:*), Bash(pnpm trace rotate), Bash(pnpm trace show:*), Bash(pnpm trace query:*), Bash(pnpm -s trace query:*)
 ---
 
 Run a **self-learning ("dream") pass** over the project knowledge wiki at

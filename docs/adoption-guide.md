@@ -30,6 +30,7 @@ CLAUDE.md                     Project rules, critic roster, completion gates
 .claude/trace/                TRACE-lite schema + bench fixtures (rewrite the fixtures for your app)
 scripts/trace/                `pnpm trace` CLI + its tests (add "trace": "node scripts/trace/cli.mjs"
                               to package.json and scripts/**/*.test.mjs to your unit-test globs)
+.claude/skills-index.md       Command catalog: which slash command fits which task
 .claude/settings.local.json   Allowed commands (adapt to your tools)
 docs/*.md  docs/stories/      Story-map scaffolds (user-stories index, stories/ per-story files, ...)
 ```
@@ -135,8 +136,7 @@ Notes:
 ## Permissions (`settings.local.json`)
 
 The template ships `.claude/settings.local.json` with an allow-list for the
-verification commands **and `git add` / `git commit`**. Two things to decide before
-copying it:
+verification commands **and `git add` / `git commit`**. Before copying it:
 
 - **Shared vs. personal.** `*.local.json` is conventionally personal and often
   git-ignored — but this template *tracks* it. If your repo’s `.gitignore` excludes
@@ -148,6 +148,15 @@ copying it:
   workflow; it may not suit yours. Remove those two entries if you want to approve
   commits yourself, and only allow the commands your tooling actually uses (swap the
   `pnpm …` entries for your real ones).
+- **`allowed-tools` pre-approves; it never restricts.** A command's `allowed-tools`
+  frontmatter lets the listed tools run without a prompt until your next message, and
+  workspace trust does not gate it, so keep it narrow (`/dream` lists only the
+  `pnpm trace` subcommands it runs). This template never pre-approves `Workflow`:
+  every multi-agent fan-out keeps your approval.
+- **Keep agent worktrees out of git and lint.** Git-ignore `.claude/worktrees/` (where
+  worktree-isolated agents check out), and add `.claude/worktrees/**` to your linter's
+  ignores. ESLint's flat config does not read `.gitignore`, so a leftover worktree
+  would otherwise turn `lint` red.
 
 ---
 
@@ -541,13 +550,17 @@ issues; record nice-to-haves; avoid unrelated refactors.
 
 ```txt
 [ ] Copied CLAUDE.md (merged with any existing one)
-[ ] Copied .claude/commands/, .claude/loop.md, .claude/memory/, settings.local.json
-[ ] Copied docs/ story-map scaffolds (content cleared, formats kept)
+[ ] Copied .claude/commands/, .claude/workflows/, .claude/loop.md, loop-checklist.md,
+    .claude/memory/, .claude/trace/, .claude/skills-index.md and scripts/trace/
+[ ] Started .claude/memory/trace/ and quarantine.md EMPTY (no template records, no quarantine rows)
+[ ] package.json has "trace": "node scripts/trace/cli.mjs"; unit-test globs include scripts/**/*.test.mjs
+[ ] Copied docs/*.md and docs/stories/ story-map scaffolds (content cleared, formats kept)
 [ ] CLAUDE.md "Main commands" point at my real scripts
 [ ] verify trimmed to the scripts I actually have (no missing-script failure)
 [ ] Package-manager + localhost URL/port updated to match my project
 [ ] Monorepo: src/ , e2e/ , and port paths adjusted to my package layout
-[ ] settings.local.json allows only my real commands; git auto-allow kept or removed deliberately
+[ ] .claude/settings.local.json allows only my real commands; git auto-allow kept or removed deliberately
+[ ] .gitignore covers .claude/worktrees/; my linter ignores .claude/worktrees/**
 [ ] CLAUDE.md memory @import path resolves from where my CLAUDE.md lives
 [ ] Memory wiki: removed stack facts that don't apply (BEFORE first task); will re-seed via /dream
 [ ] If a docs/ wiki already exists: namespaced the story map + picked ONE canonical
