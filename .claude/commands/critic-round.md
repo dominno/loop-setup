@@ -13,13 +13,19 @@ $ARGUMENTS
 
 ## Procedure
 1. Make sure context exists for the critics: confirm `CLAUDE.md` and (if a UI flow
-   is in scope) that localhost is running for the browser-driven critics.
+   is in scope) that localhost is running for the browser-driven critics. When UI or perf
+   lenses are in scope (a UI flow, or a change that can move the client bundle), run
+   `pnpm test:e2e` (including `e2e/a11y.spec.ts`) and `pnpm build && pnpm check:bundle`
+   yourself first and pass their output as `priorEvidence` (step 3), as `/qa-pass` does:
+   the critics and skeptics never run E2E, and never build or test in the shared checkout
+   (their SAFETY rules), so a result you did not supply is reported as missing evidence.
 2. **Gather the reuse inputs:** `pnpm -s trace query --latest --writer critic-panel --brief`
    (prior verdicts) and `pnpm -s trace tree-id` (HEAD + uncommitted changes — reuse only
    fires when the code is identical).
 3. **Invoke the Workflow tool** with the predefined critic-panel workflow:
    - `scriptPath: .claude/workflows/critic-panel.js`
-   - `args: { "focus": "$ARGUMENTS", "priorRecords": <step-2 JSON>, "treeId": "<tree-id>" }`
+   - `args: { "focus": "$ARGUMENTS", "priorRecords": <step-2 JSON>, "treeId": "<tree-id>" }`,
+     plus `"priorEvidence": "<the step-1 output>"` when UI or perf lenses are in scope
    This command explicitly opts into multi-agent orchestration — calling Workflow
    here is expected.
 4. The workflow returns `{ error?, focus, treeId, reviewMode, failedReviewers, completion, counts, confirmed, deferred, revised, niceToHaves, refuted, traceRecords, reuseActions }`.

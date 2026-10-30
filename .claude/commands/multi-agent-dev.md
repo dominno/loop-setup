@@ -23,6 +23,11 @@ Procedure:
 4. **Pre-implementation critic round** — invoke the Workflow tool with
    `scriptPath: .claude/workflows/critic-panel.js`,
    `args: { "focus": "$ARGUMENTS (current behavior + changed files)", "priorRecords": <pnpm -s trace query --latest --writer critic-panel --brief>, "treeId": "<pnpm -s trace tree-id>" }`.
+   When UI or perf lenses are in scope (a UI flow, or a change that can move the client
+   bundle), first run `pnpm test:e2e` (including `e2e/a11y.spec.ts`) and
+   `pnpm build && pnpm check:bundle` yourself and pass their output as `args.priorEvidence`:
+   the critics and skeptics never run E2E, and never build or test in the shared checkout
+   (their SAFETY rules), so a result you did not supply is reported as missing evidence.
    Print `error` first if present (every lens failed: no review happened), then
    `completion` (its claim next to `completion.verdict`, and its `missing`). Render the
    returned `confirmed` findings (verdict `accept`/`qualify`) as the critic matrix with
@@ -51,6 +56,9 @@ Procedure:
     `args.focus` set to the changed flow and `args.priorEvidence` set to what you
     already gathered (git diff summary + test/lint/build results + browser/console
     findings) so the critics verify against it instead of re-running everything.
+    When UI or perf lenses are in scope, that evidence includes the output of
+    `pnpm test:e2e` (including `e2e/a11y.spec.ts`) and `pnpm build && pnpm check:bundle`
+    run on the tree this round reviews (step 10's build is then not optional), as in step 4.
     Pass `priorRecords` + a fresh `treeId` again (reuse only fires on an identical tree).
     Fix any remaining blockers and re-run — at most **3** post-implementation rounds
     (infra re-runs of an incomplete round count toward the cap; at the cap, report the

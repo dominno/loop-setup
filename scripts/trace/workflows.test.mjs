@@ -5,7 +5,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { benchArgs, briefRecords, finalizeRecord, loadSchema, markUnscanned, opaqueFixtureId, readPolicyVersion, ROOT, scoreBench, semanticViolations, validate } from "./lib.mjs";
+import { benchArgs, briefRecords, finalizeRecord, loadSchema, loadWorkflowBlock, markUnscanned, opaqueFixtureId, readPolicyVersion, ROOT, scoreBench, semanticViolations, validate } from "./lib.mjs";
 
 const schema = loadSchema();
 const POLICY = readPolicyVersion();
@@ -837,5 +837,28 @@ describe("round integrity: a whole-phase failure is an error, a partial one stay
     const empty = await runWorkflow("loop-iteration.js", { items, level: "L2" }, (label) => (label.startsWith("impl:") ? { changedFiles: [], diff: "", checksPassed: true, notes: "" } : verdict()));
     expect(empty.result.error).toBeUndefined();
     expect(empty.result.deferred.map((o) => o.failedGates)).toEqual([["no-diff"], ["no-diff"]]);
+  });
+});
+
+// The repo checkout is shared with the Lead, so every agent a read-only workflow starts gets the
+// <agent-safety> block (byte-identical in each script: contracts.test.mjs). Each scenario reaches
+// every agent() call site of its workflow: one blocker finding (or gap, or story), so the checker
+// after the fan-out runs too.
+describe("agent SAFETY: every prompt of a read-only workflow carries the <agent-safety> block", () => {
+  const metaBlocker = { severity: "blocker", file: "CLAUDE.md", title: "Gate weakened", evidence: "CLAUDE.md:1", proposedEdit: "restore it" };
+  const story = { id: "US-001", title: "Greeting", source: "docs/prd.md" };
+  const storyEvidence = { implementationFiles: ["src/lib/greeting.ts"], unitTests: "Present", e2eTests: "Present", proposedStatus: "E2E tested", notes: "" };
+  it.each([
+    ["critic-panel.js (panel, every lens)", "critic-panel.js", { focus: "x" }, (label) => (label.startsWith("critic:") ? onlySecurity([finding()])(label) : verdict()), ["critic:security", "verify:"]],
+    ["critic-panel.js (single-pass)", "critic-panel.js", { focus: "x", uiInScope: false }, (label) => (label.startsWith("critic:") ? { findings: [finding({ lens: "security" })] } : verdict()), ["critic:all-lenses-0", "verify:"]],
+    ["improve-skills.js", "improve-skills.js", { targets: ["CLAUDE.md"] }, (label) => (label.startsWith("meta:safety") ? { findings: [metaBlocker] } : label.startsWith("meta:") ? { findings: [] } : null), ["meta:", "verify:"]],
+    ["scan-docs.js", "scan-docs.js", { stories: [story] }, (label) => (label.startsWith("evidence:") ? storyEvidence : { finalStatus: "E2E tested", justification: "j", missing: [], evidenceChecked: [] }), ["evidence:", "verify:"]],
+    ["gap-analysis.js", "gap-analysis.js", { scope: "mvp" }, (label) => (label.startsWith("gap:") ? { gaps: [{ item: label, detail: "src/a.ts:1", priority: "high" }] } : { order: [] }), ["gap:", "synthesize"]],
+    ["e2e-design.js", "e2e-design.js", { flow: "greeting" }, () => ({ cases: [] }), ["e2e:"]],
+  ])("%s: every agent prompt carries AGENT_SAFETY", async (_name, file, args, reply, reached) => {
+    const { AGENT_SAFETY } = loadWorkflowBlock("critic-panel.js", "agent-safety", ["AGENT_SAFETY"]);
+    const { calls } = await runWorkflow(file, args, reply);
+    for (const prefix of reached) expect(calls.some((c) => c.label.startsWith(prefix)), `no ${prefix} agent ran`).toBe(true);
+    expect(calls.filter((c) => !c.prompt.includes(AGENT_SAFETY)).map((c) => c.label)).toEqual([]);
   });
 });

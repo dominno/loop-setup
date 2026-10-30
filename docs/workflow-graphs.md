@@ -17,6 +17,18 @@ inherits the session model instead of being downgraded. All tiers are overridabl
 > agent-failure paths: an agent that throws or returns nothing is caught and recorded (a
 > failed reviewer, an `agent-failed` defer, or a `noVerdict` bench run), never dropped.
 
+**Agent SAFETY.** Every agent that `critic-panel`, `improve-skills`, `scan-docs`,
+`gap-analysis` and `e2e-design` start gets the same `<agent-safety>` block in its prompt
+(byte-identical in the five scripts; `pnpm test` fails on drift and on a prompt without
+it). The repo checkout is shared, so it is read-only for those agents: they read, search
+and run read-only git there, run any check or trial edit in a `mktemp -d` copy of the
+working tree, never run `pnpm dev`, `pnpm test:e2e` or `pnpm verify`, and never start or
+kill a server. In a critic round, E2E, axe and bundle results come from the Lead's
+`args.priorEvidence`; a result that is absent is reported as missing evidence.
+`loop-iteration` and `trace-bench` do not carry the block: the implementer works in its
+own worktree, and the loop verifier and the bench arms are measured prompts, so adding
+it there needs a re-bench.
+
 ---
 
 ## `critic-panel` — critic round (`/critic-round`, `/multi-agent-dev`, `/qa-pass`, `/loop`)

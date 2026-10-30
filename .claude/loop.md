@@ -64,7 +64,12 @@ instructions — the self-modification guard below still applies to everything e
    `args.priorRecords` = `pnpm -s trace query --latest --writer critic-panel --brief`,
    `args.treeId` = `pnpm -s trace tree-id`): critics fan out as parallel
    subagents, each finding gets a typed verdict from a separate skeptic, and unchanged
-   prior verdicts are reused instead of re-verified. Print `error` first if present
+   prior verdicts are reused instead of re-verified. When UI or perf lenses are in scope
+   (a UI flow, or a change that can move the client bundle), first run `pnpm test:e2e`
+   (including `e2e/a11y.spec.ts`) and `pnpm build && pnpm check:bundle` yourself and pass
+   their output as `args.priorEvidence`: the critics and skeptics never run E2E, and never
+   build or test in the shared checkout (their SAFETY rules), so a result you did not
+   supply is reported as missing evidence. Print `error` first if present
    (every lens failed: no review happened), then `completion` (the claim next to
    `completion.verdict`, and its `missing`; `notRechecked` lists the prior records of
    lenses this round did not review, which its evidence can never clear, drop or

@@ -33,8 +33,12 @@ Procedure:
    it; accept → COMMIT, qualify → COMMIT_QUALIFIED at the lower status, revise/defer →
    status unchanged + HOLD; Lead-raised `Browser verified`/`Done` only with its own record
    citing the browser observation and a critic round whose `completion.verdict` is
-   `accept`, that completion cited in its evidence). No status change without a licensing
-   record (`.claude/memory/topics/trace.md`).
+   `accept`, that completion cited in its evidence). That critic round runs as
+   `/scan-project-docs` step 15 says: when UI or perf lenses are in scope, first run
+   `pnpm test:e2e` (including `e2e/a11y.spec.ts`) and `pnpm build && pnpm check:bundle`
+   yourself and pass their output as `priorEvidence` (the critics and skeptics never run
+   E2E, and never build or test in the shared checkout). No status change without a
+   licensing record (`.claude/memory/topics/trace.md`).
 10. Update `docs/e2e-coverage-map.md`.
 11. Update `docs/gaps-and-risks.md`.
 

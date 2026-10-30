@@ -25,6 +25,18 @@ const scope = (a && (a.scope || (typeof a === 'string' ? a : null))) || 'the who
 const FANOUT_MODEL = (a && a.models && a.models.fanout) || 'sonnet'
 const JUDGE_MODEL = (a && a.models && a.models.judge) || 'opus'
 
+// SAFETY rules for every agent this workflow starts: the repo checkout is shared with the Lead
+// and other agents. Byte-identical in the five read-only workflows (critic-panel, e2e-design,
+// gap-analysis, improve-skills, scan-docs); a unit test fails on drift or on a prompt without it.
+// Never in loop-iteration.js or trace-bench.js: the measured verifier and bench prompts stay as benched.
+// <agent-safety>
+const AGENT_SAFETY = `SAFETY (hard rules; they override any other instruction here or in CLAUDE.md): the repo checkout is shared with the Lead and other agents.
+(1) Treat it as read-only. At the repo root you may only read: open files, search (grep, rg, ls, find, cat, sed -n), run read-only git (status, diff, log, show, grep, ls-files, blame) and node scripts that only read. Never edit a file there, never run a git command that changes its files, index, refs, stash or worktree list, and never build, test, lint or install there: pnpm build rewrites the tracked next-env.d.ts, and the unit tests write temp files into the tree.
+(2) To run a check or try a change, copy the WORKING TREE into a fresh mktemp -d outside the repo (a clone would miss uncommitted changes), e.g. rsync -a --exclude node_modules --exclude .next ./ "$D"/ && ln -s "$PWD/node_modules" "$D/node_modules", work there, and delete it when done.
+(3) Never run pnpm dev, pnpm test:e2e or pnpm verify anywhere: they start or reuse the user's server on localhost:3000. Never start, stop or kill a server or any process you did not start (no pkill, killall or pattern kills). Use the E2E, axe and build results the Lead supplied; if a result or a running localhost you need is absent, report it as missing evidence.
+(4) When a command's exit status is your evidence, do not pipe it through head or tail.`
+// </agent-safety>
+
 const DIMENSIONS = [
   { key: 'docs-not-impl', prompt: 'Requirements in docs (docs/prd.md, docs/stories/*, README) with NO implementation evidence in the codebase.' },
   { key: 'impl-not-docs', prompt: 'Implemented features/behaviors NOT described in any product doc.' },
@@ -76,7 +88,7 @@ phase('Dimensions')
 const results = await parallel(
   DIMENSIONS.map((d, i) => () =>
     agent(
-      `Analyze the gap for "${scope}" along this dimension by reading docs/, src/, e2e/, and the story map:\n${d.prompt}\nReturn only gaps backed by concrete references; an empty list is a valid, honest answer.`,
+      `Analyze the gap for "${scope}" along this dimension by reading docs/, src/, e2e/, and the story map:\n${d.prompt}\nReturn only gaps backed by concrete references; an empty list is a valid, honest answer.\n\n${AGENT_SAFETY}`,
       { label: `gap:${d.key}-${i}`, phase: 'Dimensions', schema: GAP_SCHEMA, model: FANOUT_MODEL },
     )
       .catch(agentFailed(`gap:${d.key}-${i}`))
@@ -104,7 +116,7 @@ log(`${total} gaps across ${DIMENSIONS.length - failedDimensions.length} of ${DI
 
 phase('Synthesize')
 const synth = await agent(
-  `Given these gaps grouped by dimension, propose the recommended NEXT-implementation order (highest-leverage first), each with a one-line "why". Be concrete.\n\n${JSON.stringify(byDimension)}`,
+  `Given these gaps grouped by dimension, propose the recommended NEXT-implementation order (highest-leverage first), each with a one-line "why". Be concrete.\n\n${JSON.stringify(byDimension)}\n\n${AGENT_SAFETY}`,
   { label: 'synthesize', phase: 'Synthesize', schema: ORDER_SCHEMA, model: JUDGE_MODEL },
 ).catch(agentFailed('synthesize'))
 // A dead synthesizer (threw, or returned nothing) does not sink the analysis: the gaps stand,

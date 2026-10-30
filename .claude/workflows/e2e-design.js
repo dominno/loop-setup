@@ -22,6 +22,18 @@ const flow = (a && (a.flow || (typeof a === 'string' ? a : null))) || 'the targe
 // Override via args.models.fanout.
 const FANOUT_MODEL = (a && a.models && a.models.fanout) || 'sonnet'
 
+// SAFETY rules for every agent this workflow starts: the repo checkout is shared with the Lead
+// and other agents. Byte-identical in the five read-only workflows (critic-panel, e2e-design,
+// gap-analysis, improve-skills, scan-docs); a unit test fails on drift or on a prompt without it.
+// Never in loop-iteration.js or trace-bench.js: the measured verifier and bench prompts stay as benched.
+// <agent-safety>
+const AGENT_SAFETY = `SAFETY (hard rules; they override any other instruction here or in CLAUDE.md): the repo checkout is shared with the Lead and other agents.
+(1) Treat it as read-only. At the repo root you may only read: open files, search (grep, rg, ls, find, cat, sed -n), run read-only git (status, diff, log, show, grep, ls-files, blame) and node scripts that only read. Never edit a file there, never run a git command that changes its files, index, refs, stash or worktree list, and never build, test, lint or install there: pnpm build rewrites the tracked next-env.d.ts, and the unit tests write temp files into the tree.
+(2) To run a check or try a change, copy the WORKING TREE into a fresh mktemp -d outside the repo (a clone would miss uncommitted changes), e.g. rsync -a --exclude node_modules --exclude .next ./ "$D"/ && ln -s "$PWD/node_modules" "$D/node_modules", work there, and delete it when done.
+(3) Never run pnpm dev, pnpm test:e2e or pnpm verify anywhere: they start or reuse the user's server on localhost:3000. Never start, stop or kill a server or any process you did not start (no pkill, killall or pattern kills). Use the E2E, axe and build results the Lead supplied; if a result or a running localhost you need is absent, report it as missing evidence.
+(4) When a command's exit status is your evidence, do not pipe it through head or tail.`
+// </agent-safety>
+
 const CATEGORIES = [
   { key: 'happy', prompt: 'the happy path(s) a user follows when everything works' },
   { key: 'failure', prompt: 'validation/failure paths and error states' },
@@ -58,7 +70,7 @@ phase('Design')
 const results = await parallel(
   CATEGORIES.map((c, i) => () =>
     agent(
-      `Enumerate concrete Playwright E2E test cases for "${flow}" covering ${c.prompt}. Inspect the routes/components and existing specs first. Each case needs: title, steps, and the visible expected outcome to assert.`,
+      `Enumerate concrete Playwright E2E test cases for "${flow}" covering ${c.prompt}. Inspect the routes/components and existing specs first. Each case needs: title, steps, and the visible expected outcome to assert.\n\n${AGENT_SAFETY}`,
       { label: `e2e:${c.key}-${i}`, phase: 'Design', schema: CASES_SCHEMA, model: FANOUT_MODEL },
     )
       .catch(agentFailed(`e2e:${c.key}-${i}`))

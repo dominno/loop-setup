@@ -72,6 +72,31 @@ describe("workflow scripts", () => {
     expect(block(bench.text, tag)).toBe(canonical);
   });
 
+  // Every agent a read-only workflow starts gets the same SAFETY rules: the checkout is shared
+  // with the Lead. Never in a measured prompt: the loop verifier and the bench arms must stay
+  // exactly what was benched (adding it there is a separate decision that needs a re-bench).
+  it("the <agent-safety> block is byte-identical in exactly the five read-only workflows", () => {
+    const canonical = block(workflows.find((w) => w.name === "critic-panel.js").text, "agent-safety");
+    expect(canonical).not.toBeNull();
+    const carriers = workflows.filter((w) => w.text.includes("// <agent-safety>"));
+    expect(carriers.map((w) => w.name).sort()).toEqual(["critic-panel.js", "e2e-design.js", "gap-analysis.js", "improve-skills.js", "scan-docs.js"]);
+    for (const w of carriers) expect(block(w.text, "agent-safety"), w.name).toBe(canonical);
+  });
+
+  it("AGENT_SAFETY keeps its hard rules (read-only checkout, scratch copy, no E2E or server, no piped exit status)", () => {
+    const { AGENT_SAFETY } = loadWorkflowBlock("critic-panel.js", "agent-safety", ["AGENT_SAFETY"]);
+    for (const rule of ["read-only", "mktemp -d", "pnpm test:e2e", "pkill", "missing evidence", "head or tail"]) expect(AGENT_SAFETY, rule).toContain(rule);
+  });
+
+  it("no measured prompt carries it: neither trace-bench.js nor the <loop-verifier> block", () => {
+    const bench = workflows.find((w) => w.name === "trace-bench.js").text;
+    expect(bench).not.toContain("agent-safety");
+    expect(bench).not.toContain("AGENT_SAFETY");
+    const verifier = block(workflows.find((w) => w.name === "loop-iteration.js").text, "loop-verifier");
+    expect(verifier).not.toBeNull();
+    expect(verifier).not.toContain("AGENT_SAFETY");
+  });
+
   it("workflow evidence-kind lists match the schema enum", () => {
     const schemaKinds = schema.$defs.evidenceItem.properties.kind.enum;
     for (const w of workflows.filter((x) => x.text.includes("const EVIDENCE_KINDS ="))) {
@@ -210,5 +235,26 @@ describe("round-integrity consumers", () => {
     ".claude/commands/sync-story-status.md",
   ])("%s gates on completion.verdict", (rel) => {
     expect(readFileSync(join(ROOT, rel), "utf8")).toContain("completion.verdict");
+  });
+});
+
+// The <agent-safety> block bars every critic-panel agent from running E2E anywhere and from
+// building in the shared checkout, so a round with UI or perf lenses in scope sees those results
+// only when its caller runs them first and passes the output as priorEvidence. (/qa-pass already
+// passes its own build and E2E results.)
+describe("Lead-supplied evidence for critic rounds", () => {
+  const count = (text, s) => text.split(s).length - 1;
+  it.each([
+    [".claude/commands/critic-round.md", 1],
+    [".claude/commands/multi-agent-dev.md", 2], // the pre- and the post-implementation round
+    [".claude/loop.md", 1],
+    [".claude/commands/scan-project-docs.md", 1],
+    [".claude/commands/sync-story-status.md", 1],
+  ])("%s has the Lead run E2E (with axe) and the bundle check first and pass them as priorEvidence", (rel, rounds) => {
+    const text = readFileSync(join(ROOT, rel), "utf8");
+    for (const anchor of ["pnpm test:e2e", "e2e/a11y.spec.ts", "pnpm build && pnpm check:bundle"]) {
+      expect(count(text, anchor), anchor).toBeGreaterThanOrEqual(rounds);
+    }
+    expect(text).toContain("priorEvidence");
   });
 });

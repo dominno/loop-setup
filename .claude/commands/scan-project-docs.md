@@ -80,9 +80,15 @@ Procedure:
     - `docs/gaps-and-risks.md`
 15. Run a post-scan critic review as the **critic-panel Workflow** (`scriptPath:
     .claude/workflows/critic-panel.js`, `args.focus` = the scanned stories' flows and
-    the updated docs/stories files) and record it per the consumer protocol. Print its
-    `error` (if any) and `completion` first; its `completion.verdict` must be `accept`
-    before any story is raised to `Browser verified`/`Done` (step 9).
+    the updated docs/stories files) and record it per the consumer protocol. When UI or
+    perf lenses are in scope (a story's UI flow, or a change that can move the client
+    bundle), first run `pnpm test:e2e` (including `e2e/a11y.spec.ts`) and
+    `pnpm build && pnpm check:bundle` yourself and pass their output as
+    `args.priorEvidence`: the critics and skeptics never run E2E, and never build or test
+    in the shared checkout (their SAFETY rules), so a result you did not supply is
+    reported as missing evidence. Print its `error` (if any) and `completion` first; its
+    `completion.verdict` must be `accept` before any story is raised to
+    `Browser verified`/`Done` (step 9).
 16. If the scan surfaced a durable engineering learning (a convention or gotcha,
     not a story-specific note), run `/dream` to file it into the memory wiki.
 17. Do not change product code unless explicitly asked.
