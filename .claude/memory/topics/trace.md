@@ -105,6 +105,22 @@ denylist path still needs a human).
 - **Completion:** a blocker that is confirmed, deferred or revised keeps the task open
   until it is fixed, re-adjudicated, or the user explicitly accepts the risk. Diminishing
   returns ends the *re-running*, not the task — report the open blockers and ask.
+- **Round integrity:** `critic-panel` returns `completion`, computed in code: the claim "no
+  open blocker in: <focus>", its `verdict`, `missing`, and `notRechecked` (the prior records
+  of every lens the round did not review: failed, out of scope, or opt-in and off). `reject`
+  = a blocker is confirmed; `defer` = a lens failed, a finding went unassigned, a blocker is
+  deferred or revised, or an open prior blocker (latest for its claim, not refuted, no CLEAR)
+  sits in an unreviewed lens; otherwise `accept`. It sees only the priors passed in (`--brief`
+  = the newest 40). A critic round is **clean only when `completion.verdict` is `accept`**. A
+  round with `error` (every lens failed) or a failed in-scope lens is **incomplete**: it
+  never satisfies a completion or Done gate, never counts as diminishing returns, and shows
+  nothing fixed — never CLEAR, drop or resolve a record listed in `completion.notRechecked`.
+  Re-run it; infra re-runs count toward the round cap, and at the cap report the failed
+  lenses and ask. A `defer` caused only by open deferred or revised blockers follows the
+  blocker rule under **Completion**. Every workflow fails the same way: when every agent of
+  its first phase (reviewers, finders, category or evidence agents, implementers) failed, it
+  returns `error` and writes no records; a partial failure, and any dead checker, stays per
+  item (a named failed lens, category or dimension, or an `agent-failed` defer).
 
 ## The discipline — no durable state change without a record
 | boundary | record writer | consumer action |
@@ -166,8 +182,9 @@ reviewer's cross-lens duplicates never count as independent corroboration.
 ## Stop conditions (paper §5.4) — used by `/loop` and `/multi-agent-dev`
 Stop *re-running* when every claim is (1) a qualified proposal (accept/qualify, acted on),
 (2) rejected, (3) deferred with named `missing`, or (4) **diminishing returns**: a re-run
-left the set of open blockers (by `claim_id`) and their verdicts unchanged — report them
-and ask instead of spinning. Stopping is not completing (see the consumer protocol).
+left the set of open blockers (by `claim_id`) and their verdicts unchanged (compared only
+between complete rounds) — report them and ask instead of spinning. Stopping is not
+completing (see the consumer protocol).
 
 ## Verdict reuse (critic-panel)
 A finding that re-raises a prior claim reuses the prior verdict without a new skeptic only

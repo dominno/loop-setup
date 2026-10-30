@@ -47,17 +47,36 @@ const CASES_SCHEMA = {
   },
 }
 
+// An agent() that throws (token budget spent, harness error) is a FAILED agent, not a crashed
+// run: log it and return the same null a dead agent returns, so the category is reported.
+const agentFailed = (label) => (e) => {
+  log(`agent failed: ${label}: ${String((e && e.message) || e).slice(0, 200)}`)
+  return null
+}
+
 phase('Design')
 const results = await parallel(
   CATEGORIES.map((c, i) => () =>
     agent(
       `Enumerate concrete Playwright E2E test cases for "${flow}" covering ${c.prompt}. Inspect the routes/components and existing specs first. Each case needs: title, steps, and the visible expected outcome to assert.`,
       { label: `e2e:${c.key}-${i}`, phase: 'Design', schema: CASES_SCHEMA, model: FANOUT_MODEL },
-    ).then((r) => ((r && r.cases) || []).map((x) => ({ ...x, category: c.key }))),
+    )
+      .catch(agentFailed(`e2e:${c.key}-${i}`))
+      .then((r) => ({ cases: ((r && r.cases) || []).map((x) => ({ ...x, category: c.key })), failed: !r })),
   ),
 )
+// A category whose agent died enumerated nothing — that is NOT "no cases". `results` is
+// index-aligned with CATEGORIES (a dead parallel() thunk is a null slot), so each is named.
+const failedCategories = results.map((r, i) => (!r || r.failed ? CATEGORIES[i].key : null)).filter(Boolean)
+if (failedCategories.length) log(`WARNING: ${failedCategories.length} categor(y/ies) returned no result: ${failedCategories.join(', ')} — not enumerated`)
+// Every category failed: nothing was designed, so the run is an error, not an empty case list.
+if (failedCategories.length === CATEGORIES.length) {
+  const error = `all ${CATEGORIES.length} path categories failed (infra) — no cases were designed; re-run`
+  log(`ERROR: ${error}`)
+  return { flow, error, failedCategories, count: 0, cases: [] }
+}
 
-const all = results.filter(Boolean).flat()
+const all = results.filter(Boolean).flatMap((r) => r.cases)
 const seen = new Set()
 const cases = all.filter((c) => {
   // Key on category + title so a failure-path case isn't dropped for sharing a
@@ -69,4 +88,4 @@ const cases = all.filter((c) => {
 })
 log(`${cases.length} test cases (${all.length} before dedup) for "${flow}"`)
 
-return { flow, count: cases.length, cases }
+return { flow, failedCategories, count: cases.length, cases }

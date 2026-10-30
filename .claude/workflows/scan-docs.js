@@ -165,6 +165,7 @@ const agentFailed = (label) => (e) => {
 }
 
 phase('Evidence')
+let evidenceFailed = 0 // stories whose evidence agent threw or returned nothing
 // Pipeline: each story flows through evidence → verify independently (no barrier).
 const records = await pipeline(
   stories,
@@ -180,6 +181,7 @@ const records = await pipeline(
     // an empty report as "Not started". A dead agent is an infra failure ('agent-failed').
     const ev = evidence || {}
     if (!evidence) {
+      evidenceFailed += 1
       return {
         id: story.id, title: story.title, source: story.source,
         implementationFiles: [], unitTests: 'Missing', e2eTests: 'Missing',
@@ -230,6 +232,14 @@ const records = await pipeline(
 )
 
 const settled = records.filter(Boolean)
+// Every evidence agent failed: nothing was gathered, so the scan is an error. An outage is
+// not N story verdicts: it writes no records, and every story keeps its current status
+// (finalStatus null). One dead agent among live ones stays a per-story defer record.
+if (evidenceFailed === stories.length) {
+  const error = `all ${stories.length} evidence agent(s) failed (infra) — no story was scanned; re-run`
+  log(`ERROR: ${error}`)
+  return { error, count: settled.length, records: settled, traceRecords: [] }
+}
 
 // TRACE-lite record drafts — one per story status claim (the caller writes them with
 // `pnpm trace write` and cites the record_id in the story file before changing a status;

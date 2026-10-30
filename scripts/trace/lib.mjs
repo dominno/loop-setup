@@ -470,18 +470,22 @@ export function latestByClaim(records, superseded) {
  * `pnpm trace query --brief` — the compact prior-record shape passed to critic-panel as
  * args.priorRecords (the newest BRIEF_WINDOW records). It must carry every field
  * critic-panel reads from a prior (a contract test enforces this): a reused `qualify`
- * that lost its qualifier would be acted on at full strength.
+ * that lost its qualifier would be acted on at full strength. `severity` and `cleared`
+ * (a CLEAR action names the record) let the round's completion see an open prior blocker
+ * in a lens it did not review. `actions` is the store's consumer actions; without them
+ * nothing reads as cleared (fail closed).
  */
 export const BRIEF_WINDOW = 40;
-export function briefRecords(recs) {
+export function briefRecords(recs, actions = []) {
+  const cleared = new Set(actions.filter((a) => a && a.action === "CLEAR").map((a) => a.record_id));
   return [...recs]
     .sort((x, y) => String(y.created_at).localeCompare(String(x.created_at)))
     .slice(0, BRIEF_WINDOW)
     .map((r) => ({
       record_id: r.record_id, claim_id: r.claim_id, claim_text: r.claim_text, claim_type: r.claim_type,
-      final_status: r.final_status, qualifier: r.qualifier || "", repair: r.repair || "",
+      severity: r.severity || "", final_status: r.final_status, qualifier: r.qualifier || "", repair: r.repair || "",
       failed_gates: r.failed_gates || [], missing: r.missing || [], reason: String(r.reason || "").slice(0, 200),
-      provenance: { tree: r.provenance && r.provenance.tree }, created_at: r.created_at,
+      provenance: { tree: r.provenance && r.provenance.tree }, created_at: r.created_at, cleared: cleared.has(r.record_id),
     }));
 }
 

@@ -266,7 +266,7 @@ const lensOf = (f) => {
   if (m && m[2] === slug(f.title) && prior.claim_type === f.claimType && CRITICS.some((c) => c.key === m[1])) return m[1]
   return f.lens
 }
-let unassignedFindings = 0
+let unassigned = [] // single-pass findings tagged with no in-scope lens: dropped, never adjudicated
 const reviews = reviewMode === 'single-pass'
   ? await agent(
       `You are the reviewer for this project, covering EVERY lens below in a single pass. ${readOnlyBrief}, then review through each lens in turn and tag every finding with the key of the lens it belongs to:\n${CRITICS.map((c) => `- ${c.key} (${c.label}): ${c.lens}`).join('\n')}\n${reviewTail}`,
@@ -275,8 +275,7 @@ const reviews = reviewMode === 'single-pass'
       .catch(agentFailed('critic:all-lenses-0')) // a throwing reviewer is a failed reviewer, not a crashed round
       .then((r) => {
         const found = r ? (r.findings || []).map((f) => ({ ...f, lens: lensOf(f) })) : []
-        const unassigned = found.filter((f) => !CRITICS.some((c) => c.key === f.lens))
-        unassignedFindings = unassigned.length
+        unassigned = found.filter((f) => !CRITICS.some((c) => c.key === f.lens))
         if (unassigned.length) log(`WARNING: ${unassigned.length} finding(s) named no in-scope lens and were dropped: ${unassigned.map((f) => JSON.stringify(f.title)).join(', ')}`)
         // A reviewer that died leaves EVERY lens unreviewed — reported per lens below.
         return CRITICS.map((c) => ({ critic: c.key, label: c.label, findings: found.filter((f) => f.lens === c.key).map(withoutLens), failed: !r }))
@@ -296,6 +295,11 @@ const reviews = reviewMode === 'single-pass'
 // CRITICS in both modes (a dead parallel() thunk is a null slot), so each is named by its key.
 const failedReviewers = reviews.map((r, i) => (!r || r.failed ? CRITICS[i].key : null)).filter(Boolean)
 if (failedReviewers.length) log(`WARNING: ${failedReviewers.length} critic(s) returned no result: ${failedReviewers.join(', ')} — the round is incomplete`)
+// Every in-scope lens failed: nothing was reviewed, so the round is an error, not an empty
+// pass. The rest of the round still runs on no findings, so every key stays (empty) and a
+// caller that only reads failedReviewers or completion fails closed too.
+const error = failedReviewers.length === CRITICS.length ? `all ${CRITICS.length} lens(es) failed (infra) — no review happened; re-run` : null
+if (error) log(`ERROR: ${error}`)
 
 // Flatten, then dedup on (severity + exact normalized title). On a collision, MERGE
 // rather than drop. Agreement is NOT a stronger signal by itself: every critic is the
@@ -406,6 +410,41 @@ const deferred = settled.filter((o) => o.verdict === 'defer')
 const refuted = settled.filter((o) => o.verdict === 'reject')
 const niceToHaves = deduped.filter((f) => f.severity === 'nice-to-have')
 
+// Round integrity, computed here instead of inferred by the caller from empty lists. The
+// claim "no open blocker" is refuted (reject) by a confirmed blocker. It cannot be settled
+// (defer) while a lens failed, a finding went unassigned, a blocker is deferred or revised,
+// or an OPEN prior blocker sits in a lens this round did not review. Otherwise it holds.
+// notRechecked = every prior record of an unreviewed lens (failed, out of scope, or an opt-in
+// lens that is off): this round shows nothing about them, so it never clears one. Derived
+// from the round's own results, so completion is not written as a record.
+const reviewedLenses = new Set(CRITICS.map((c) => c.key).filter((k) => !failedReviewers.includes(k)))
+const priorLens = (prior) => (/^critic:([^:]+):/.exec(String(prior.claim_id || '')) || [])[1] || null
+const unreviewedPriors = priorRecords.filter((prior) => priorLens(prior) && !reviewedLenses.has(priorLens(prior)))
+const newestOfClaim = new Map() // claim_id → newest created_at among the priors
+for (const prior of priorRecords) {
+  const at = String(prior.created_at || '')
+  if (!newestOfClaim.has(prior.claim_id) || at > newestOfClaim.get(prior.claim_id)) newestOfClaim.set(prior.claim_id, at)
+}
+// Open = a blocker that no CLEAR names, not refuted, and not superseded by a newer prior.
+const openPriorBlockers = unreviewedPriors.filter((prior) =>
+  prior.severity === 'blocker' && !prior.cleared && ['accept', 'qualify', 'defer', 'revise'].includes(prior.final_status) &&
+  String(prior.created_at || '') >= newestOfClaim.get(prior.claim_id))
+const blockersIn = (list) => list.filter((f) => f.severity === 'blocker')
+const completionMissing = [
+  ...failedReviewers.map((k) => `a review through the ${k} lens — its reviewer failed (infra)`),
+  ...(unassigned.length ? [`an in-scope lens for ${unassigned.length} finding(s) the reviewer tagged with none — dropped, never adjudicated: ${unassigned.map((f) => JSON.stringify(String(f.title || 'untitled'))).join(', ')}`] : []),
+  ...blockersIn(deferred).map((f) => `blocker "${f.title}" (${f.critic}) is deferred — missing: ${f.missing.join('; ')}`),
+  ...blockersIn(revised).map((f) => `blocker "${f.title}" (${f.critic}) was revised — adjudicate the restated claim: ${f.repair}`),
+  ...openPriorBlockers.map((prior) => `re-review of the ${priorLens(prior)} lens for open prior blocker ${prior.record_id} (or CLEAR it on verified evidence)`),
+]
+const completion = {
+  claim: `no open blocker in: ${focus}`,
+  verdict: blockersIn(confirmed).length ? 'reject' : completionMissing.length ? 'defer' : 'accept',
+  missing: completionMissing,
+  notRechecked: unreviewedPriors.map((prior) => prior.record_id),
+}
+log(`completion: ${completion.verdict} — ${completion.claim}${completion.missing.length ? ` (${completion.missing.length} missing)` : ''}`)
+
 // TRACE-lite record drafts for every NEWLY adjudicated finding (the Lead appends them
 // with `pnpm trace write`); reused verdicts get a REUSE action instead of a new record.
 const traceRecords = settled
@@ -440,14 +479,16 @@ const reuseActions = settled
   .map((o) => ({ record_id: o.reused, consumer: 'critic-panel', action: 'REUSE', note: `still present on identical tree ${treeId}` }))
 
 return {
+  ...(error ? { error } : {}), // every in-scope lens failed: no review happened — re-run
   focus,
   treeId,
   reviewMode, // 'panel' (one critic per lens) or 'single-pass' (one all-lens reviewer)
   failedReviewers, // critics that returned nothing — the round is incomplete if non-empty
+  completion, // { claim, verdict, missing, notRechecked } — the round is clean only when verdict is 'accept'
   counts: {
     critics: CRITICS.length,
     reviewAgents: reviewMode === 'single-pass' ? 1 : CRITICS.length,
-    unassignedFindings,
+    unassignedFindings: unassigned.length,
     failedReviewers: failedReviewers.length,
     confirmedBlockers: confirmed.filter((f) => f.severity === 'blocker').length,
     confirmedImportant: confirmed.filter((f) => f.severity === 'important').length,

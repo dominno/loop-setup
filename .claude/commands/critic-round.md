@@ -22,9 +22,13 @@ $ARGUMENTS
    - `args: { "focus": "$ARGUMENTS", "priorRecords": <step-2 JSON>, "treeId": "<tree-id>" }`
    This command explicitly opts into multi-agent orchestration — calling Workflow
    here is expected.
-4. The workflow returns `{ focus, treeId, reviewMode, failedReviewers, counts, confirmed, deferred, revised, niceToHaves, refuted, traceRecords, reuseActions }`.
-   Render `confirmed` (verdict `accept` or `qualify`) as the critic matrix and list
-   `niceToHaves` separately:
+4. The workflow returns `{ error?, focus, treeId, reviewMode, failedReviewers, completion, counts, confirmed, deferred, revised, niceToHaves, refuted, traceRecords, reuseActions }`.
+   **Print first:** `error` if present (every lens failed: no review happened, re-run),
+   then `completion` — its claim next to `completion.verdict`, its `missing`, and
+   `notRechecked`. The round is clean only when `completion.verdict` is `accept`; `reject`
+   means a blocker is confirmed, `defer` that the round is incomplete or a blocker is still
+   open (Round integrity in `.claude/memory/topics/trace.md`). Then render `confirmed`
+   (verdict `accept` or `qualify`) as the critic matrix and list `niceToHaves` separately:
 
    | Critic | Severity | Verdict | Finding | Evidence | Recommended action |
    |---|---|---|---|---|---|
@@ -33,7 +37,8 @@ $ARGUMENTS
    at). List `deferred` findings with their `missing` evidence and `revised` ones with
    their `repair` — neither is actionable as stated. Note `refuted` findings so they
    are not actioned. If `failedReviewers` is non-empty, say which lenses are missing —
-   the round is incomplete.
+   the round is incomplete; re-run it. Never CLEAR a record listed in
+   `completion.notRechecked` on this round's evidence: its lens was not reviewed.
 5. **Record the verdicts** (memory, not code), per the consumer protocol in
    `.claude/memory/topics/trace.md`: save the workflow result JSON to a scratchpad file,
    then `pnpm trace write <file> --then-act HOLD --consumer critic-round --note
@@ -51,6 +56,11 @@ $ARGUMENTS
   TRACE-Bench-lite found it as good as the panel on code-only review at ~5x lower cost
   (F1; qualified: one run on the 19-fixture bench, 5 of the 10 critics, measured as diff-level block/no-block with the bench's own single-pass prompt — not this round's production prompt). Each finding still names its lens and still gets its own separate
   skeptic. Pass `reviewMode: 'panel'` to force the fan-out.
+- `completion` sees only the prior records passed in, and `--brief` carries the newest 40.
+  Before a task is declared complete, also check the whole store for an open blocker:
+  `pnpm -s trace query --latest --writer critic-panel --json` lists each latest critic
+  record with its `severity`; a `blocker` at accept/qualify/defer/revise is open unless
+  `pnpm trace show <id>` lists a CLEAR on it.
 - Agreement between critics is **not** extra evidence (they share a model); only a
   critic bringing *different* evidence corroborates. Verdict semantics, the evidence
   standard per claim type, and the consumer actions: `.claude/memory/topics/trace.md`.

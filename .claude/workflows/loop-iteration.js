@@ -245,6 +245,7 @@ const agentFailed = (label) => (e) => {
 }
 
 phase('Implement')
+let implFailed = 0 // items whose implementer threw or returned nothing (never counts an empty diff)
 // Pipeline: each item flows implement → verify independently.
 const outcomes = await pipeline(
   items,
@@ -279,6 +280,7 @@ const outcomes = await pipeline(
     // A dead implementer (threw, or returned nothing) is an infra failure, not an empty fix:
     // 'agent-failed' (re-dispatch), distinct from a live implementer's empty diff ('no-diff').
     if (!impl) {
+      implFailed += 1
       return {
         ...base, applied: false, status: 'deferred', verdict: 'defer', preGateVerdict: null,
         failedGates: ['agent-failed'], missing: ['a diff from the implementer (the implementer agent failed — re-dispatch)'],
@@ -321,6 +323,14 @@ const outcomes = await pipeline(
 )
 
 const settled = outcomes.filter(Boolean)
+// Every implementer failed: nothing was implemented, verified or applied, so the iteration is
+// an error with no records (the caller resets the nodes to ready). Judged by the dead
+// implementers counted above, never by an empty diff: a live implementer may change nothing.
+if (implFailed === items.length) {
+  const error = `all ${items.length} implementer(s) failed (infra) — nothing was implemented or verified; re-dispatch`
+  log(`ERROR: ${error}`)
+  return { error, level, applied: [], deferred: [], held: [], rejected: [], escalate: [], traceRecords: [] }
+}
 const applied = settled.filter((o) => o.applied)
 const deferred = settled.filter((o) => o.status === 'deferred')
 const held = settled.filter((o) => o.status === 'held') // L3 qualify — needs a human to accept the qualifier

@@ -484,6 +484,18 @@ describe("critic-panel review modes (F1: single-pass on code-only rounds)", () =
     );
     expect(result.counts.unassignedFindings).toBe(1);
     expect(result.counts.independentlyCorroborated).toBe(0);
+    // The dropped finding was never adjudicated, so completion names it. The merged
+    // security/regression blocker is confirmed here, and a confirmed blocker (reject) outranks defer.
+    expect(result.completion.verdict).toBe("reject");
+    expect(result.completion.missing.join("\n")).toContain("Input has no accessible name");
+    // A dropped finding alone leaves the round unsettled: defer, never accept.
+    const alone = await runWorkflow("critic-panel.js", { focus: "x", uiInScope: false }, (label) =>
+      label === "critic:all-lenses-0" ? { findings: [finding({ lens: "designer", title: "Focus ring is missing" })] } : null,
+    );
+    expect(alone.calls.filter((c) => c.label.startsWith("verify:"))).toHaveLength(0);
+    expect(alone.result.counts.unassignedFindings).toBe(1);
+    expect(alone.result.completion.verdict).toBe("defer");
+    expect(alone.result.completion.missing.join("\n")).toContain("Focus ring is missing");
   });
 
   it("a round that drives the app keeps the panel (one critic per lens), and the mode can be forced", async () => {
@@ -544,12 +556,21 @@ describe("agent failures never vanish (a throwing agent takes the null path, mar
   const story = { id: "US-001", title: "Greeting", source: "docs/prd.md" };
   const evidence = { implementationFiles: ["src/lib/greeting.ts"], unitTests: "Present", e2eTests: "Present", proposedStatus: "E2E tested", notes: "" };
   it("scan-docs: an evidence agent that throws keeps the story as one defer record (no-evidence-report + agent-failed)", async () => {
-    const { result } = await runWorkflow("scan-docs.js", { stories: [story] }, throwing("evidence:", () => null));
-    expect(result.count).toBe(1);
-    expect(result.records[0]).toMatchObject({ id: "US-001", verdict: "defer", finalStatus: null, failedGates: ["no-evidence-report", "agent-failed"] });
-    expect(result.traceRecords).toHaveLength(1);
-    expect(result.traceRecords[0].missing).toEqual(["an evidence report for this story (the evidence agent returned nothing)"]);
-    expectWritable(result.traceRecords);
+    // A second, healthy story keeps this a PARTIAL failure: when every evidence agent dies,
+    // the whole scan is an error that writes no records (round integrity, tested below).
+    const other = { id: "US-002", title: "Farewell", source: "docs/prd.md" };
+    const verified = { finalStatus: "E2E tested", justification: "a spec covers it", missing: [], evidenceChecked: [{ kind: "file_line", ref: "e2e/greeting.spec.ts:1" }] };
+    const live = (label) => (label.startsWith("evidence:") ? evidence : verified);
+    for (const reply of [throwing("evidence:US-001", live), (label) => (label.startsWith("evidence:US-001") ? null : live(label))]) {
+      const { result } = await runWorkflow("scan-docs.js", { stories: [story, other] }, reply);
+      expect(result.error).toBeUndefined();
+      expect(result.count).toBe(2);
+      expect(result.records[0]).toMatchObject({ id: "US-001", verdict: "defer", finalStatus: null, failedGates: ["no-evidence-report", "agent-failed"] });
+      expect(result.records[1]).toMatchObject({ id: "US-002", verdict: "accept", finalStatus: "E2E tested" });
+      expect(result.traceRecords).toHaveLength(2);
+      expect(result.traceRecords[0].missing).toEqual(["an evidence report for this story (the evidence agent returned nothing)"]);
+      expectWritable(result.traceRecords);
+    }
   });
 
   it("scan-docs: a status verifier that throws or returns nothing defers the story with a named missing, not the 'unspecified' fallback", async () => {
@@ -557,7 +578,9 @@ describe("agent failures never vanish (a throwing agent takes the null path, mar
     const silent = (label) => (label.startsWith("evidence:") ? evidence : null);
     for (const reply of [dies, silent]) {
       const { result } = await runWorkflow("scan-docs.js", { stories: [story] }, reply);
+      expect(result.error).toBeUndefined(); // a dead verifier is a per-story defer, never a whole-phase error
       expect(result.count).toBe(1);
+      expect(result.traceRecords).toHaveLength(1);
       expect(result.records[0]).toMatchObject({
         verdict: "defer",
         finalStatus: "Implemented", // the fail-closed cap on the maker's self-proposed status
@@ -569,14 +592,19 @@ describe("agent failures never vanish (a throwing agent takes the null path, mar
   });
 
   it("loop-iteration: a dead implementer (threw, or returned nothing) is deferred as agent-failed for re-dispatch; a live empty diff stays 'no-diff'", async () => {
-    const items = [{ id: "LP-010", description: "x" }];
-    for (const reply of [throwing("impl:", () => verdict()), (label) => (label.startsWith("impl:") ? null : verdict())]) {
+    // A second, healthy item keeps this a PARTIAL failure: when every implementer dies, the
+    // whole iteration is an error that writes no records (round integrity, tested below).
+    const items = [{ id: "LP-010", description: "x" }, { id: "LP-012", description: "y" }];
+    const live = (label) => (label.startsWith("impl:") ? { changedFiles: ["src/a.ts"], diff, checksPassed: true, notes: "" } : verdict({ evidenceChecked: [{ kind: "diff", ref: "src/a.ts" }] }));
+    for (const reply of [throwing("impl:LP-010", live), (label) => (label.startsWith("impl:LP-010") ? null : live(label))]) {
       const { result, calls } = await runWorkflow("loop-iteration.js", { items, level: "L2" }, reply);
-      expect(calls.some((c) => c.label.startsWith("verify:"))).toBe(false);
-      expect(result.applied).toHaveLength(0);
+      expect(result.error).toBeUndefined();
+      expect(calls.some((c) => c.label.startsWith("verify:LP-010"))).toBe(false);
+      expect(result.applied.map((o) => o.id)).toEqual(["LP-012"]);
       expect(result.escalate).toEqual([]);
       expect(result.deferred).toHaveLength(1);
       expect(result.deferred[0]).toMatchObject({
+        id: "LP-010",
         status: "deferred",
         verdict: "defer",
         failedGates: ["agent-failed"],
@@ -584,7 +612,9 @@ describe("agent failures never vanish (a throwing agent takes the null path, mar
       });
       expectWritable(result.traceRecords);
     }
-    const empty = await runWorkflow("loop-iteration.js", { items, level: "L2" }, (label) => (label.startsWith("impl:") ? { changedFiles: [], diff: "", checksPassed: true, notes: "" } : verdict()));
+    // One live implementer with an empty diff is not a dead one (never an error).
+    const empty = await runWorkflow("loop-iteration.js", { items: [items[0]], level: "L2" }, (label) => (label.startsWith("impl:") ? { changedFiles: [], diff: "", checksPassed: true, notes: "" } : verdict()));
+    expect(empty.result.error).toBeUndefined();
     expect(empty.result.deferred[0].failedGates).toEqual(["no-diff"]);
   });
 
@@ -606,5 +636,206 @@ describe("agent failures never vanish (a throwing agent takes the null path, mar
       expect(result.runs, arm).toHaveLength(result.agents);
       expect(result.runs.filter((r) => r.noVerdict), arm).toHaveLength(1);
     }
+  });
+});
+
+// Round integrity: whether a critic round is complete and clean is computed in code
+// (`completion`), never inferred by the caller from empty lists; and a phase in which every
+// agent failed is an `error`, never an empty-but-clean result.
+const CODE_LENSES = ["frontend-arch", "qa-e2e", "performance", "security", "regression"]; // in scope when uiInScope is false
+const deadReplies = (prefix) => [() => null, throwing(prefix, () => null)]; // every agent returns nothing / every agent throws
+
+describe("round integrity: critic-panel completion is computed in code", () => {
+  const code = { focus: "x", uiInScope: false, reviewMode: "panel" };
+  const clean = () => ({ findings: [] });
+  // A prior blocker of the designer lens, which a code-only round (uiInScope: false) does not review.
+  const designerBlocker = (over = {}) => ({
+    record_id: "TR-eeeeeeeeeee1", claim_id: "critic:designer:button-spacing-is-off", claim_text: "Button spacing is off", claim_type: "factual",
+    severity: "blocker", final_status: "accept", qualifier: "", repair: "", failed_gates: [], missing: [], reason: "verified earlier",
+    provenance: { tree: TREE }, created_at: "2026-10-07T12:00:00.000Z", cleared: false, ...over,
+  });
+
+  it("a clean round is accept; an accepted IMPORTANT finding does not refute 'no open blocker'", async () => {
+    const { result } = await runWorkflow("critic-panel.js", code, clean);
+    expect(result.error).toBeUndefined();
+    expect(result.completion).toEqual({ claim: "no open blocker in: x", verdict: "accept", missing: [], notRechecked: [] });
+    const important = await runWorkflow("critic-panel.js", code, (label) => (label.startsWith("critic:") ? onlySecurity([finding({ severity: "important" })])(label) : verdict()));
+    expect(important.result.confirmed).toHaveLength(1);
+    expect(important.result.completion.verdict).toBe("accept");
+  });
+
+  it("an accepted blocker is reject", async () => {
+    const { result } = await runWorkflow("critic-panel.js", code, (label) => (label.startsWith("critic:") ? onlySecurity([finding()])(label) : verdict()));
+    expect(result.counts.confirmedBlockers).toBe(1);
+    expect(result.completion.verdict).toBe("reject");
+  });
+
+  it("a blocker whose skeptic throws is defer, carrying that blocker's missing", async () => {
+    const { result } = await runWorkflow("critic-panel.js", code, throwing("verify:", onlySecurity([finding()])));
+    expect(result.deferred).toHaveLength(1);
+    expect(result.completion.verdict).toBe("defer");
+    const missing = result.completion.missing.join("\n");
+    for (const m of result.deferred[0].missing) expect(missing).toContain(m);
+    expect(missing).toContain(result.deferred[0].title);
+  });
+
+  it("a revised blocker is defer, carrying its repair", async () => {
+    const { result } = await runWorkflow("critic-panel.js", code, (label) =>
+      label.startsWith("critic:") ? onlySecurity([finding()])(label) : verdict({ verdict: "revise", repair: "only the email input lacks a name" }),
+    );
+    expect(result.revised).toHaveLength(1);
+    expect(result.completion.verdict).toBe("defer");
+    expect(result.completion.missing.join("\n")).toContain("only the email input lacks a name");
+  });
+
+  it("a dead security lens with a prior security record is defer, and notRechecked names that record (not a reviewed lens's prior)", async () => {
+    const sec = designerBlocker({ record_id: "TR-aaaaaaaaaaa1", claim_id: "critic:security:token-in-url", severity: "important" });
+    const reg = designerBlocker({ record_id: "TR-aaaaaaaaaaa2", claim_id: "critic:regression:route-changed", severity: "important" });
+    const { result } = await runWorkflow("critic-panel.js", { ...code, priorRecords: [sec, reg] }, (label) => (label.startsWith("critic:security") ? null : { findings: [] }));
+    expect(result.failedReviewers).toEqual(["security"]);
+    expect(result.error).toBeUndefined();
+    expect(result.completion.verdict).toBe("defer");
+    expect(result.completion.missing).toEqual(["a review through the security lens — its reviewer failed (infra)"]);
+    expect(result.completion.notRechecked).toEqual([sec.record_id]);
+  });
+
+  it("an open prior blocker in a lens the round did not review (out of scope) keeps completion at defer, naming it", async () => {
+    for (const final_status of ["accept", "qualify", "defer", "revise"]) {
+      const prior = designerBlocker({ final_status });
+      const { result } = await runWorkflow("critic-panel.js", { ...code, priorRecords: [prior] }, clean);
+      expect(result.completion.verdict, final_status).toBe("defer");
+      expect(result.completion.missing).toEqual([`re-review of the designer lens for open prior blocker ${prior.record_id} (or CLEAR it on verified evidence)`]);
+      expect(result.completion.notRechecked).toEqual([prior.record_id]);
+    }
+  });
+
+  it("a cleared, refuted, superseded or non-blocker prior of an unreviewed lens leaves completion accept, still listed in notRechecked", async () => {
+    const newer = designerBlocker({ record_id: "TR-eeeeeeeeeee2", final_status: "reject", created_at: "2026-10-08T12:00:00.000Z" });
+    const cases = [
+      [designerBlocker({ cleared: true })],
+      [designerBlocker({ severity: "nice-to-have" })],
+      [designerBlocker({ final_status: "reject" })],
+      [designerBlocker(), newer], // the accept is superseded by a newer record for the same claim
+    ];
+    for (const priors of cases) {
+      const { result } = await runWorkflow("critic-panel.js", { ...code, priorRecords: priors }, clean);
+      expect(result.completion.verdict).toBe("accept");
+      expect(result.completion.notRechecked).toEqual(priors.map((p) => p.record_id));
+    }
+  });
+
+  it("through `query --brief`: a stored prior blocker stays open until a CLEAR action names it", async () => {
+    const stored = designerBlocker(); // briefRecords derives `cleared` from the actions, never from the record
+    const open = await runWorkflow("critic-panel.js", { ...code, priorRecords: briefRecords([stored]) }, clean);
+    expect(open.result.completion.verdict).toBe("defer");
+    const cleared = await runWorkflow("critic-panel.js", { ...code, priorRecords: briefRecords([stored], [{ record_id: stored.record_id, action: "CLEAR" }]) }, clean);
+    expect(cleared.result.completion.verdict).toBe("accept");
+  });
+
+  it("every lens dead (panel or single-pass; null or throw) is an error: defer, every lens failed, every key kept empty, no skeptic", async () => {
+    for (const reviewMode of ["panel", "single-pass"]) {
+      for (const reply of deadReplies("critic:")) {
+        const { result, calls } = await runWorkflow("critic-panel.js", { focus: "x", uiInScope: false, reviewMode }, reply);
+        expect(result.error, reviewMode).toBe("all 5 lens(es) failed (infra) — no review happened; re-run");
+        expect(result.completion.verdict).toBe("defer");
+        expect(result.failedReviewers).toEqual(CODE_LENSES);
+        expect(calls.filter((c) => !c.label.startsWith("critic:"))).toEqual([]);
+        for (const k of ["confirmed", "deferred", "revised", "niceToHaves", "refuted", "traceRecords", "reuseActions"]) expect(result[k], k).toEqual([]);
+      }
+    }
+  });
+});
+
+describe("round integrity: a whole-phase failure is an error, a partial one stays per item", () => {
+  it("e2e-design: every category dead is an error with no cases; one dead category is named and the rest kept", async () => {
+    const CATEGORY_LABELS = ["e2e:happy-0", "e2e:failure-1", "e2e:edge-2", "e2e:accessibility-3", "e2e:regression-4"];
+    for (const reply of deadReplies("e2e:")) {
+      const { result, calls } = await runWorkflow("e2e-design.js", { flow: "greeting" }, reply);
+      expect(result).toEqual({ flow: "greeting", error: expect.stringContaining("failed (infra)"), failedCategories: ["happy", "failure", "edge", "accessibility", "regression"], count: 0, cases: [] });
+      expect(calls.map((c) => c.label).sort()).toEqual([...CATEGORY_LABELS].sort());
+    }
+    const { result } = await runWorkflow("e2e-design.js", { flow: "greeting" }, (label) =>
+      label.startsWith("e2e:edge") ? null : { cases: [{ title: `case for ${label}`, steps: "s", expected: "a visible greeting" }] },
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.failedCategories).toEqual(["edge"]);
+    expect(result.cases.map((c) => c.category)).toEqual(["happy", "failure", "accessibility", "regression"]);
+    expect(result.count).toBe(4);
+  });
+
+  const DIMENSIONS = ["docs-not-impl", "impl-not-docs", "impl-not-unit", "impl-not-e2e", "e2e-missing-edges", "ux-design", "ambiguous"];
+  it("gap-analysis: every finder dead is an error with no synth call; one dead finder is named, absent from byDimension, and the rest synthesized", async () => {
+    for (const reply of deadReplies("gap:")) {
+      const { result, calls } = await runWorkflow("gap-analysis.js", { scope: "mvp" }, reply);
+      expect(result.error).toContain("failed (infra)");
+      expect(result.failedDimensions).toEqual(DIMENSIONS);
+      expect(calls.filter((c) => !c.label.startsWith("gap:"))).toEqual([]);
+    }
+    const { result, calls } = await runWorkflow("gap-analysis.js", { scope: "mvp" }, (label) =>
+      label.startsWith("gap:ux-design") ? null : label.startsWith("gap:") ? { gaps: [{ item: label, detail: "src/a.ts:1", priority: "high" }] } : { order: [{ next: "x", why: "y" }] },
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.failedDimensions).toEqual(["ux-design"]);
+    expect(Object.keys(result.byDimension)).toEqual(DIMENSIONS.filter((d) => d !== "ux-design")); // a dead finder is not "no gaps"
+    expect(result.totalGaps).toBe(6);
+    expect(calls.filter((c) => c.label === "synthesize")).toHaveLength(1);
+    expect(result.recommendedOrder).toEqual([{ next: "x", why: "y" }]);
+    expect(result.missing).toEqual([]);
+  });
+
+  it("gap-analysis: a synthesizer that throws (or returns nothing) no longer aborts the run; recommendedOrder is null with a named missing", async () => {
+    const dies = () => {
+      throw new Error("synthesizer died");
+    };
+    for (const synth of [dies, () => null]) {
+      const { result } = await runWorkflow("gap-analysis.js", { scope: "mvp" }, (label) => (label.startsWith("gap:") ? { gaps: [{ item: label, detail: "d", priority: "low" }] } : synth()));
+      expect(result.error).toBeUndefined();
+      expect(result.totalGaps).toBe(7);
+      expect(result.recommendedOrder).toBeNull();
+      expect(result.missing).toEqual([expect.stringMatching(/^a synthesized order — the synthesizer failed \(infra\)/)]);
+    }
+  });
+
+  const LENS_KEYS = ["clarity", "instruction-following", "safety-gating", "consistency-dry", "workflow-dsl", "routing"];
+  const metaFinding = { severity: "important", file: "CLAUDE.md", title: "Gate weakened", evidence: "CLAUDE.md:1", proposedEdit: "restore it" };
+  it("improve-skills: every lens dead is an error and Verify is skipped; one dead lens is named and the rest verified", async () => {
+    for (const reply of deadReplies("meta:")) {
+      const { result, calls } = await runWorkflow("improve-skills.js", { targets: ["CLAUDE.md"] }, reply);
+      expect(result.error).toContain("failed (infra)");
+      expect(result.failedReviewers).toEqual(LENS_KEYS);
+      expect(result.budgetStop).toBe(false);
+      expect(calls.filter((c) => !c.label.startsWith("meta:"))).toEqual([]);
+      for (const k of ["applyReady", "needsDesign", "deferred", "niceToHaves", "refuted", "traceRecords"]) expect(result[k], k).toEqual([]);
+    }
+    const { result, calls } = await runWorkflow("improve-skills.js", { targets: ["CLAUDE.md"] }, (label) =>
+      label.startsWith("meta:clarity") ? null : label.startsWith("meta:safety") ? { findings: [metaFinding] } : label.startsWith("meta:") ? { findings: [] } : null,
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.failedReviewers).toEqual(["clarity"]);
+    expect(calls.filter((c) => c.label.startsWith("verify:"))).toHaveLength(1);
+    expect(result.traceRecords).toHaveLength(1);
+  });
+
+  it("scan-docs: every evidence agent dead is an error that writes no records and changes no status", async () => {
+    const stories = [{ id: "US-001", title: "Greeting", source: "docs/prd.md" }, { id: "US-002", title: "Farewell", source: "docs/prd.md" }];
+    for (const reply of deadReplies("evidence:")) {
+      const { result, calls } = await runWorkflow("scan-docs.js", { stories }, reply);
+      expect(result.error).toContain("failed (infra)");
+      expect(result.traceRecords).toEqual([]);
+      expect(result.records.map((r) => [r.id, r.finalStatus])).toEqual([["US-001", null], ["US-002", null]]); // null = keep the current status
+      expect(calls.filter((c) => !c.label.startsWith("evidence:"))).toEqual([]);
+    }
+  });
+
+  it("loop-iteration: every implementer dead is an error with the full empty shape and no records; empty diffs are not dead implementers", async () => {
+    const items = [{ id: "LP-020", description: "x" }, { id: "LP-021", description: "y" }];
+    for (const reply of deadReplies("impl:")) {
+      const { result, calls } = await runWorkflow("loop-iteration.js", { items, level: "L2" }, reply);
+      expect(result).toEqual({ error: expect.stringContaining("failed (infra)"), level: "L2", applied: [], deferred: [], held: [], rejected: [], escalate: [], traceRecords: [] });
+      expect(calls.filter((c) => !c.label.startsWith("impl:"))).toEqual([]);
+    }
+    const empty = await runWorkflow("loop-iteration.js", { items, level: "L2" }, (label) => (label.startsWith("impl:") ? { changedFiles: [], diff: "", checksPassed: true, notes: "" } : verdict()));
+    expect(empty.result.error).toBeUndefined();
+    expect(empty.result.deferred.map((o) => o.failedGates)).toEqual([["no-diff"], ["no-diff"]]);
   });
 });

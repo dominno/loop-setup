@@ -32,11 +32,14 @@ Checklist:
     agent simulating the panel). Record the verdicts per the **consumer protocol** in
     `.claude/memory/topics/trace.md` (scratchpad file → `pnpm trace write <file>` →
     `pnpm trace act --from <file>`).
-13. Report the workflow's `confirmed` findings (with verdicts and qualifiers), the
+13. Report the workflow's `error` first if present (every lens failed: no review
+    happened, re-run), then its `completion` (the claim next to `completion.verdict`, and
+    its `missing`), then the `confirmed` findings (with verdicts and qualifiers), the
     `deferred` ones with their `missing` evidence, the `revised` ones with their `repair`,
     any `failedReviewers`, and recommended next actions.
 
-Never mark as complete if build, tests, or the critical browser flow fails, if any
-blocker is open (confirmed, deferred or revised — a defer is not a pass until its
-`missing` evidence is supplied and re-adjudicated, or a human accepts the risk), or if a
-reviewer failed in the critic round.
+Never mark as complete if build, tests, or the critical browser flow fails, or if the
+critic round's `completion.verdict` is not `accept`: any open blocker (confirmed, deferred
+or revised — a defer is not a pass until its `missing` evidence is supplied and
+re-adjudicated, or a human accepts the risk), a reviewer that failed in the critic round,
+or an `error` keeps it incomplete.

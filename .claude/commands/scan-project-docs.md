@@ -45,7 +45,9 @@ Procedure:
    and a *separate* status-verifier agent (evidence-based status, no overclaiming),
    returning one record per story. This is real multi-agent orchestration, not one
    agent judging every story in a single context. (Invoking Workflow here is expected.)
-9. Use the returned `records` as the source of truth for status; do browser
+9. If the workflow returns `error` (no stories passed, or every evidence agent failed —
+   infra), change no status and write no records: fix the cause and re-run it. Otherwise
+   use the returned `records` as the source of truth for status; do browser
    verification yourself where it raises a status to `Browser verified`/`Done`.
    **No status change without a licensing TRACE record** (consumer protocol in
    `.claude/memory/topics/trace.md`): record the workflow's `traceRecords` (scratchpad
@@ -57,10 +59,14 @@ Procedure:
    - `revise` or `defer` → **leave the story's current status unchanged**, `HOLD` the
      record, and put its `repair`/`missing` in the story's "Next action" (a defer is
      resolved by supplying the missing evidence and re-running this workflow for the story).
-   Raising a story to `Browser verified`/`Done` is the Lead's own claim: only after the
-   post-scan critic round below has no blockers, write a record (writer_id `lead`,
-   claim_id `story:<id>:status`, `revises` the story's latest record, evidence = the
-   `browser` observation + the critic round's record ids as `record`), then COMMIT it.
+   Raising a story to `Browser verified`/`Done` is the Lead's own claim: only after a
+   post-scan critic round (step 15) whose `completion.verdict` is `accept`, write a record
+   (writer_id `lead`, claim_id `story:<id>:status`, `revises` the story's latest record,
+   evidence = the `browser` observation, the critic round's record ids as `record`, and
+   that round's completion as a `record` item (ref: the completion claim, its verdict
+   `accept` and the round's `treeId`)), then COMMIT it. Never cite the completion as
+   `command` evidence: it is derived from the round's records, and it must not stand in
+   for the `browser` observation at the evidence gate.
 10. Start or reuse localhost when browser verification is possible.
 11. Open relevant pages using Chrome or Playwright MCP.
 12. Verify implemented user flows in browser when possible.
@@ -74,8 +80,9 @@ Procedure:
     - `docs/gaps-and-risks.md`
 15. Run a post-scan critic review as the **critic-panel Workflow** (`scriptPath:
     .claude/workflows/critic-panel.js`, `args.focus` = the scanned stories' flows and
-    the updated docs/stories files) and record it per the consumer protocol. It must
-    have no blockers before any story is raised to `Done` (step 9).
+    the updated docs/stories files) and record it per the consumer protocol. Print its
+    `error` (if any) and `completion` first; its `completion.verdict` must be `accept`
+    before any story is raised to `Browser verified`/`Done` (step 9).
 16. If the scan surfaced a durable engineering learning (a convention or gotcha,
     not a story-specific note), run `/dream` to file it into the memory wiki.
 17. Do not change product code unless explicitly asked.

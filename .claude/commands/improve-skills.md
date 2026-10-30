@@ -21,7 +21,10 @@ $ARGUMENTS
    instruction-following risk, safety/gating, consistency/DRY, workflow DSL, routing)
    runs in its own context, in parallel; a *separate* skeptic adversarially verifies
    every blocker/important finding. Invoking Workflow here is expected.
-2. The workflow returns `{ scope, targets, budgetStop, counts, applyReady, needsDesign, deferred, niceToHaves, refuted, traceRecords }`.
+2. The workflow returns `{ error?, scope, targets, budgetStop, failedReviewers, counts, applyReady, needsDesign, deferred, niceToHaves, refuted, traceRecords }`.
+   If `error` is set, every lens failed (infra): nothing was reviewed or verified, so
+   report it and re-run. A non-empty `failedReviewers` names lenses that did not review —
+   the pass is incomplete for them, never "no findings".
    Each finding carries a typed TRACE verdict derived from the two axes:
    `applyReady` = `accept` (real + edit safe), `needsDesign` = `revise` (real, edit not
    safe — its `repair` is a safer edit to design from), `deferred` = `defer` (no verdict

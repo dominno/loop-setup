@@ -46,12 +46,16 @@ flowchart LR
     vn[typed verdict #N]
   end
   V --> gate[▫️ strict evidence gate<br/>accept+qualify floor, under critic AND skeptic type]
-  gate --> out([confirmed accept/qualify · deferred · revised · refuted<br/>+ failedReviewers + traceRecords + reuseActions])
-  reused --> out
+  gate --> comp
+  reused --> comp
+  comp["▫️ completion, computed in code: claim 'no open blocker in focus'<br/>reject = a blocker confirmed · defer = a failed lens, a deferred or revised<br/>blocker, or an open prior blocker in a lens not reviewed · else accept<br/>+ notRechecked = prior records of the lenses not reviewed"]
+  comp --> out([completion · confirmed accept/qualify · deferred · revised · refuted<br/>+ failedReviewers + traceRecords + reuseActions])
   R -.->|a critic threw or returned nothing| fr[▫️ failedReviewers, named by lens key<br/>round incomplete, never a clean pass]
-  fr --> out
+  fr --> comp
+  fr -.->|every lens failed| err[▫️ error: no review happened, re-run<br/>every other key kept, empty]
+  err --> out
   V -.->|a skeptic threw or returned nothing| af[▫️ defer: verdict-missing + agent-failed<br/>infra failure: re-run, never refuted]
-  af --> out
+  af --> comp
 ```
 
 > Prior verdicts come in via `args.priorRecords` (`pnpm -s trace query --latest --writer
@@ -66,6 +70,11 @@ flowchart LR
 > run, 5 of 10 critics, diff-level block/no-block with the bench's own prompt). Each finding
 > keeps its lens and still gets its own skeptic, so everything after Review is unchanged.
 > The 10-node graph above is the default/full case (`args.reviewMode` overrides).
+>
+> A round is clean only when `completion.verdict` is `accept`; callers print `error` and
+> `completion` before the matrix and never CLEAR a record in `completion.notRechecked`
+> (Round integrity in `.claude/memory/topics/trace.md`). `completion` is derived, not
+> written as a record.
 
 ## `improve-skills` — meta-critic over our own prompts (`/improve-skills`)
 
@@ -92,6 +101,8 @@ flowchart LR
   skip --> out
   R -.->|a lens threw or returned nothing| fr[▫️ failedReviewers, named by lens key<br/>pass incomplete]
   fr --> out
+  fr -.->|every lens failed| err[▫️ error: no review happened, re-run<br/>Verify skipped, every other key kept, empty]
+  err --> out
   V -.->|a skeptic threw or returned nothing| af[▫️ defer: verdict-missing + agent-failed<br/>infra failure: re-run, never refuted]
   af --> out
 ```
@@ -108,7 +119,9 @@ flowchart LR
     v -.->|the verifier threw or returned nothing| d1[defer: status capped<br/>verdict-missing + agent-failed]
   end
   P --> map["▫️ proposed vs verified status →<br/>verdict, then evidence gate (factual)"]
-  map --> out([per-story status records + traceRecords])
+  map --> allf{"▫️ every evidence agent failed?"}
+  allf -- no --> out([per-story status records + traceRecords])
+  allf -- "yes (infra)" --> err[▫️ error: no records written,<br/>every status unchanged, re-run]
 ```
 
 ## `gap-analysis` — docs↔code↔tests gaps (`/story-gap-analysis`)
@@ -125,8 +138,14 @@ flowchart LR
     d6[ux-design]
     d7[ambiguous]
   end
-  D --> s[🔵 synthesize prioritized order]
-  s --> out([recommendedOrder])
+  D --> allf{"▫️ every finder failed?"}
+  allf -- "yes (infra)" --> err[▫️ error: nothing analysed,<br/>no synth call, re-run]
+  allf -- no --> s[🔵 synthesize prioritized order<br/>over the dimensions analysed]
+  s --> out([recommendedOrder + byDimension<br/>+ failedDimensions + missing])
+  D -.->|a finder threw or returned nothing| fd["▫️ failedDimensions, named by key<br/>left out of byDimension, never 'no gaps'"]
+  fd --> out
+  s -.->|the synthesizer threw or returned nothing| ns[▫️ recommendedOrder null + missing<br/>gaps listed unordered]
+  ns --> out
 ```
 
 ## `e2e-design` — Playwright case enumeration (`/multi-agent-e2e`)
@@ -141,8 +160,12 @@ flowchart LR
     d4[accessibility]
     d5[regression]
   end
-  D --> dedup[▫️ dedup on category+title]
-  dedup --> out([concrete test cases])
+  D --> allf{"▫️ every category failed?"}
+  allf -- "yes (infra)" --> err[▫️ error: no cases designed, re-run]
+  allf -- no --> dedup[▫️ dedup on category+title]
+  dedup --> out([concrete test cases + failedCategories])
+  D -.->|a category agent threw or returned nothing| fc["▫️ failedCategories, named by key<br/>not enumerated, never 'no cases'"]
+  fc --> out
 ```
 
 ## `loop-iteration` — maker/checker for `/loop` L2/L3
@@ -164,7 +187,9 @@ flowchart LR
     ver --> eg[▫️ evidence gate<br/>practical: accept/qualify need the diff]
     ver -.->|the verifier threw or returned nothing| vaf[deferred: verdict-missing + agent-failed]
   end
-  P --> out([applied + deferred + held L3-qualify + rejected + escalate<br/>+ traceRecords])
+  P --> allf{"▫️ every implementer failed?<br/>a dead agent, never an empty diff"}
+  allf -- no --> out([applied + deferred + held L3-qualify + rejected + escalate<br/>+ traceRecords])
+  allf -- "yes (infra)" --> erri[▫️ error: no records,<br/>caller resets the nodes to ready]
   esc0 --> out
 ```
 

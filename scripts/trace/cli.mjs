@@ -301,7 +301,7 @@ async function main() {
     if (flags.writer) recs = recs.filter((r) => r.writer_id.startsWith(flags.writer));
     if (flags.subject) recs = recs.filter((r) => r.subject === flags.subject);
     if (flags.brief) {
-      process.stdout.write(JSON.stringify(briefRecords(recs)) + "\n");
+      process.stdout.write(JSON.stringify(briefRecords(recs, [...state.actions.values()].flat())) + "\n");
       return 0;
     }
     if (flags.json) return out(recs, true), 0;

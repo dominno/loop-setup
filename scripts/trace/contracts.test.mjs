@@ -180,7 +180,35 @@ describe("verdict-reuse input contract", () => {
     const digest = /const priorDigest[\s\S]*?\n {2}: ''/.exec(text)[0];
     for (const m of digest.matchAll(/\b[rxy]\.([a-z_]+)/g)) reads.add(m[1]); // the digest's map (r) and sort (x, y)
     expect(reads.size).toBeGreaterThan(5);
+    // completion reads these from each prior of a lens the round did not review (an open
+    // prior blocker keeps it at defer); if the scan above stops seeing them, fail here.
+    expect([...reads]).toEqual(expect.arrayContaining(["severity", "cleared"]));
     const keys = Object.keys(briefRecords([{ record_id: "TR-x", provenance: {} }])[0]);
     expect([...reads].filter((k) => !keys.includes(k))).toEqual([]);
+  });
+
+  it("`query --brief` carries the severity, and marks a record cleared only when a CLEAR action names it", () => {
+    const recs = [
+      { record_id: "TR-a", severity: "blocker", provenance: {}, created_at: "2026-10-07T12:00:02.000Z" },
+      { record_id: "TR-b", provenance: {}, created_at: "2026-10-07T12:00:01.000Z" },
+    ];
+    const actions = [{ record_id: "TR-a", action: "CLEAR" }, { record_id: "TR-b", action: "HOLD" }];
+    expect(briefRecords(recs, actions).map((r) => [r.record_id, r.severity, r.cleared])).toEqual([["TR-a", "blocker", true], ["TR-b", "", false]]);
+    expect(briefRecords(recs).map((r) => r.cleared)).toEqual([false, false]); // no actions given: nothing is cleared (fail closed)
+  });
+});
+
+// A critic round is clean only when its computed completion verdict is `accept`; every
+// consumer that gates on a round must say so, not re-derive "clean" from empty lists.
+describe("round-integrity consumers", () => {
+  it.each([
+    ".claude/commands/critic-round.md",
+    ".claude/commands/multi-agent-dev.md",
+    ".claude/commands/qa-pass.md",
+    ".claude/loop.md",
+    ".claude/commands/scan-project-docs.md",
+    ".claude/commands/sync-story-status.md",
+  ])("%s gates on completion.verdict", (rel) => {
+    expect(readFileSync(join(ROOT, rel), "utf8")).toContain("completion.verdict");
   });
 });

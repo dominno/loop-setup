@@ -378,6 +378,17 @@ describe("round-3 CLI fixes", () => {
     expect(brief.every((r) => r.qualifier.startsWith("only case"))).toBe(true);
   });
 
+  it("query --brief carries each record's severity and marks it cleared only when a stored CLEAR action names it", () => {
+    const two = `[${draft({ claim_id: "cli:blocker", claim_text: "a blocker", severity: "blocker" })},${draft({ claim_id: "cli:important", claim_text: "an important", severity: "important" })}]`;
+    expect(trace(["write", "-"], two).status).toBe(0);
+    const ids = Object.fromEntries(JSON.parse(trace(["query", "--json"]).stdout).map((r) => [r.claim_id, r.record_id]));
+    expect(trace(["act", ids["cli:blocker"], "multi-agent-dev", "CLEAR"]).status).toBe(0);
+    expect(trace(["act", ids["cli:important"], "critic-round", "HOLD"]).status).toBe(0);
+    const brief = Object.fromEntries(JSON.parse(trace(["query", "--brief"]).stdout).map((r) => [r.claim_id, r]));
+    expect(brief["cli:blocker"]).toMatchObject({ severity: "blocker", cleared: true });
+    expect(brief["cli:important"]).toMatchObject({ severity: "important", cleared: false });
+  });
+
   it("reaudit --act twice on an unchanged queue appends the REAUDIT once", () => {
     trace(["write", "-"], draft({ evidence: [{ kind: "file_line", ref: "package.json:1" }], provenance: { workflow: "test", commit: "deadbeef0000" } }));
     const lines = () => readFileSync(store, "utf8").trim().split("\n").length;

@@ -18,7 +18,10 @@ Procedure:
    `scriptPath: .claude/workflows/e2e-design.js`, `args: { "flow": "$ARGUMENTS" }`.
    One agent per path category (happy, failure, edge, accessibility, regression)
    enumerates concrete cases in its own context; results are deduped. (Invoking
-   Workflow here is expected.) It returns `{ flow, count, cases }`.
+   Workflow here is expected.) It returns `{ error?, flow, failedCategories, count, cases }`.
+   If `error` is set, every category agent failed (infra) and no case was designed:
+   report it and re-run. Name any `failedCategories`: those path categories were not
+   enumerated (never read them as "no cases"), so list them under remaining coverage gaps.
 4. Implement Playwright tests from the returned `cases` (cover the happy path + at
    least one failure/edge path); run the specific specs.
 5. Fix test or app failures, but do not weaken assertions.

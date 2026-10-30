@@ -29,10 +29,12 @@ Procedure:
    self-adjudicated (maker ≠ checker): run the **scan-docs Workflow** for the in-scope
    stories (`scriptPath: .claude/workflows/scan-docs.js`, `args.stories` = those
    stories) so a separate status verifier issues the verdicts, then apply them exactly as
-   `/scan-project-docs` step 9 does (accept → COMMIT, qualify → COMMIT_QUALIFIED at the
-   lower status, revise/defer → status unchanged + HOLD; Lead-raised `Browser verified`/
-   `Done` only with its own record citing the browser observation and a no-blocker critic
-   round). No status change without a licensing record (`.claude/memory/topics/trace.md`).
+   `/scan-project-docs` step 9 does (an `error` → no status changes and no records: re-run
+   it; accept → COMMIT, qualify → COMMIT_QUALIFIED at the lower status, revise/defer →
+   status unchanged + HOLD; Lead-raised `Browser verified`/`Done` only with its own record
+   citing the browser observation and a critic round whose `completion.verdict` is
+   `accept`, that completion cited in its evidence). No status change without a licensing
+   record (`.claude/memory/topics/trace.md`).
 10. Update `docs/e2e-coverage-map.md`.
 11. Update `docs/gaps-and-risks.md`.
 

@@ -204,6 +204,10 @@ const reviews = await parallel(
 // LENSES (a dead parallel() thunk is a null slot), so each is named by its key.
 const failedReviewers = reviews.map((r, i) => (!r || r.failed ? LENSES[i].key : null)).filter(Boolean)
 if (failedReviewers.length) log(`WARNING: ${failedReviewers.length} lens(es) returned no result: ${failedReviewers.join(', ')} — the pass is incomplete`)
+// Every lens failed: nothing was reviewed, so the pass is an error and Verify is skipped.
+// The rest still runs on no findings, so every key stays (empty).
+const error = failedReviewers.length === LENSES.length ? `all ${LENSES.length} lens(es) failed (infra) — no review happened; re-run` : null
+if (error) log(`ERROR: ${error}`)
 
 // Flatten, then dedup on (severity + file + exact normalized title). On a collision,
 // MERGE (keep the corroborating critic + evidence) rather than dropping — two critics
@@ -228,7 +232,7 @@ log(`${deduped.length} findings from ${LENSES.length} meta-critics (${all.length
 // Phase 2 — adversarially verify each blocker/important finding with a SEPARATE
 // skeptic. It must refute BOTH that the problem is real AND that the proposed edit is
 // a safe improvement (so we never "improve" a prompt into being weaker or less safe).
-phase('Verify')
+if (!error) phase('Verify')
 const toVerify = deduped.filter((f) => f.severity === 'blocker' || f.severity === 'important')
 
 // Budget as a HARD stop (soft + hard controls, graph-engineering): if the turn's token
@@ -236,9 +240,11 @@ const toVerify = deduped.filter((f) => f.severity === 'blocker' || f.severity ==
 // (TRACE defer — missing: the adversarial verification), so nothing unverified is ever
 // apply-ready or mistaken for a refutation.
 const VERIFY_FLOOR = 60_000 // tokens to leave for the verify phase
-const budgetStop = !!(budget.total && budget.remaining() < VERIFY_FLOOR)
+const budgetStop = !error && !!(budget.total && budget.remaining() < VERIFY_FLOOR)
 let verified
-if (budgetStop) {
+if (error) {
+  verified = [] // every lens failed: nothing reached Verify (`error` says so)
+} else if (budgetStop) {
   log(`budget floor reached (${Math.round(budget.remaining() / 1000)}k left) — skipping adversarial verify; ${toVerify.length} findings deferred (unverified, never auto-applied)`)
   verified = toVerify.map((f) => ({
     ...f,
@@ -330,6 +336,7 @@ const traceRecords = settled.map((f, i) => ({
 }))
 
 return {
+  ...(error ? { error } : {}), // every lens failed: no review happened — re-run
   scope,
   targets,
   budgetStop, // true ⇒ verify was skipped for budget; every blocker/important finding is in `deferred`

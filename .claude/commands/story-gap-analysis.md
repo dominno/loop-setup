@@ -19,7 +19,7 @@ tool with `scriptPath: .claude/workflows/gap-analysis.js`,
 context, in parallel; a final agent synthesizes the recommended order. (Invoking
 Workflow here is expected.)
 
-The workflow returns `{ scope, totalGaps, byDimension, recommendedOrder }` covering:
+The workflow returns `{ error?, scope, totalGaps, byDimension, failedDimensions, recommendedOrder, missing }` covering:
 
 1. Requirements found in docs but not implemented (`docs-not-impl`).
 2. Implemented features not described in docs (`impl-not-docs`).
@@ -30,4 +30,8 @@ The workflow returns `{ scope, totalGaps, byDimension, recommendedOrder }` cover
 7. Ambiguous or contradictory requirements (`ambiguous`).
 8. Recommended next implementation order (`recommendedOrder`).
 
-Render the dimensions + the recommended order. Do not edit files unless explicitly asked.
+Render first: `error` if set (every dimension failed — infra; nothing was analysed, so
+re-run), then any `failedDimensions` (those dimensions were not analysed — never read
+their absence from `byDimension` as "no gaps"). A `recommendedOrder` of `null` means no
+order was synthesized: show its `missing` and list the gaps unordered. Then render the
+dimensions + the recommended order. Do not edit files unless explicitly asked.

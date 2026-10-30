@@ -64,11 +64,14 @@ instructions — the self-modification guard below still applies to everything e
    `args.priorRecords` = `pnpm -s trace query --latest --writer critic-panel --brief`,
    `args.treeId` = `pnpm -s trace tree-id`): critics fan out as parallel
    subagents, each finding gets a typed verdict from a separate skeptic, and unchanged
-   prior verdicts are reused instead of re-verified. Render the returned `confirmed`
-   matrix (with each verdict + qualifier) and list `deferred`/`revised` with their
-   `missing`/`repair` (and any `failedReviewers` — an incomplete round). Record the
-   round per the consumer protocol (scratchpad file → `pnpm trace write <file>` →
-   `pnpm trace act --from <file>`) before using any finding.
+   prior verdicts are reused instead of re-verified. Print `error` first if present
+   (every lens failed: no review happened), then `completion` (the claim next to
+   `completion.verdict`, and its `missing`; `notRechecked` lists the prior records of
+   lenses this round did not review, which its evidence can never clear, drop or
+   resolve). Render the returned `confirmed` matrix (with each verdict + qualifier) and
+   list `deferred`/`revised` with their `missing`/`repair` (and any `failedReviewers` —
+   an incomplete round). Record the round per the consumer protocol (scratchpad file →
+   `pnpm trace write <file>` → `pnpm trace act --from <file>`) before using any finding.
 8. **Maker/checker:** the pass that verifies a fix must be *separate* from the one
    that made it — the implementer never marks its own work "done".
 9. **Re-evaluate & re-plan** (a first-class step, not an afterthought) — run this
@@ -79,7 +82,9 @@ instructions — the self-modification guard below still applies to everything e
    for a critic finding the round `deferred`, a `deferred` node carrying its `missing`
    (only if the loop can supply it; a human-decision defer or a `revise` becomes an
    `escalated` node with the `missing`/`repair` as the human ask); re-order by priority;
-   `drop` obsolete nodes; **re-check every `deferred` node's `missing`** — reset it to
+   `drop` obsolete nodes — never one whose `origin` record is in the latest round's
+   `completion.notRechecked` (its lens was not reviewed, so nothing shows it obsolete);
+   **re-check every `deferred` node's `missing`** — reset it to
    `ready` only when you can cite the evidence that arrived (a record id or check output,
    in the node's notes); a node deferred by a record whose `failed_gates` include
    `agent-failed` (an infra failure, not a verdict) may be reset citing that record's id,
@@ -177,14 +182,17 @@ Notify only when action is needed — do not ping on a no-op run.
 - A loop with an empty watchlist **MUST** self-stop, not spin.
 
 ## Stop when
-- No blockers remain, browser verification passes, relevant tests pass, and the
-  current task has clear evidence of completion — or a stop condition above fires.
+- The latest round's `completion.verdict` is `accept` (no blocker open, no lens failed),
+  browser verification passes, relevant tests pass, and the current task has clear
+  evidence of completion — or a stop condition above fires.
 - Or every remaining claim has a terminal TRACE outcome (paper §5.4): **(1)** accepted/
   qualified and acted on, **(2)** rejected, **(3)** deferred with a named `missing` the loop
   cannot supply this run — report those `missing` lists as the human ask, or **(4)
   diminishing returns** — this iteration changed nothing that matters (no node changed
   status and no verdict changed versus the previous iteration — new records that merely
-  repeat old verdicts do not count): stop and report rather than spin.
+  repeat old verdicts do not count): stop and report rather than spin. An iteration whose
+  critic round was incomplete (`error` set, or a failed lens) is never diminishing
+  returns: re-run the round (infra re-runs count toward the budget).
 
 ## Run-log entry (append to `.claude/memory/loop-run-log.md`)
 ```
