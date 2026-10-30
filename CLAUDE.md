@@ -94,7 +94,9 @@ Default app URL: `http://localhost:3000`.
 
 Before browser testing:
 1. Check if the dev server is already running.
-2. If not running, start it in the background.
+2. If not running, start it in the background. This is for the Lead session only:
+   workflow subagents never start, stop or kill servers, and they report a down
+   localhost as missing evidence.
 3. Wait until localhost responds.
 4. Only then use Chrome or Playwright MCP.
 
@@ -105,12 +107,35 @@ Before browser testing:
 - Do not change public APIs unless the task explicitly requires it.
 - Do not hide failing tests.
 - Do not delete tests to make the suite pass.
+- Do not weaken or delete an assertion to make a check pass. If you change a test's
+  expectation, state in your report why the old expectation was wrong (the root cause).
+- Mocks don't prove integration. A behaviour whose only tests mock or stub what it
+  integrates with (`vi.mock`, `vi.stubGlobal`, spies) counts as unit-tested only. Pair
+  it with a test on the real stack (a Playwright spec for user flows; otherwise an
+  integration test against the real module, route or CLI, like `tempRepo()` in
+  `scripts/trace/cli.test.mjs`), or name the gap and why under Remaining risks. This
+  rule governs how coverage is reported and how story status is classified, not
+  whether a diff that adds a stubbed unit test is acceptable.
 - Always explain root cause before applying a fix.
 - After fixing, run the smallest relevant test first, then the full verification command.
-- Commit or push only when the user explicitly asks. Never commit/push as a side
-  effect of completing a task; `git commit`/`git add` being pre-allowed in
-  `settings.local.json` is a convenience, not a license to commit unprompted. If on
-  the default branch, branch first.
+- Fix attempts are bounded, counted per failing check within one task (separate from
+  `/multi-agent-dev`'s 3-round cap and `/loop`'s per-item cap). If the same check fails
+  with the same error twice in a row, stop patching and re-diagnose from the raw output.
+  A fresh `Agent` subagent given only the failing command, its output and the diff is a
+  good second opinion; its fix is a claim you re-run, not evidence. After 5 failed
+  attempts, stop and report the blocker: the command, the exact error, what you tried,
+  and your best root-cause hypothesis. The task stays incomplete.
+- Commit or push only when the user explicitly asks, never as a side effect of
+  completing a task. An allow rule for `git commit`, wherever it is configured, is a
+  convenience, not a license. If on the default branch, branch first.
+  Commit by pathspec, because other agents and sessions share this checkout:
+  `git add -- <new files>` first (an untracked path is not matched), check with
+  `git commit --dry-run --short -- <paths>`, then `git commit -m "…" -- <paths>`; never
+  `git add -A` or `git commit -a`. Exception: a pathspec commit re-adds a file you
+  untracked with `git rm --cached` while it is still on disk, so commit that change
+  from the index after `git diff --cached --name-status` lists only your paths.
+  Never rewrite pushed history (no amend, rebase or force-push of pushed commits);
+  fix forward, because TRACE records cite commit SHAs.
 
 ## Multi-Agent Development Workflow
 
@@ -196,7 +221,9 @@ For every task:
 13. Run E2E tests.
 14. Run full verification when appropriate.
 15. Run a second critic review after implementation.
-16. Repeat until there are no blocker issues.
+16. Repeat until there are no blocker issues, within the fix-attempt bounds in
+    Development rules. A round in which any in-scope reviewer failed is not clean, so
+    re-run it; stopping on a bound is not completing.
 17. Report final evidence.
 
 ## Rules
@@ -213,9 +240,11 @@ A task is complete only when:
 - lint passes
 - unit tests pass when relevant
 - build passes when relevant
-- post-implementation critic review has no blockers — none confirmed, and none deferred or
-  revised: an open defer/revise blocker keeps the task incomplete until its missing
-  evidence is supplied and re-adjudicated, or the user explicitly accepts the risk
+- post-implementation critic review is complete (no in-scope reviewer failed; a round
+  with a failed lens is re-run, never accepted as clean) and has no blockers: none
+  confirmed, and none deferred or revised. An open defer/revise blocker keeps the task
+  incomplete until its missing evidence is supplied and re-adjudicated, or the user
+  explicitly accepts the risk
 - the critic rounds' TRACE-lite records are appended (`pnpm trace lint` passes)
 - Artistic Direction Critic confirms the UI has an intentional look and feel when the task touches UI or product experience
 - changed files and remaining risks are reported
@@ -248,7 +277,10 @@ At the end, report:
 
 1. Goal status
 2. Browser verification
-3. Tests run
+3. Tests run: each command with the result you observed in full this session (its
+   exit status and the runner's own summary line). Never report a number from memory,
+   from output cut by `| head`/`| tail` (a pipe hides the exit status), or from a
+   subagent's report.
 4. Critic review summary
 5. Files changed
 6. Remaining risks
