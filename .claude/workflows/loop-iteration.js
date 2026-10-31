@@ -27,6 +27,10 @@ const items = (a && a.items) || []
 const level = (a && a.level) || 'L1'
 // Working-tree fingerprint (`pnpm -s trace tree-id`) stamped on the records' provenance.
 const treeId = (a && typeof a.treeId === 'string' && /^[0-9a-f]{16}$/.test(a.treeId) && a.treeId) || null
+// The Lead's `git rev-parse HEAD` (40 hex), required at L2/L3. Each implementer reports the commit
+// its fresh worktree started from (baseSha); a diff based on any other commit may not apply to, or
+// mean the same on, the Lead's tree, so it is deferred before verification ('base-mismatch').
+const headSha = (a && typeof a.headSha === 'string' && /^[0-9a-f]{40}$/.test(a.headSha) && a.headSha) || null
 
 // Model tiering (graph-engineering): the adversarial verifier (the safety gate) runs
 // on the strong tier. The IMPLEMENTER intentionally has NO override — it writes real
@@ -39,6 +43,23 @@ if (level !== 'L2' && level !== 'L3') {
 }
 if (!items.length) {
   return { error: 'No work items. Triage + denylist-check first, then pass args.items = [{id, description}].', applied: [], deferred: [], rejected: [], escalate: [], traceRecords: [] }
+}
+
+// Argument errors, refused before any agent starts: nothing was attempted and no record is written.
+// Worded apart from the infra `error` below (every implementer failed), which the caller counts as an
+// attempt per node. Each item costs up to two agents (implementer + verifier), so a batch over
+// args.maxItems (an integer > 0, default 5) is refused up front: the caller dispatches fewer nodes.
+const argError = (error) => {
+  log(`ERROR: ${error}`)
+  return { error, level, applied: [], deferred: [], held: [], rejected: [], escalate: [], traceRecords: [] }
+}
+if (!headSha) {
+  return argError(`argument error: args.headSha must be the Lead's \`git rev-parse HEAD\` (40 hex characters), got ${JSON.stringify(a && a.headSha)} — no agent started`)
+}
+const maxItems = a && Number.isInteger(a.maxItems) && a.maxItems > 0 ? a.maxItems : 5
+if (a && a.maxItems !== undefined && a.maxItems !== maxItems) log(`ignored args.maxItems=${JSON.stringify(a.maxItems)} (expected an integer > 0) — using ${maxItems}`)
+if (items.length > maxItems) {
+  return argError(`argument error: ${items.length} items > maxItems ${maxItems} (up to ${2 * items.length} agents) — no agent started; dispatch at most ${maxItems} ready nodes per call`)
 }
 
 // Budget as a HARD stop (soft + hard controls, graph-engineering): worktree
@@ -121,8 +142,10 @@ function applyEvidenceGateStrict(v, claimTypes) {
 const LICENSING = ['accept', 'qualify']
 
 const IMPL_SCHEMA = {
-  type: 'object', additionalProperties: false, required: ['changedFiles', 'diff', 'checksPassed', 'notes'],
+  type: 'object', additionalProperties: false, required: ['baseSha', 'changedFiles', 'diff', 'checksPassed', 'notes'],
   properties: {
+    // The commit the fresh worktree started from; the base check compares it with args.headSha.
+    baseSha: { type: 'string', description: 'git rev-parse HEAD in your fresh worktree, recorded before any edit' },
     changedFiles: { type: 'array', items: { type: 'string' } },
     // The ACTUAL unified diff (from `git diff` in the worktree) — the durable
     // artifact the verifier reviews and the caller applies. Not a prose summary.
@@ -236,6 +259,14 @@ function diffPathScan(diff) {
 const parseDiffPaths = (diff) => diffPathScan(diff).paths
 // </loop-denylist>
 
+// F7: an implementer may report changedFiles as absolute paths inside its worktree
+// (<repo>/.claude/worktrees/<name>/src/a.ts), which the .claude/ rule would escalate. The gate reads
+// them repo-relative: everything up to and including the first '/.claude/worktrees/<name>/' is
+// stripped. A path that BEGINS '.claude/' has no such prefix, so it is kept as is and still
+// escalates, and the paths parsed from the diff are gated unchanged. The verifier still gets the
+// implementer's report exactly as returned.
+const repoRelative = (f) => String(f).replace(/^.*?\/\.claude\/worktrees\/[^/]+\//, '')
+
 // An agent() that throws (token budget spent, harness error) is a FAILED agent: log it and
 // hand the next stage the same null a dead agent returns, so that stage's fail-safe null path
 // runs. Uncaught, pipeline() drops the item to null and it vanishes with no record.
@@ -251,19 +282,23 @@ const outcomes = await pipeline(
   items,
   (item, i) =>
     agent(
-      `Implement the SMALLEST safe fix for this loop work item in your isolated worktree and run the smallest relevant checks (tests/typecheck/lint). Stay in scope; NEVER touch denylist paths (auth, payments, secrets/.env, infra, CI config, migrations, .claude/, CLAUDE.md). Then capture the ACTUAL change with \`git diff --src-prefix=a/ --dst-prefix=b/\` (explicit prefixes: the gate parses only a/ and b/, whatever the git config says) and return it as \`diff\` (the real patch, not a summary), the changed files, and whether the checks passed.\n\n${JSON.stringify(item)}`,
+      `Implement the SMALLEST safe fix for this loop work item in your isolated worktree. Stay in scope; NEVER touch denylist paths (auth, payments, secrets/.env, infra, CI config, migrations, .claude/, CLAUDE.md).\n- Your worktree is a fresh checkout without dependencies. First record \`git rev-parse HEAD\` as \`baseSha\`. Then install with the lockfile: \`pnpm install --frozen-lockfile --prefer-offline\`; in the web env, use the pnpm invocation from .claude/memory/topics/remote-env.md (pnpm 10 vs 11).\n- Edit only inside your worktree, and run typecheck, lint and unit tests there.\n- Never run pnpm dev, pnpm build, pnpm test:e2e or pnpm verify: build rewrites tracked files into your diff, and port 3000 belongs to the user. The Lead runs those after applying.\n- Never commit, push, switch branches, stash or reset, and never stop or kill a process you did not start.\n- Before capturing the diff, run \`git add -N .\` so new files appear in it. Then capture the ACTUAL change with \`git diff --src-prefix=a/ --dst-prefix=b/\` (explicit prefixes: the gate parses only a/ and b/, whatever the git config says) and return it as \`diff\` (the real patch, not a summary). Report changedFiles repo-relative, as the a/ and b/ paths in the diff. In notes, give each check command with its exit code (no | tail) and your worktree root. Set checksPassed to whether those checks passed.\n\n${JSON.stringify(item)}`,
       { label: `impl:${item.id || 'item'}-${i}`, phase: 'Implement', schema: IMPL_SCHEMA, isolation: 'worktree' },
     ).catch(agentFailed(`impl:${item.id || 'item'}-${i}`)),
   (impl, item, i) => {
     const im = impl || {}
-    const base = { id: item.id, changedFiles: im.changedFiles || [], diff: im.diff || '', checksPassed: !!im.checksPassed }
+    // The reported base as `git rev-parse HEAD` prints it (trimmed, lower case). The outcome carries
+    // it and the implementer's notes (its worktree root): the caller's worktree cleanup reads both.
+    const baseSha = String(im.baseSha || '').trim().toLowerCase()
+    const base = { id: item.id, baseSha, changedFiles: im.changedFiles || [], diff: im.diff || '', checksPassed: !!im.checksPassed, notes: im.notes || '' }
+    // Stage gates, in a fixed order: denylist → base-mismatch → agent-failed / no-diff → verifier.
     // Hard denylist gate — independent of the verifier. Check the UNION of the
-    // self-reported changedFiles AND the paths parsed from the real diff (the artifact
-    // the caller applies), so an under-reported file list can't bypass the gate.
+    // self-reported changedFiles (repo-relative, F7) AND the paths parsed from the real diff (the
+    // artifact the caller applies), so an under-reported file list can't bypass the gate.
     // TRACE: a failed hard gate forbids clearance; the defer names the human approval
     // that could lift it (resolvable by a human, never by the loop).
     const scan = diffPathScan(im.diff)
-    const gatedFiles = [...(im.changedFiles || []), ...scan.paths]
+    const gatedFiles = [...(im.changedFiles || []).map(repoRelative), ...scan.paths]
     // Fail closed: a non-empty diff whose paths cannot all be parsed cannot be cleared by the gate.
     const unparsable = String(im.diff || '').trim() && scan.unparsable
     if (unparsable || hitsDenylist(gatedFiles)) {
@@ -274,6 +309,20 @@ const outcomes = await pipeline(
         missing: ['explicit human approval — the change touches a denylisted path'],
         repair: '', qualifier: '', evidenceChecked: [{ kind: 'diff', ref: gatedFiles.join(', ') || '(no paths)' }], counterReasons: [],
         reason: 'changed files or diff paths match the denylist — forced escalation regardless of verdict',
+      }
+    }
+    // Deterministic base check: a live implementer's diff must be based on the Lead's HEAD
+    // (args.headSha), or it may not apply to, or mean the same on, the tree the Lead applies it
+    // to. Defer it unverified (resolvable by a re-dispatch from HEAD). A dead implementer reports
+    // no base: it takes the agent-failed path below. Only a hex base is quoted: `missing` reaches
+    // the plan, and the report is maker-written text.
+    if (impl && baseSha !== headSha) {
+      const based = /^[0-9a-f]{1,64}$/.test(baseSha) ? baseSha : baseSha ? 'a baseSha that is not a commit id' : 'an unreported commit'
+      return {
+        ...base, applied: false, status: 'deferred', verdict: 'defer', preGateVerdict: null,
+        failedGates: ['base-mismatch'], missing: [`a diff based on HEAD ${headSha} (the worktree was based on ${based})`],
+        repair: '', qualifier: '', evidenceChecked: [], counterReasons: [],
+        reason: `the implementer's worktree was based on ${based}, not HEAD ${headSha} — not verified, not applied`,
       }
     }
     // Nothing to verify or apply without the real patch — defer (resolvable by a re-run).
@@ -303,6 +352,9 @@ const outcomes = await pipeline(
       // Fail safe: no verdict / verifier died → defer (not applied). The evidence gate
       // also defers an accept that does not cite the real diff. A dead verifier (threw, or
       // returned nothing) is also marked 'agent-failed': re-dispatch, never wait for evidence.
+      // Only workflow code sets 'agent-failed' and 'base-mismatch', the gates that let the caller
+      // re-dispatch a node with no new evidence. The gate copies a live verifier's own failedGates,
+      // so either one among them is dropped (a live checker cannot forge them).
       const g = applyEvidenceGate(v ? { ...v, claimType: 'practical' } : { claimType: 'practical' })
       // Unattended (L3) only an `accept` is applied; a `qualify` waits for a human to accept
       // its caveat (status 'held'). At L2 a human is watching, so qualify is applied.
@@ -314,7 +366,7 @@ const outcomes = await pipeline(
         status: licensed ? 'applied' : held ? 'held' : g.verdict === 'defer' ? 'deferred' : 'rejected',
         verdict: g.verdict,
         preGateVerdict: (v && v.verdict) || null,
-        failedGates: v ? g.failedGates : [...g.failedGates, 'agent-failed'], missing: g.missing, repair: g.repair, qualifier: g.qualifier,
+        failedGates: v ? g.failedGates.filter((x) => x !== 'agent-failed' && x !== 'base-mismatch') : [...g.failedGates, 'agent-failed'], missing: g.missing, repair: g.repair, qualifier: g.qualifier,
         evidenceChecked: g.evidenceChecked, counterReasons: (v && v.counterReasons) || [],
         reason: (v && v.reason) || 'verifier returned no verdict — deferred, not applied',
       }

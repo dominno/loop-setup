@@ -525,7 +525,8 @@ To adapt them:
   default 30) with important findings, round-robin across lenses, and records any beyond
   it as a `defer` (`counts.capDeferred`) instead of dropping it; `scan-docs` refuses more
   than `args.maxStories` (default 30) stories per call before any agent starts, so pass
-  them in batches; `improve-skills` is uncapped unless you pass `args.maxVerifiers`. With
+  them in batches; `loop-iteration` likewise refuses more than `args.maxItems` (default 5)
+  items per call; `improve-skills` is uncapped unless you pass `args.maxVerifiers`. With
   a `+Nk` token target, the workflows also stop at budget floors (output tokens left)
   instead of failing mid-run: `critic-panel` 80k before Review and 60k before Verify,
   `scan-docs` 60k, `gap-analysis` 40k and 20k before synthesis, `improve-skills` 60k

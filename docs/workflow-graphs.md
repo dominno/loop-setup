@@ -26,11 +26,13 @@ working tree, never run `pnpm dev`, `pnpm test:e2e` or `pnpm verify`, and never 
 kill a server. In a critic round, E2E, axe and bundle results come from the Lead's
 `args.priorEvidence`; a result that is absent is reported as missing evidence.
 `loop-iteration` and `trace-bench` do not carry the block: the implementer works in its
-own worktree, and the loop verifier and the bench arms are measured prompts, so adding
-it there needs a re-bench.
+own worktree under its own rules (no dev, build, E2E or verify; no commit, push, stash or
+reset), and the loop verifier and the bench arms are measured prompts, so adding it there
+needs a re-bench.
 
 **Cost bounds.** Where the agent count is known up front, a workflow refuses an over-size
-batch before any agent starts (`scan-docs`: `args.maxStories`, default 30). A verifier cap
+batch before any agent starts (`scan-docs`: `args.maxStories`, default 30; `loop-iteration`:
+`args.maxItems`, default 5). A verifier cap
 turns the overflow into recorded defers instead of dropping it (`critic-panel`:
 `args.maxVerifiers`, default 30; `improve-skills`: opt-in, uncapped by default). Budget
 floors compare `budget.remaining()` (output tokens left in the turn's shared pool) with a
@@ -221,24 +223,40 @@ flowchart LR
 flowchart LR
   items([ready plan nodes — triaged, denylist-cleared]) --> lvl{▫️ level L2/L3?}
   lvl -- no --> err[▫️ refuse: L1 is report-only]
-  lvl -- yes --> budget{budget floor?}
+  lvl -- yes --> argc{"▫️ args.headSha (40 hex) given?<br/>at most maxItems items (default 5)?"}
+  argc -- no --> aerr[▫️ argument error before any agent:<br/>no records, counts no attempt]
+  argc -- yes --> budget{budget floor?}
   budget -- "under floor" --> esc0[▫️ escalate all]
   budget -- ok --> P
   subgraph P["pipeline — per item, independent"]
-    impl[⚪ implementer<br/>isolated worktree, real git diff] --> dl{▫️ denylist gate<br/>.claude / CLAUDE.md / scripts/trace / auth / secrets…<br/>or unparsable diff paths}
+    impl[⚪ implementer<br/>fresh worktree: deps installed, base reported<br/>real git diff, new files included] --> dl{▫️ denylist gate<br/>.claude / CLAUDE.md / scripts/trace / auth / secrets…<br/>on repo-relative changedFiles + diff paths<br/>or unparsable diff paths}
     dl -- hit --> escd[escalated-denylist<br/>defer: human approval]
-    dl -- clear --> nd{▫️ report + diff returned?}
+    dl -- clear --> bm{"▫️ base check:<br/>reported baseSha = headSha?"}
+    bm -- "no (a live report)" --> dbm[deferred: base-mismatch<br/>unverified, re-dispatch from HEAD]
+    bm -- "yes, or no report" --> nd{▫️ report + diff returned?}
     nd -- "no report: the implementer threw or returned nothing" --> daf[deferred: agent-failed<br/>re-dispatch]
     nd -- "empty diff" --> dfr[deferred: no-diff]
     nd -- yes --> ver[🔵 verifier: typed verdict on the real diff]
     ver --> eg[▫️ evidence gate<br/>practical: accept/qualify need the diff]
-    ver -.->|the verifier threw or returned nothing| vaf[deferred: verdict-missing + agent-failed]
+    ver -.->|the verifier threw or returned nothing| vaf[deferred: verdict-missing + agent-failed<br/>set only by workflow code, never by the verifier]
   end
   P --> allf{"▫️ every implementer failed?<br/>a dead agent, never an empty diff"}
   allf -- no --> out([applied + deferred + held L3-qualify + rejected + escalate<br/>+ traceRecords])
-  allf -- "yes (infra)" --> erri[▫️ error: no records,<br/>caller resets the nodes to ready]
+  allf -- "yes (infra)" --> erri[▫️ error: no records,<br/>caller resets the nodes to ready<br/>and counts one attempt per node]
   esc0 --> out
 ```
+
+> `args.headSha` is the Lead's `git rev-parse HEAD`. Each implementer reports the commit its
+> worktree started from (`baseSha`), and a live report based on another commit is deferred
+> `base-mismatch` before verification: set `worktree.baseRef` to `"head"` so loop worktrees
+> branch from local HEAD. The stage gates run in a fixed order: denylist, base check, then
+> `agent-failed` / `no-diff`, then the verifier. The denylist gate reads `changedFiles`
+> repo-relative (a path inside `.claude/worktrees/<name>/` is no `.claude/` hit; a path that
+> begins `.claude/` still is), while the verifier gets the report exactly as returned. An
+> argument error starts no agent and counts no attempt; the infra `error` counts one per node.
+> Like `agent-failed`, `base-mismatch` is set only by workflow code: both let the Lead
+> re-dispatch a node without new evidence, so the verifier stage drops either one from a
+> live verifier's own `failedGates`.
 
 ## `trace-bench` — measure the checkers (`/bench-checkers`)
 

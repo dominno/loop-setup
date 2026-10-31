@@ -93,8 +93,36 @@ Common recurring loops — each is a `/loop` with its own scope, cadence, and bu
 ## 5. Parallel / file-mutating loops → worktrees
 
 If a loop (or its sub-agents) mutates files in parallel, run the **implementer via
-`Agent` with `isolation: worktree`** so concurrent work can't clobber a shared tree,
-and have the **verifier** run tests in its own isolation before approving.
+`Agent` with `isolation: worktree`** so concurrent work can't clobber a shared tree
+(`loop-iteration` does). The worktree is a fresh checkout without dependencies: the
+implementer records the commit it started from (`git rev-parse HEAD`), installs from the
+lockfile (`pnpm install --frozen-lockfile --prefer-offline`), and edits and runs
+typecheck, lint and unit tests only there. **Implementers never run dev, build or E2E**:
+a build rewrites tracked files into the diff, and the dev server's port belongs to the
+user. The Lead runs those after applying the diff.
+
+- **Base.** The Lead passes `args.headSha` (`git rev-parse HEAD`), and `loop-iteration`
+  defers any item whose worktree started from another commit (`base-mismatch`), before
+  verification. Set `worktree.baseRef` to `"head"` in your Claude Code settings so loop
+  worktrees branch from your local HEAD; without it, the base check defers every item
+  whose base differs (a safe stall: those items are neither verified nor applied).
+- **The verifier is not isolated today.** It reviews the diff in the shared checkout,
+  so it must not apply diffs there; whether it gets its own worktree is an open decision.
+  The Lead applies a licensed diff only after `git apply --check` passes.
+- **Zero-install alternative.** `worktree.symlinkDirectories: ["node_modules"]` links
+  the main checkout's `node_modules` into each worktree, so a worktree starts with
+  dependencies. The trade-offs: every worktree shares one install and its caches, and an
+  item that changes the lockfile runs against stale dependencies. The implementer's
+  `pnpm install` still runs, and through the link it writes into the main checkout's
+  shared install, once per item and concurrently: an item that changes dependencies and
+  reinstalls rewrites your own `node_modules`.
+- **Cleanup.** The built-in sweep keeps any worktree with changes, so implementer
+  worktrees outlive their run. `/loop` removes an applied item's worktree after its
+  `CLEAR`, and only after validating it (listed by `git worktree list --porcelain`, under
+  `.claude/worktrees/`, nothing in it beyond the applied patch); it keeps deferred, held
+  and escalated ones. To clean up by hand: `git worktree list`, then
+  `git worktree remove --force <path>` for each one you no longer need, then
+  `git worktree prune`.
 
 ## 6. Red flags — stop and fix before raising a level
 
