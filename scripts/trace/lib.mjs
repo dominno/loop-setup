@@ -900,6 +900,13 @@ export function scoreBench(manifest, results, thresholds = { invariance: 0.8 }) 
   // Validity: a run whose agent returned no verdict measured nothing — scoring it as a
   // hold would let a dead checker look perfect on the bad fixtures.
   const runs = clean.filter((r) => !r.noVerdict);
+  // What an arm actually measured: the manifest fixtures among its scored runs, beside the
+  // manifest's counts (`fixtures`) — a run over part of the manifest (bench-args --only) must not
+  // read as a full bench (l3Check needs the verifier arm over every fixture).
+  const measuredOf = (rs) => {
+    const ids = new Set(rs.map((r) => r.fixtureId));
+    return { bad: bad.filter((id) => ids.has(id)).length, good: good.filter((id) => ids.has(id)).length };
+  };
   const out = {
     fixtures: { bad: bad.length, good: good.length },
     contaminatedRuns: all.filter((r) => r.contaminated).length,
@@ -962,6 +969,7 @@ export function scoreBench(manifest, results, thresholds = { invariance: 0.8 }) 
     }
     out.arms.verifier = {
       repeats: repeats.length,
+      measured: measuredOf(ver),
       wrongAcceptRate: avg("wrongAcceptRate"),
       falseHoldRate: avg("falseHoldRate"),
       deferRate: avg("deferRate"),
@@ -1006,7 +1014,7 @@ export function scoreBench(manifest, results, thresholds = { invariance: 0.8 }) 
   const single = runs.filter((r) => r.arm === "single-pass" && fixtures.has(r.fixtureId));
   if (single.length) {
     const blocks = new Map(single.map((r) => [r.fixtureId, !!r.block]));
-    out.arms.singlePass = { agents: single.length, ...detection(blocks) };
+    out.arms.singlePass = { agents: single.length, measured: measuredOf(single), ...detection(blocks) };
   }
   const panel = runs.filter((r) => r.arm === "panel" && fixtures.has(r.fixtureId));
   if (panel.length) {
@@ -1025,6 +1033,7 @@ export function scoreBench(manifest, results, thresholds = { invariance: 0.8 }) 
     out.arms.panel = {
       agents: panel.length,
       critics: critics.length,
+      measured: measuredOf(panel),
       anyBlock: detection(anyBlock),
       majority: detection(majority),
       meanPairwiseErrorCorrelation: rho,
@@ -1537,33 +1546,40 @@ export function benchArgs(manifest, { arms, repeat, critics, only, runId }) {
 }
 
 /**
- * A TRACE-lite record draft for a scored bench run (a measured claim about our checkers).
- * `verifierHash` (verifierBlockHash of the production verifier, read by the caller) names the
- * <loop-verifier> block the run measured; without it the record names none and never passes l3Check.
+ * A TRACE-lite record draft for a scored bench run (a measured claim about our checkers). The
+ * claim states the fixtures each scored arm measured next to the manifest's counts, and the
+ * measurement item carries both (`fixtures`, `arms.<arm>.measured`), so a run over part of the
+ * manifest never reads as a full bench (l3Check reads them). `verifierHash` (verifierBlockHash of
+ * the production verifier, read by the caller) names the <loop-verifier> block the run measured —
+ * only when the score has a verifier arm: a run without one measured no verifier. Without a named
+ * block the record never passes l3Check.
  */
 export function benchRecordDraft(score, { resultsRef, priorRecordId, runIds = [], verifierHash }) {
   const v = score.arms.verifier || {};
   const s = score.arms.singlePass || {};
   const p = score.arms.panel || {};
   const f = (x) => (x == null ? "n/a" : Number(x).toFixed(2));
+  // "<measured>/<manifest> bad and <measured>/<manifest> good fixtures"; an arm that did not run measured none.
+  const of = (m) => `${m?.bad ?? 0}/${score.fixtures.bad} bad and ${m?.good ?? 0}/${score.fixtures.good} good fixtures`;
   const parts = [
-    `verifier WrongAcceptRate=${f(v.wrongAcceptRate)} FalseHoldRate=${f(v.falseHoldRate)} invariance=${f(v.proceduralInvariance)}`,
-    s.recall != null ? `single-pass recall=${f(s.recall)} false-block=${f(s.falseBlockRate)}` : null,
-    p.anyBlock ? `panel(any) recall=${f(p.anyBlock.recall)} n_eff=${f(p.effectivePanelSize)}` : null,
+    `verifier measured ${of(v.measured)}: WrongAcceptRate=${f(v.wrongAcceptRate)} FalseHoldRate=${f(v.falseHoldRate)} invariance=${f(v.proceduralInvariance)}`,
+    score.arms.singlePass ? `single-pass measured ${of(s.measured)}: recall=${f(s.recall)} false-block=${f(s.falseBlockRate)}` : null,
+    p.anyBlock ? `panel(any) measured ${of(p.measured)}: recall=${f(p.anyBlock.recall)} n_eff=${f(p.effectivePanelSize)}` : null,
   ].filter(Boolean);
   return {
     writer_id: "trace-bench/score",
     claim_id: "bench:trace-bench-lite",
-    claim_text: `TRACE-Bench-lite (${score.fixtures.bad} bad / ${score.fixtures.good} good fixtures): ${parts.join("; ")}`,
+    claim_text: `TRACE-Bench-lite (manifest: ${score.fixtures.bad} bad / ${score.fixtures.good} good fixtures): ${parts.join("; ")}`,
     claim_type: "measured",
     subject: ".claude/trace/bench/fixtures.json",
     // Counts only — never fixture ids or defect text: the record store is in the tree the
     // next bench run's agents can grep (contamination rule above).
     // The run ids are recorded so a later --record of the SAME run (e.g. reused args) is refused.
     evidence: [
-      { kind: "measurement", ref: `pnpm trace bench-score ${resultsRef}${runIds.length ? ` [runs ${runIds.join(",")}]` : ""}`, result: JSON.stringify({ arms: score.arms, externalJudgeGap: Object.fromEntries(Object.entries(score.externalJudgeGap || {}).map(([k, ids]) => [k, ids.length])), contaminatedRuns: score.contaminatedRuns }).slice(0, 4000) },
-      // L3 freshness: the verifier this run measured, so a later edit to it shows (l3Check).
-      ...(verifierHash ? [{ kind: "file_line", ref: VERIFIER_FILE, result: `<loop-verifier> sha256=${verifierHash}` }] : []),
+      { kind: "measurement", ref: `pnpm trace bench-score ${resultsRef}${runIds.length ? ` [runs ${runIds.join(",")}]` : ""}`, result: JSON.stringify({ fixtures: score.fixtures, arms: score.arms, externalJudgeGap: Object.fromEntries(Object.entries(score.externalJudgeGap || {}).map(([k, ids]) => [k, ids.length])), contaminatedRuns: score.contaminatedRuns }).slice(0, 4000) },
+      // L3 freshness: the verifier this run measured, so a later edit to it shows (l3Check) — only
+      // when it had a verifier arm, else the record would name a verifier it never measured.
+      ...(verifierHash && score.arms.verifier ? [{ kind: "file_line", ref: VERIFIER_FILE, result: `<loop-verifier> sha256=${verifierHash}` }] : []),
     ],
     failed_gates: score.flags.map((x) => x.split(":")[0]),
     missing: [],
@@ -1597,8 +1613,10 @@ export function verifierBlockHash(source) {
 /**
  * The L3 gate over a replayed store: the LATEST bench:trace-bench-lite record, licensing or not
  * (an older accept never stands in for a newer qualify), is an accept, from a verifier arm run at
- * repeat ≥ 2, with no F0, F3 or F4 in its failed_gates, and names the <loop-verifier> block it
- * measured by a hash equal to `currentHash` (the current block's; null when it cannot be read).
+ * repeat ≥ 2 over the full manifest (the arm's measured bad/good counts equal the manifest's, both
+ * read from the record's measurement item), with no F0, F3 or F4 in its failed_gates, and names the
+ * <loop-verifier> block it measured by a hash equal to `currentHash` (the current block's; null when
+ * it cannot be read).
  * Returns every unmet condition; ok only when there is none. Fail closed: a store that does not
  * replay, a missing record and an unreadable field are each an unmet condition, never a pass.
  */
@@ -1622,8 +1640,20 @@ export function l3Check(state, currentHash) {
   };
   const metrics = rec.evidence.filter((e) => e.kind === "measurement").map((e) => parse(e.result)).find((m) => m && m.arms);
   const repeats = metrics?.arms?.verifier?.repeats;
-  if (!Number.isInteger(repeats)) unmet.push("the record does not show the verifier arm's repeat count — L3 needs a bench of the verifier arm at repeat ≥ 2");
+  if (!Number.isInteger(repeats)) unmet.push("the record does not show the verifier arm's repeat count — L3 needs a bench of the verifier arm over the full manifest at repeat ≥ 2");
   else if (repeats < 2) unmet.push(`the verifier arm ran ${repeats} repeat(s) — needs repeat ≥ 2 (F3, procedural invariance, cannot fire on fewer)`);
+  // The full manifest: a verifier arm run over part of it (bench-args --only) never saw the rest —
+  // possibly no bad diff at all. With no verifier arm the repeat-count condition above already fails.
+  if (metrics?.arms?.verifier) {
+    const total = metrics.fixtures;
+    const seen = metrics.arms.verifier.measured;
+    const count = (n, min) => Number.isInteger(n) && n >= min; // a manifest holds ≥ 1 bad and ≥ 1 good fixture
+    if (!(count(total?.bad, 1) && count(total?.good, 1) && count(seen?.bad, 0) && count(seen?.good, 0))) {
+      unmet.push("the record does not show the manifest's fixture counts and the ones its verifier arm measured (a record scored before full-manifest counts carries none) — L3 needs a verifier bench of every fixture: re-bench the full manifest with /bench-checkers");
+    } else if (seen.bad !== total.bad || seen.good !== total.good) {
+      unmet.push(`the verifier arm measured ${seen.bad}/${total.bad} bad and ${seen.good}/${total.good} good manifest fixtures — L3 needs every fixture (a run over part of the manifest, e.g. bench-args --only, never meets it): re-bench the full manifest with /bench-checkers`);
+    }
+  }
   const blocking = rec.failed_gates.filter((g) => /^F[034](?![0-9])/.test(g));
   if (blocking.length) unmet.push(`its failed_gates contain ${blocking.join(", ")} — any F0, F3 or F4 keeps loops at ≤ L2`);
   const named = rec.evidence.find((e) => e.kind === "file_line" && e.ref === VERIFIER_FILE && VERIFIER_HASH.test(String(e.result || "")));

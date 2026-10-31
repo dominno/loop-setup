@@ -87,8 +87,9 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
                                        comments, committed facts, quarantine rows, page sizes — JSON {ok, errors,
                                        warnings}; exit 1 on an error, 2 when the store does not replay
   pnpm trace l3-check [--json]         the L3 measured-checker item of .claude/loop-checklist.md, computed: the latest
-                                       bench:trace-bench-lite record is accept, from repeat ≥ 2, with no F0, F3 or F4
-                                       in its failed_gates, and names the current <loop-verifier> block by its sha256 —
+                                       bench:trace-bench-lite record is accept, from a verifier arm run at repeat ≥ 2
+                                       over every manifest fixture (no --only subset), with no F0, F3 or F4 in its
+                                       failed_gates, and names the current <loop-verifier> block by its sha256 —
                                        exit 0 when all hold, else exit 1 listing every unmet condition
   pnpm trace reaudit [--act]           licensing records whose file evidence changed since their commit; one whose
                                        commit the repo no longer has (squashed away) is listed apart, as unreachable
@@ -98,8 +99,10 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
                                        print the args JSON for .claude/workflows/trace-bench.js (no ground truth)
   pnpm trace bench-score <results.json>... --transcripts <dir> [--record]
                                        score trace-bench run(s) (runs concatenated); agent transcripts are scanned for
-                                       leaked ground truth (contaminated runs excluded, F0); --record writes the record,
-                                       naming the <loop-verifier> block it measured by its sha256 (read when you score)
+                                       leaked ground truth (contaminated runs excluded, F0); --record writes the record:
+                                       the fixtures each arm measured next to the manifest's counts, and — for a run
+                                       with a verifier arm — the <loop-verifier> block it measured by its sha256 (read
+                                       when you score)
   pnpm trace bench-unpack <dir>        decode the fixture bundle into <dir> (outside the repo!) for editing
   pnpm trace bench-pack <dir>          re-encode <dir>/fixtures.json (patches inline) into the bundle
   pnpm trace bench-judge [--only ids] [--skip-e2e] [--recover]   verify each fixture's judge.catches by running its
@@ -459,7 +462,7 @@ async function main() {
     const res = l3Check(state, currentVerifierHash());
     if (flags.json) out({ ...res, store: storePath }, true);
     else if (res.ok) {
-      out(`l3-check: met — ${res.record_id} is accept from ${res.repeats} repeat(s), with no F0, F3 or F4, and measured the current <loop-verifier> block (sha256 ${res.currentHash.slice(0, 12)}…)`);
+      out(`l3-check: met — ${res.record_id} is accept from ${res.repeats} repeat(s) over the full manifest, with no F0, F3 or F4, and measured the current <loop-verifier> block (sha256 ${res.currentHash.slice(0, 12)}…)`);
     } else {
       out(`l3-check: NOT met — ${res.unmet.length} unmet condition(s); latest bench:trace-bench-lite record: ${res.record_id || "none"}\n${res.unmet.map((u) => `  - ${u}`).join("\n")}`);
     }
@@ -655,7 +658,7 @@ async function main() {
     );
     if (flags.record && runIds.some((id) => recordedRunIds.has(id))) {
       out(score, true);
-      out("--record refused: this run id is already recorded — run `pnpm trace bench-args` afresh for every Workflow invocation (F0)");
+      out("--record refused: this run id is already recorded — run `pnpm trace bench-args` afresh for every new run; only a resume of a cut-off run keeps its args file (F0)");
       return 1;
     }
     if (flags.record && score.unattributedLeaks) {

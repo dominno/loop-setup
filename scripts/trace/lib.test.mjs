@@ -880,13 +880,15 @@ describe("L3 freshness: bench records name the verifier they measured", () => {
 
 describe("l3Check: the L3 measured-checker item, computed from the LATEST bench record", () => {
   const HASH = "b".repeat(64);
+  // The verifier arm measured the whole (2 bad / 2 good) manifest, as a passing record must show.
+  const FULL = { bad: 2, good: 2 };
   const bench = ({ status = "accept", repeats = 2, gates = ["F2 (informational)"], hash = HASH, ...over } = {}) => ({
     writer_id: "trace-bench/score",
     claim_id: "bench:trace-bench-lite",
     claim_text: `TRACE-Bench-lite (2 bad / 2 good fixtures): ${status} at ${repeats} repeat(s), flags ${gates.join(", ") || "none"}`,
     claim_type: "measured",
     evidence: [
-      { kind: "measurement", ref: "pnpm trace bench-score r.json [runs 0a1b2c3d]", result: JSON.stringify({ arms: { verifier: { repeats } } }) },
+      { kind: "measurement", ref: "pnpm trace bench-score r.json [runs 0a1b2c3d]", result: JSON.stringify({ fixtures: FULL, arms: { verifier: { repeats, measured: FULL } } }) },
       ...(hash ? [{ kind: "file_line", ref: VERIFIER_FILE, result: `<loop-verifier> sha256=${hash}` }] : []),
     ],
     failed_gates: gates,
@@ -950,5 +952,103 @@ describe("l3Check: the L3 measured-checker item, computed from the LATEST bench 
     const broken = l3Check(replay(parseLines("{not json\n", "records.jsonl"), schema, POLICY), HASH);
     expect(broken.ok).toBe(false);
     expect(broken.unmet.some((u) => /does not replay/.test(u))).toBe(true);
+  });
+});
+
+// L3 needs a full verifier bench: a run over part of the manifest (bench-args --only) measured less
+// than the manifest counts say, so each scored arm carries the fixtures it measured, the record
+// states both, and l3Check needs the verifier arm over every fixture. A run without a verifier arm
+// names no verifier. Synthetic manifests and runs only — never real fixture ids or patches.
+describe("L3 needs a full verifier bench: measured fixture counts", () => {
+  const HASH = "e".repeat(64);
+  const manifest = { fixtures: [{ id: "B1", kind: "bad" }, { id: "B2", kind: "bad" }, { id: "G1", kind: "good" }, { id: "G2", kind: "good" }] };
+  // Verifier runs on `ids` at repeats 0 and 1: bad diffs held, good ones licensed — no F0, F3 or F4.
+  const verifierRuns = (ids) =>
+    [0, 1].flatMap((repeat) =>
+      ids.map((id) => {
+        const verdict = manifest.fixtures.find((f) => f.id === id).kind === "bad" ? "reject" : "accept";
+        return { arm: "verifier", repeat, fixtureId: id, verdict, preGateVerdict: verdict };
+      }),
+    );
+  const scored = (ids) => scoreBench(manifest, { runs: verifierRuns(ids), expectedRuns: ids.length * 2 });
+  const l3 = (draft) => {
+    expect(writeRecords([draft], ctx())[0].stored).toBe(true);
+    return l3Check(replay(loadEntries(store), schema, POLICY), HASH);
+  };
+
+  it("scoreBench: each scored arm carries the manifest fixtures it measured — distinct ids among its scored runs", () => {
+    const runs = [
+      ...verifierRuns(["G1", "G2"]),
+      { arm: "verifier", repeat: 0, fixtureId: "B1", verdict: "defer", noVerdict: true }, // excluded: it measured nothing
+      { arm: "verifier", repeat: 0, fixtureId: "X9", verdict: "reject" }, // not a manifest fixture
+      { arm: "single-pass", fixtureId: "B1", block: true },
+      { arm: "single-pass", fixtureId: "G1", block: false },
+      { arm: "panel", critic: "a", fixtureId: "B1", block: true },
+      { arm: "panel", critic: "a", fixtureId: "B2", block: false },
+      { arm: "panel", critic: "b", fixtureId: "B1", block: true },
+    ];
+    const s = scoreBench(manifest, { runs });
+    expect(s.fixtures).toEqual({ bad: 2, good: 2 });
+    expect(s.arms.verifier.measured).toEqual({ bad: 0, good: 2 });
+    expect(s.arms.singlePass.measured).toEqual({ bad: 1, good: 1 });
+    expect(s.arms.panel.measured).toEqual({ bad: 2, good: 0 });
+  });
+
+  it.each([
+    ["only the good fixtures (bench-args --only)", ["G1", "G2"], /measured 0\/2 bad and 2\/2 good manifest fixtures/],
+    ["all but one bad fixture", ["B1", "G1", "G2"], /measured 1\/2 bad and 2\/2 good manifest fixtures/],
+    ["all but one good fixture", ["B1", "B2", "G1"], /measured 2\/2 bad and 1\/2 good manifest fixtures/],
+  ])("l3Check is unmet when the verifier arm benched %s at repeat 2 with no F0, F3 or F4 — exactly the full-manifest condition", (_what, ids, re) => {
+    const s = scored(ids);
+    expect(s.arms.verifier.repeats).toBe(2);
+    expect(s.flags.filter((f) => /^F[034]/.test(f))).toEqual([]);
+    const res = l3(benchRecordDraft(s, { resultsRef: "r.json", runIds: ["0a1b2c3d"], verifierHash: HASH }));
+    expect(res.ok).toBe(false);
+    expect(res.unmet).toHaveLength(1);
+    expect(res.unmet[0]).toMatch(re);
+    expect(res.unmet[0]).toMatch(/re-bench the full manifest/);
+  });
+
+  it("the same bench with every manifest fixture measured meets l3Check", () => {
+    const s = scored(["B1", "B2", "G1", "G2"]);
+    expect(s.arms.verifier.measured).toEqual({ bad: 2, good: 2 });
+    const res = l3(benchRecordDraft(s, { resultsRef: "r.json", runIds: ["0a1b2c3d"], verifierHash: HASH }));
+    expect(res).toMatchObject({ ok: true, unmet: [], verdict: "accept", repeats: 2, recordHash: HASH });
+  });
+
+  it.each([
+    ["a record scored before the counts (no fixtures, no measured)", { arms: { verifier: { repeats: 2 } } }],
+    ["manifest counts without the verifier arm's measured counts", { fixtures: { bad: 2, good: 2 }, arms: { verifier: { repeats: 2 } } }],
+    ["measured counts without the manifest's", { arms: { verifier: { repeats: 2, measured: { bad: 2, good: 2 } } } }],
+    ["counts that are not integers", { fixtures: { bad: "2", good: 2 }, arms: { verifier: { repeats: 2, measured: { bad: "2", good: 2 } } } }],
+    ["a manifest with no bad fixture (a verifier that never saw a bad diff)", { fixtures: { bad: 0, good: 2 }, arms: { verifier: { repeats: 2, measured: { bad: 0, good: 2 } } } }],
+  ])("l3Check fails closed on %s, saying to re-bench the full manifest", (_what, metrics) => {
+    const draft = benchRecordDraft(scored(["B1", "B2", "G1", "G2"]), { resultsRef: "r.json", runIds: ["0a1b2c3d"], verifierHash: HASH });
+    draft.evidence = draft.evidence.map((e) => (e.kind === "measurement" ? { ...e, result: JSON.stringify(metrics) } : e));
+    const res = l3(draft);
+    expect(res.ok).toBe(false);
+    expect(res.unmet).toHaveLength(1);
+    expect(res.unmet[0]).toMatch(/re-bench the full manifest/);
+  });
+
+  it("benchRecordDraft names a <loop-verifier> block only when the score has a verifier arm, and states each arm's measured counts next to the manifest's", () => {
+    const named = (rec) => rec.evidence.some((e) => e.kind === "file_line" && e.ref === VERIFIER_FILE);
+    // Single-pass only: no verifier was measured, so the hash it is handed names none.
+    const single = scoreBench(manifest, { runs: manifest.fixtures.map((f) => ({ arm: "single-pass", fixtureId: f.id, block: f.kind === "bad" })) });
+    expect(single.arms.verifier).toBeUndefined();
+    const noVerifier = benchRecordDraft(single, { resultsRef: "r.json", verifierHash: HASH });
+    expect(named(noVerifier)).toBe(false);
+    expect(noVerifier.evidence.map((e) => e.kind)).toEqual(["measurement"]);
+    expect(noVerifier.claim_text).toMatch(/manifest: 2 bad \/ 2 good fixtures/);
+    expect(noVerifier.claim_text).toMatch(/verifier measured 0\/2 bad and 0\/2 good fixtures/);
+    expect(noVerifier.claim_text).toMatch(/single-pass measured 2\/2 bad and 2\/2 good fixtures/);
+    // With a verifier arm (over part of the manifest): the hash is named, and the counts show the gap.
+    const partial = benchRecordDraft(scored(["G1", "G2"]), { resultsRef: "r.json", verifierHash: HASH });
+    expect(partial.evidence).toContainEqual({ kind: "file_line", ref: VERIFIER_FILE, result: `<loop-verifier> sha256=${HASH}` });
+    expect(partial.claim_text).toMatch(/verifier measured 0\/2 bad and 2\/2 good fixtures/);
+    // The measurement item carries the manifest counts beside the arms (what l3Check reads).
+    const metrics = JSON.parse(partial.evidence.find((e) => e.kind === "measurement").result);
+    expect(metrics.fixtures).toEqual({ bad: 2, good: 2 });
+    expect(metrics.arms.verifier.measured).toEqual({ bad: 0, good: 2 });
   });
 });

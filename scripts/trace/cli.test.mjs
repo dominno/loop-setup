@@ -29,17 +29,18 @@ const draft = (over = {}) =>
     ...over,
   });
 // The sha256 of the production <loop-verifier> block (marker lines included), computed here
-// independently of lib.mjs, and a bench record draft that names it (override any field).
+// independently of lib.mjs, and a bench record draft that names it (override any field). By
+// default its verifier arm measured the whole (2 bad / 2 good) manifest.
 const verifierSha = (text) => createHash("sha256").update(/\/\/ <loop-verifier>\n[\s\S]*?\/\/ <\/loop-verifier>\n/.exec(text)[0]).digest("hex");
 const CURRENT_VERIFIER = verifierSha(readFileSync(join(ROOT, ".claude/workflows/loop-iteration.js"), "utf8"));
-const benchDraft = ({ status = "accept", repeats = 2, gates = ["F2 (informational)"], hash = CURRENT_VERIFIER } = {}) =>
+const benchDraft = ({ status = "accept", repeats = 2, gates = ["F2 (informational)"], hash = CURRENT_VERIFIER, measured = { bad: 2, good: 2 } } = {}) =>
   JSON.stringify({
     writer_id: "trace-bench/score",
     claim_id: "bench:trace-bench-lite",
     claim_text: `TRACE-Bench-lite (2 bad / 2 good fixtures): ${status} at ${repeats} repeat(s)`,
     claim_type: "measured",
     evidence: [
-      { kind: "measurement", ref: "pnpm trace bench-score runs.json [runs 0a1b2c3d]", result: JSON.stringify({ arms: { verifier: { repeats } } }) },
+      { kind: "measurement", ref: "pnpm trace bench-score runs.json [runs 0a1b2c3d]", result: JSON.stringify({ fixtures: { bad: 2, good: 2 }, arms: { verifier: { repeats, measured } } }) },
       { kind: "file_line", ref: ".claude/workflows/loop-iteration.js", result: `<loop-verifier> sha256=${hash}` },
     ],
     failed_gates: gates,
@@ -668,10 +669,10 @@ describe("round-3 CLI fixes", () => {
 
   describe("bench-score --record fails closed", () => {
     const RUN = "0a1b2c3d";
-    const setup = (transcripts, { runId = RUN, agents, repeats = 1 } = {}) => {
+    const setup = (transcripts, { runId = RUN, agents, repeats = 1, only = () => true } = {}) => {
       const m = readBench();
       const runs = join(dir, "runs.json");
-      const verifierRuns = m.fixtures.flatMap((f) => Array.from({ length: repeats }, (_, repeat) => ({ arm: "verifier", repeat, fixtureId: opaqueFixtureId(f.id), verdict: "defer", failedGates: [], missing: ["x"] })));
+      const verifierRuns = m.fixtures.filter(only).flatMap((f) => Array.from({ length: repeats }, (_, repeat) => ({ arm: "verifier", repeat, fixtureId: opaqueFixtureId(f.id), verdict: "defer", failedGates: [], missing: ["x"] })));
       writeFileSync(runs, JSON.stringify({ ...(runId ? { runId } : {}), ...(agents != null ? { agents } : {}), runs: verifierRuns }));
       const tdir = join(dir, "transcripts");
       mkdirSync(tdir);
@@ -751,6 +752,21 @@ describe("round-3 CLI fixes", () => {
       expect(out.status).toBe(0);
       expect(JSON.parse(out.stdout)).toMatchObject({ ok: true, unmet: [], verdict: "accept", repeats: 2, recordHash: CURRENT_VERIFIER, currentHash: CURRENT_VERIFIER });
     });
+    it("a clean run over part of the manifest (the good fixtures only, repeat 2) is recorded with the counts it measured, and l3-check exits 1 on the full-manifest condition alone", () => {
+      const good = (f) => f.kind === "good";
+      expect(setup((m) => covering({ fixtures: m.fixtures.filter(good) }, RUN, 2), { repeats: 2, only: good })().status).toBe(0);
+      const rec = JSON.parse(readFileSync(store, "utf8").trim().split("\n").at(-1));
+      expect(rec.final_status).toBe("accept");
+      const metrics = JSON.parse(rec.evidence.find((e) => e.kind === "measurement").result);
+      const all = readBench().fixtures;
+      const counts = { bad: all.filter((f) => !good(f)).length, good: all.filter(good).length };
+      expect(metrics.fixtures).toEqual(counts);
+      expect(metrics.arms.verifier.measured).toEqual({ bad: 0, good: counts.good });
+      expect(namesCurrentVerifier()).toBe(true);
+      const out = trace(["l3-check", "--json"]);
+      expect(out.status).toBe(1);
+      expect(JSON.parse(out.stdout).unmet).toEqual([expect.stringMatching(new RegExp(`measured 0/${counts.bad} bad and ${counts.good}/${counts.good} good manifest fixtures`))]);
+    });
     it("refuses to record when the results path itself carries ground truth (the evidence ref is screened)", () => {
       const m = readBench();
       const named = join(dir, `${m.fixtures[0].id}.json`);
@@ -781,6 +797,7 @@ describe("l3-check (CLI process)", () => {
     ["a qualify", { status: "qualify" }, /qualify, not accept/],
     ["a single repeat", { repeats: 1 }, /ran 1 repeat\(s\)/],
     ["an F3", { gates: ["F2 (informational)", "F3 instability"] }, /F3 instability/],
+    ["a verifier bench of part of the manifest", { measured: { bad: 1, good: 2 } }, /measured 1\/2 bad and 2\/2 good manifest fixtures/],
   ])("exits 1 on %s, listing exactly that unmet condition", (_what, over, re) => {
     expect(trace(["write", "-"], benchDraft(over)).status).toBe(0);
     const json = trace(["l3-check", "--json"]);
