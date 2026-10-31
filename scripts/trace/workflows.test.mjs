@@ -1052,6 +1052,23 @@ describe("cost bounds: critic-panel verifier cap (args.maxVerifiers, default 30)
       expect(calls.filter(VERIFY), String(maxVerifiers)).toHaveLength(2);
     }
   });
+
+  it("a reused BLOCKER takes no slot either: with maxVerifiers 1 the one fresh important finding gets the only skeptic", async () => {
+    // Only fresh blockers count against the cap. Counting the reused one too would leave no slot
+    // and cap-defer the important finding.
+    const prior = { record_id: "TR-aaaaaaaaaaaa", claim_id: "critic:security:input-has-no-accessible-name", claim_text: "Input has no accessible name", claim_type: "factual", severity: "blocker", final_status: "accept", missing: [], reason: "verified earlier", provenance: { tree: TREE } };
+    const { result, calls } = await runWorkflow("critic-panel.js", { ...code, maxVerifiers: 1, priorRecords: [prior], treeId: TREE }, (label) =>
+      label.startsWith("critic:")
+        ? onlySecurity([finding({ revisits: prior.record_id, revisitReason: "still-present" }), finding({ severity: "important", title: "Token logged" })])(label)
+        : verdict(),
+    );
+    expect(calls.filter(VERIFY).map((c) => c.label)).toEqual(["verify:security:1"]); // the important finding; the blocker is reused
+    expect(result.reuseActions).toEqual([expect.objectContaining({ record_id: prior.record_id, action: "REUSE" })]);
+    expect(result.counts.capDeferred).toBe(0);
+    expect(result.deferred).toEqual([]);
+    expect(result.confirmed.map((f) => [f.severity, f.title])).toEqual([["blocker", "Input has no accessible name"], ["important", "Token logged"]]);
+    expectWritable(result.traceRecords);
+  });
 });
 
 describe("cost bounds: improve-skills verifier cap (opt-in: uncapped unless args.maxVerifiers is set)", () => {
@@ -1079,6 +1096,30 @@ describe("cost bounds: improve-skills verifier cap (opt-in: uncapped unless args
     expect(result.counts.capDeferred).toBe(4);
     expect(result.deferred.map((f) => f.title).sort()).toEqual(["c2", "c3", "r2", "r3"]);
     for (const f of result.deferred) expect(f).toMatchObject({ verdict: "defer", editSafe: false, failedGates: ["not-verified:verifier-cap"], missing: [CAP_MISSING(3)] });
+    expect(result.traceRecords).toHaveLength(7);
+    expectWritable(result.traceRecords);
+  });
+
+  it("the default stays uncapped, not critic-panel's 30: 31 important findings get 31 skeptics and none is cap-deferred", async () => {
+    // The user's decision: a full /improve-skills pass verifies every important finding unless the
+    // caller passes args.maxVerifiers. A default of 30 would cap-defer the 31st.
+    const many = Array.from({ length: 31 }, (_, k) => mf("important", `i${k + 1}`));
+    const { result, calls } = await runWorkflow("improve-skills.js", { targets: ["CLAUDE.md"] }, (label) =>
+      label.startsWith("meta:") ? { findings: label.startsWith("meta:clarity-") ? many : [] } : safe,
+    );
+    expect(calls.filter(VERIFY)).toHaveLength(31);
+    expect(result.counts.capDeferred).toBe(0);
+    expect(result.deferred).toEqual([]);
+    expect(result.applyReady).toHaveLength(31);
+  });
+
+  it("args.maxVerifiers 0 is a cap, not 'unset': only the blocker gets a skeptic, and every important finding is a recorded cap defer", async () => {
+    const { result, calls } = await runWorkflow("improve-skills.js", { targets: ["CLAUDE.md"], maxVerifiers: 0 }, reply);
+    expect(calls.filter(VERIFY).map((c) => c.label)).toEqual(["verify:routing:3"]); // r0, the only blocker
+    expect(result.applyReady.map((f) => f.title)).toEqual(["r0"]);
+    expect(result.counts.capDeferred).toBe(6);
+    expect(result.deferred.map((f) => f.title).sort()).toEqual(["c1", "c2", "c3", "r1", "r2", "r3"]);
+    for (const f of result.deferred) expect(f).toMatchObject({ severity: "important", verdict: "defer", editSafe: false, failedGates: ["not-verified:verifier-cap"], missing: [CAP_MISSING(0)] });
     expect(result.traceRecords).toHaveLength(7);
     expectWritable(result.traceRecords);
   });
@@ -1183,6 +1224,56 @@ describe("cost bounds: budget floors (only with a '+Nk' token target)", () => {
     expect(result.missing).toEqual([expect.stringContaining("synthesis skipped: token budget floor")]);
     const enough = draining(100_000, 30_000);
     expect((await runWorkflow("gap-analysis.js", { scope: "mvp" }, enough.tap(reply), enough.budget)).result.recommendedOrder).toEqual([{ next: "x", why: "y" }]);
+  });
+});
+
+// A floor fires only with a '+Nk' token target. Without one, budget.total is null and remaining()
+// can read anything (0 here), so every floor must check budget.total first. One test per floor:
+// each fails if that floor drops its budget.total guard.
+describe("cost bounds: with no token target no floor fires, even at remaining() 0", () => {
+  const NO_TARGET = { total: null, spent: () => 0, remaining: () => 0 };
+  const DIMENSION_KEYS = ["docs-not-impl", "impl-not-docs", "impl-not-unit", "impl-not-e2e", "e2e-missing-edges", "ux-design", "ambiguous"];
+  const gapReply = (label) => (label.startsWith("gap:") ? { gaps: [{ item: label, detail: "src/a.ts:1", priority: "high" }] } : { order: [{ next: "x", why: "y" }] });
+
+  it("critic-panel verify floor: every fresh blocker and important finding still gets its skeptic", async () => {
+    const reply = (label) => (label.startsWith("critic:") ? onlySecurity([finding({ title: "Token in URL" }), finding({ severity: "important", title: "Token logged" })])(label) : verdict());
+    const { result, calls } = await runWorkflow("critic-panel.js", { focus: "x", uiInScope: false, reviewMode: "panel" }, reply, NO_TARGET);
+    expect(calls.filter(VERIFY).map((c) => c.label)).toEqual(["verify:security:0", "verify:security:1"]);
+    expect(result.budgetStopped).toBeUndefined();
+    expect(result.deferred).toEqual([]);
+    expect(result.confirmed.map((f) => f.title)).toEqual(["Token in URL", "Token logged"]);
+  });
+
+  it("scan-docs start floor: the story's evidence agent and status verifier run", async () => {
+    const reply = (label) =>
+      label.startsWith("evidence:")
+        ? { implementationFiles: [], unitTests: "Missing", e2eTests: "Missing", proposedStatus: "Not started", notes: "" }
+        : { finalStatus: "Not started", justification: "j", missing: [], evidenceChecked: [{ kind: "file_line", ref: "src/a.ts:1" }] };
+    const { result, calls } = await runWorkflow("scan-docs.js", { stories: [{ id: "US-001", title: "Greeting", source: "docs/prd.md" }] }, reply, NO_TARGET);
+    expect(calls.map((c) => c.label.split(":")[0])).toEqual(["evidence", "verify"]);
+    expect(result.error).toBeUndefined();
+    expect(result.budgetStopped).toBeUndefined();
+    expect(result.count).toBe(1);
+  });
+
+  it("gap-analysis start floor: every finder runs; with a target, below 40k none starts and failedDimensions names every dimension", async () => {
+    const { result, calls } = await runWorkflow("gap-analysis.js", { scope: "mvp" }, gapReply, NO_TARGET);
+    expect(calls.filter((c) => c.label.startsWith("gap:")).map((c) => c.label)).toEqual(DIMENSION_KEYS.map((k, i) => `gap:${k}-${i}`));
+    expect(result.error).toBeUndefined();
+    expect(result.failedDimensions).toEqual([]);
+    expect(Object.keys(result.byDimension)).toEqual(DIMENSION_KEYS);
+    // Below the floor nothing was analysed, so every dimension is named failed: never read as "no gaps".
+    const stopped = await runWorkflow("gap-analysis.js", { scope: "mvp" }, noAgent, LOW);
+    expect(stopped.calls).toEqual([]);
+    expect(stopped.result.budgetStopped).toBe(true);
+    expect(stopped.result.failedDimensions).toEqual(DIMENSION_KEYS);
+  });
+
+  it("gap-analysis pre-synth floor: the synthesizer runs and the gaps are ordered", async () => {
+    const { result, calls } = await runWorkflow("gap-analysis.js", { scope: "mvp" }, gapReply, NO_TARGET);
+    expect(calls.filter((c) => c.label === "synthesize")).toHaveLength(1);
+    expect(result.recommendedOrder).toEqual([{ next: "x", why: "y" }]);
+    expect(result.missing).toEqual([]);
   });
 });
 

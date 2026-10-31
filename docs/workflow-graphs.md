@@ -101,7 +101,9 @@ flowchart LR
 > (`reviewMode: 'single-pass'`, 🟢 Sonnet, label `critic:all-lenses-0`) — TRACE-Bench-lite
 > measured it equal to the panel on code-only review at ~5x lower cost (F1; one 19-fixture
 > run, 5 of 10 critics, diff-level block/no-block with the bench's own prompt). Each finding
-> keeps its lens and still gets its own skeptic, so everything after Review is unchanged.
+> keeps its lens, so everything after Review is unchanged: every blocker, and each important
+> finding up to the verifier cap, gets a typed verdict from a separate skeptic; the rest are
+> recorded as defers.
 > The 10-node graph above is the default/full case (`args.reviewMode` overrides).
 >
 > A round is clean only when `completion.verdict` is `accept`; callers print `error` and

@@ -1,10 +1,10 @@
 export const meta = {
   name: 'improve-skills',
   description:
-    "Deterministic meta-critic over the project's OWN prompts and orchestration: fan out one reviewer per quality lens across the command/workflow/instruction surface (.claude/commands/*.md, .claude/workflows/*.js, CLAUDE.md, skills-index, loop files), adversarially verify each blocker/important finding with a separate skeptic, and return PROPOSED edits. The caller applies them only on confirmation — this workflow never writes files.",
+    "Deterministic meta-critic over the project's OWN prompts and orchestration: fan out one reviewer per quality lens across the command/workflow/instruction surface (.claude/commands/*.md, .claude/workflows/*.js, CLAUDE.md, skills-index, loop files), adversarially verify each blocker and important finding with a separate skeptic (important findings are uncapped by default; args.maxVerifiers caps them, and the rest are recorded as defers), and return PROPOSED edits. The caller applies them only on confirmation — this workflow never writes files.",
   phases: [
     { title: 'Review', detail: 'one meta-critic per lens reviews the prompt/workflow surface' },
-    { title: 'Verify', detail: 'a separate skeptic refutes each finding AND its proposed edit' },
+    { title: 'Verify', detail: 'a separate skeptic refutes each blocker and important finding AND its proposed edit; important findings are uncapped by default, args.maxVerifiers caps them, and the rest are recorded as defers' },
   ],
 }
 

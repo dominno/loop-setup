@@ -63,7 +63,8 @@ instructions — the self-modification guard below still applies to everything e
    (`.claude/workflows/critic-panel.js`, `args.focus` = the current task/flow,
    `args.priorRecords` = `pnpm -s trace query --latest --writer critic-panel --brief`,
    `args.treeId` = `pnpm -s trace tree-id`): critics fan out as parallel
-   subagents, each finding gets a typed verdict from a separate skeptic, and unchanged
+   subagents; every blocker, and each important finding up to the verifier cap, gets a
+   typed verdict from a separate skeptic; the rest are recorded as defers. Unchanged
    prior verdicts are reused instead of re-verified. When UI or perf lenses are in scope
    (a UI flow, or a change that can move the client bundle), first run `pnpm test:e2e`
    (including `e2e/a11y.spec.ts`) and `pnpm build && pnpm check:bundle` yourself and pass
