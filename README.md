@@ -277,6 +277,7 @@ pnpm trace plan-lint               # the loop plan vs its contract and the recor
 pnpm trace plan-items LP-002 …     # loop-iteration args.items for ready nodes (refuses a non-ready id)
 pnpm trace story-lint              # the story map vs itself and the records (consistency, not truth)
 pnpm trace wiki-check              # the memory wiki vs the records: rec: comments, quarantine rows, page sizes
+pnpm trace l3-check                # the L3 measured-checker item, computed: latest bench record vs the current verifier
 ```
 
 Policy, verdict semantics and what was deliberately *not* adopted:

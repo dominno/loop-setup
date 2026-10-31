@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -17,6 +18,7 @@ import {
   contaminatedRuns,
   effectivePanelSize,
   insideRepo,
+  l3Check,
   loadWorkflowBlock,
   markUnscanned,
   opaqueFixtureId,
@@ -33,6 +35,7 @@ import {
   readPolicyVersion,
   reauditCandidates,
   replay,
+  ROOT,
   rotateStore,
   schemaKeywordViolations,
   scoreBench,
@@ -40,6 +43,8 @@ import {
   storeMetrics,
   treeFingerprint,
   validate,
+  VERIFIER_FILE,
+  verifierBlockHash,
   writeRecords,
 } from "./lib.mjs";
 
@@ -802,5 +807,116 @@ describe("bench instrument: leak guard and F0 scan", () => {
     expect(contaminatedRuns([{ label, text: injected }], synth)).toHaveLength(1);
     // A line that does not parse counts as received (fail closed).
     expect(contaminatedRuns([{ label, text: `{"type":"assistant", ${defect}` }], synth)).toHaveLength(1);
+  });
+});
+
+// L3 freshness: a bench record names the <loop-verifier> block it measured by its sha256, so a
+// verifier edited after the bench no longer passes as measured. `pnpm trace l3-check` is
+// loop-checklist.md's measured-checker item, computed from the latest bench record.
+describe("L3 freshness: bench records name the verifier they measured", () => {
+  const block = "// <loop-verifier>\nfunction verifierPrompt() { return 'v1' }\n// </loop-verifier>\n";
+  const source = `const before = 1\n${block}const after = 2\n`;
+  const sha = (text) => createHash("sha256").update(text).digest("hex");
+
+  it("verifierBlockHash is the sha256 of the <loop-verifier> block, marker lines included: only an edit inside the block changes it", () => {
+    expect(verifierBlockHash(source)).toBe(sha(block));
+    expect(verifierBlockHash(source.replace("const after = 2", "const after = 3"))).toBe(sha(block));
+    expect(verifierBlockHash(source.replace("'v1'", "'v2'"))).not.toBe(sha(block));
+    expect(verifierBlockHash("const noBlock = 1\n")).toBeNull();
+    // The production file carries the block: renamed markers must not quietly strip every bench record's hash.
+    expect(VERIFIER_FILE).toBe(".claude/workflows/loop-iteration.js");
+    expect(verifierBlockHash(readFileSync(join(ROOT, VERIFIER_FILE), "utf8"))).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("benchRecordDraft carries the hash it is given as a file_line item on loop-iteration.js; the writer stores it and l3-check accepts it", () => {
+    const manifest = { fixtures: [{ id: "B1", kind: "bad" }, { id: "G1", kind: "good" }] };
+    const runs = [0, 1].flatMap((repeat) => [
+      { arm: "verifier", repeat, fixtureId: "B1", verdict: "reject", preGateVerdict: "reject" },
+      { arm: "verifier", repeat, fixtureId: "G1", verdict: "accept", preGateVerdict: "accept" },
+    ]);
+    const s = scoreBench(manifest, { runs, expectedRuns: 4 });
+    const hash = sha(block);
+    const rec = benchRecordDraft(s, { resultsRef: "r.json", runIds: ["0a1b2c3d"], verifierHash: hash });
+    expect(rec.evidence).toContainEqual({ kind: "file_line", ref: ".claude/workflows/loop-iteration.js", result: `<loop-verifier> sha256=${hash}` });
+    expect(rec.evidence[0].kind).toBe("measurement");
+    expect(writeRecords([rec], ctx())[0].stored).toBe(true);
+    expect(l3Check(replay(loadEntries(store), schema, POLICY), hash)).toMatchObject({ ok: true, unmet: [], verdict: "accept", repeats: 2, recordHash: hash });
+    // Without a hash (the block could not be read) the draft names no verifier, so l3-check never passes it.
+    expect(benchRecordDraft(s, { resultsRef: "r.json" }).evidence.map((e) => e.kind)).toEqual(["measurement"]);
+  });
+});
+
+describe("l3Check: the L3 measured-checker item, computed from the LATEST bench record", () => {
+  const HASH = "b".repeat(64);
+  const bench = ({ status = "accept", repeats = 2, gates = ["F2 (informational)"], hash = HASH, ...over } = {}) => ({
+    writer_id: "trace-bench/score",
+    claim_id: "bench:trace-bench-lite",
+    claim_text: `TRACE-Bench-lite (2 bad / 2 good fixtures): ${status} at ${repeats} repeat(s), flags ${gates.join(", ") || "none"}`,
+    claim_type: "measured",
+    evidence: [
+      { kind: "measurement", ref: "pnpm trace bench-score r.json [runs 0a1b2c3d]", result: JSON.stringify({ arms: { verifier: { repeats } } }) },
+      ...(hash ? [{ kind: "file_line", ref: VERIFIER_FILE, result: `<loop-verifier> sha256=${hash}` }] : []),
+    ],
+    failed_gates: gates,
+    missing: [],
+    final_status: status,
+    ...(status === "qualify" ? { qualifier: "measured on the clean runs only — 1 contaminated run(s) were excluded" } : {}),
+    reason: "deterministic scoring of the raw bench runs",
+    provenance: { workflow: "trace-bench" },
+    ...over,
+  });
+  const checked = (draft, current = HASH) => {
+    expect(writeRecords([draft], ctx())[0].stored).toBe(true);
+    return l3Check(replay(loadEntries(store), schema, POLICY), current);
+  };
+
+  it("is met by an accept from repeat ≥ 2 that measured the current block (F1 and F2 do not hold it)", () => {
+    const res = checked(bench({ gates: ["F2 (informational)", "F1 decomposition"] }));
+    expect(res).toMatchObject({ ok: true, unmet: [], verdict: "accept", repeats: 2, recordHash: HASH, currentHash: HASH });
+    expect(res.record_id).toMatch(/^TR-[0-9a-f]{12}$/);
+  });
+
+  it("is not met once the verifier changed after the bench (hash mismatch)", () => {
+    const res = checked(bench(), "c".repeat(64));
+    expect(res.ok).toBe(false);
+    expect(res.unmet).toHaveLength(1);
+    expect(res.unmet[0]).toMatch(/another <loop-verifier> block/);
+  });
+
+  it.each([
+    ["a qualify", { status: "qualify" }, /qualify, not accept/],
+    ["a single repeat", { repeats: 1 }, /1 repeat\(s\) — needs repeat ≥ 2/],
+    ["an F3", { gates: ["F2 (informational)", "F3 instability"] }, /F3 instability/],
+    ["an F0", { gates: ["F0 coverage"] }, /F0 coverage/],
+    ["an F4", { gates: ["F4 wrong-accept"] }, /F4 wrong-accept/],
+    ["a record with no hash (scored before L3 freshness)", { hash: null }, /no <loop-verifier> hash/],
+    ["a measurement whose repeat count does not parse", { evidence: [{ kind: "measurement", ref: "pnpm trace bench-score r.json", result: '{"arms":{"verif' }, { kind: "file_line", ref: VERIFIER_FILE, result: `<loop-verifier> sha256=${HASH}` }] }, /repeat count/],
+  ])("is not met by %s, and names exactly that condition", (_what, over, re) => {
+    const res = checked(bench(over));
+    expect(res.ok).toBe(false);
+    expect(res.unmet).toHaveLength(1);
+    expect(res.unmet[0]).toMatch(re);
+  });
+
+  it("reads the latest bench record, licensing or not: an older accept never stands in for a newer qualify", () => {
+    const [first] = writeRecords([bench()], ctx());
+    const [second] = writeRecords([bench({ status: "qualify", revises: first.record_id })], { ...ctx(), now: "2026-10-08T12:00:00.000Z" });
+    expect(second.stored).toBe(true);
+    const res = l3Check(replay(loadEntries(store), schema, POLICY), HASH);
+    expect(res.record_id).toBe(second.record_id);
+    expect(res.unmet).toEqual([expect.stringMatching(/qualify, not accept/)]);
+  });
+
+  it("lists every unmet condition at once, and fails closed without a record, a readable current block or a store that replays", () => {
+    const all = checked(bench({ status: "qualify", repeats: 1, gates: ["F3 instability"], hash: "d".repeat(64) }));
+    expect(all.ok).toBe(false);
+    expect(all.unmet).toHaveLength(4);
+    const unreadable = l3Check(replay(loadEntries(store), schema, POLICY), null);
+    expect(unreadable.ok).toBe(false);
+    expect(unreadable.unmet.some((u) => /current <loop-verifier> block .* cannot be read/.test(u))).toBe(true);
+    expect(l3Check(replay([], schema, POLICY), HASH)).toMatchObject({ ok: false, record_id: null, unmet: [expect.stringMatching(/no bench:trace-bench-lite record/)] });
+    const broken = l3Check(replay(parseLines("{not json\n", "records.jsonl"), schema, POLICY), HASH);
+    expect(broken.ok).toBe(false);
+    expect(broken.unmet.some((u) => /does not replay/.test(u))).toBe(true);
   });
 });

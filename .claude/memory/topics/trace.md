@@ -249,6 +249,22 @@ the live store. Pre-registered — results that count **against** our design:
   the measurement record is `qualify`, not `accept`. F1 needs the `panel` arm; F3 needs
   `repeat ≥ 2`.
 
+**L3 freshness (`pnpm trace l3-check`):** a bench record names the verifier it measured — a
+`file_line` item on `.claude/workflows/loop-iteration.js` whose result is `<loop-verifier>
+sha256=<hex>`, the hash of that block (marker lines included) as `bench-score --record` reads
+it from the working tree. `pnpm trace l3-check` is the measured-checker item of
+`.claude/loop-checklist.md`, computed: the latest `bench:trace-bench-lite` record, licensing or
+not, must be `accept`, from a verifier arm run at `repeat ≥ 2`, with no F0, F3 or F4 in its
+`failed_gates`, and its hash must equal the current block's; exit 0 only when all hold, else
+exit 1 listing every unmet condition (a store that does not replay, or a block that cannot be
+read, is one too). Any edit inside the block needs a re-bench before L3, and a record scored
+before this check carries no hash, so it never passes. Partial: the hash is read when you
+score, so it cannot see an edit made between the run and the score, or a `trace-bench.js` copy
+(the one the Workflow runs) that drifted from the production block — `pnpm test`'s parity check
+fails then; score a run before editing either copy. The hash item is file evidence, so
+`pnpm trace reaudit` also lists the bench record when `loop-iteration.js` changes (path-level;
+`l3-check` is the block-level answer).
+
 **Contamination rule (learned the hard way — the first bench run was contaminated):**
 bench agents run inside this repo and grep it, so fixture ground truth must never be
 plain text in the tree. Fixtures live gzip+base64-encoded in

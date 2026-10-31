@@ -1395,6 +1395,12 @@ export function markUnscanned(runs, transcripts) {
   return runs.map((r) => (r.noVerdict || keys.some((k) => runMatchesKey(r, k)) ? r : { ...r, unscanned: true }));
 }
 
+/** A marked block of a workflow source, marker lines included (the text the parity tests compare), or null. */
+function workflowBlock(text, tag) {
+  const m = new RegExp(`// <${tag}>\\n[\\s\\S]*?// </${tag}>\\n`).exec(String(text ?? ""));
+  return m ? m[0] : null;
+}
+
 /**
  * Evaluate a marked deterministic block from a workflow script (workflows cannot be
  * imported) and return the named bindings — used to run the PRODUCTION denylist
@@ -1404,9 +1410,9 @@ export function loadWorkflowBlock(file, tag, names, { source } = {}) {
   // `source` lets a caller evaluate a TRUSTED copy (e.g. `git show HEAD:<file>`) instead
   // of the working tree, which a patch under review may have rewritten.
   const text = source ?? readFileSync(join(ROOT, ".claude/workflows", file), "utf8");
-  const m = new RegExp(`// <${tag}>\\n[\\s\\S]*?// </${tag}>\\n`).exec(text);
-  if (!m) throw new Error(`${file}: no <${tag}> block`);
-  return new Function(`${m[0]}\nreturn { ${names.join(", ")} };`)();
+  const block = workflowBlock(text, tag);
+  if (block === null) throw new Error(`${file}: no <${tag}> block`);
+  return new Function(`${block}\nreturn { ${names.join(", ")} };`)();
 }
 
 /**
@@ -1494,8 +1500,12 @@ export function benchArgs(manifest, { arms, repeat, critics, only, runId }) {
   };
 }
 
-/** A TRACE-lite record draft for a scored bench run (a measured claim about our checkers). */
-export function benchRecordDraft(score, { resultsRef, priorRecordId, runIds = [] }) {
+/**
+ * A TRACE-lite record draft for a scored bench run (a measured claim about our checkers).
+ * `verifierHash` (verifierBlockHash of the production verifier, read by the caller) names the
+ * <loop-verifier> block the run measured; without it the record names none and never passes l3Check.
+ */
+export function benchRecordDraft(score, { resultsRef, priorRecordId, runIds = [], verifierHash }) {
   const v = score.arms.verifier || {};
   const s = score.arms.singlePass || {};
   const p = score.arms.panel || {};
@@ -1514,7 +1524,11 @@ export function benchRecordDraft(score, { resultsRef, priorRecordId, runIds = []
     // Counts only — never fixture ids or defect text: the record store is in the tree the
     // next bench run's agents can grep (contamination rule above).
     // The run ids are recorded so a later --record of the SAME run (e.g. reused args) is refused.
-    evidence: [{ kind: "measurement", ref: `pnpm trace bench-score ${resultsRef}${runIds.length ? ` [runs ${runIds.join(",")}]` : ""}`, result: JSON.stringify({ arms: score.arms, externalJudgeGap: Object.fromEntries(Object.entries(score.externalJudgeGap || {}).map(([k, ids]) => [k, ids.length])), contaminatedRuns: score.contaminatedRuns }).slice(0, 4000) }],
+    evidence: [
+      { kind: "measurement", ref: `pnpm trace bench-score ${resultsRef}${runIds.length ? ` [runs ${runIds.join(",")}]` : ""}`, result: JSON.stringify({ arms: score.arms, externalJudgeGap: Object.fromEntries(Object.entries(score.externalJudgeGap || {}).map(([k, ids]) => [k, ids.length])), contaminatedRuns: score.contaminatedRuns }).slice(0, 4000) },
+      // L3 freshness: the verifier this run measured, so a later edit to it shows (l3Check).
+      ...(verifierHash ? [{ kind: "file_line", ref: VERIFIER_FILE, result: `<loop-verifier> sha256=${verifierHash}` }] : []),
+    ],
     failed_gates: score.flags.map((x) => x.split(":")[0]),
     missing: [],
     // Excluded runs (contamination or no verdict) and missing runs (started, never returned)
@@ -1526,4 +1540,62 @@ export function benchRecordDraft(score, { resultsRef, priorRecordId, runIds = []
     provenance: { workflow: "trace-bench" },
     ...(priorRecordId ? { revises: priorRecordId } : {}),
   };
+}
+
+// ---------------------------------------------------------------------------
+// L3 freshness (`pnpm trace l3-check`): the measured-checker item of .claude/loop-checklist.md,
+// computed. A bench record names the verifier it measured by the sha256 of the production
+// <loop-verifier> block (trace-bench.js runs a byte-identical copy, parity-tested), so a verifier
+// edited after the bench no longer passes as measured.
+
+/** The production verifier: the file whose <loop-verifier> block a bench record names. */
+export const VERIFIER_FILE = ".claude/workflows/loop-iteration.js";
+const VERIFIER_HASH = /^<loop-verifier> sha256=([0-9a-f]{64})$/;
+
+/** The sha256 (hex) of the <loop-verifier> block in a workflow source, marker lines included; null when it has none. */
+export function verifierBlockHash(source) {
+  const block = workflowBlock(source, "loop-verifier");
+  return block === null ? null : createHash("sha256").update(block).digest("hex");
+}
+
+/**
+ * The L3 gate over a replayed store: the LATEST bench:trace-bench-lite record, licensing or not
+ * (an older accept never stands in for a newer qualify), is an accept, from a verifier arm run at
+ * repeat ≥ 2, with no F0, F3 or F4 in its failed_gates, and names the <loop-verifier> block it
+ * measured by a hash equal to `currentHash` (the current block's; null when it cannot be read).
+ * Returns every unmet condition; ok only when there is none. Fail closed: a store that does not
+ * replay, a missing record and an unreadable field are each an unmet condition, never a pass.
+ */
+export function l3Check(state, currentHash) {
+  const unmet = [];
+  if (state.errors.length) unmet.push(`the record store does not replay (${state.errors.length} error(s)) — run pnpm trace lint`);
+  if (!currentHash) unmet.push(`the current <loop-verifier> block in ${VERIFIER_FILE} cannot be read — there is no verifier to compare the bench against`);
+  const rec = latestByClaim(state.records, state.superseded).get("bench:trace-bench-lite");
+  if (!rec) {
+    unmet.push("no bench:trace-bench-lite record — run /bench-checkers (repeat ≥ 2) and record it with pnpm trace bench-score --record");
+    return { ok: false, unmet, record_id: null, verdict: null, repeats: null, failed_gates: [], recordHash: null, currentHash: currentHash || null };
+  }
+  if (rec.final_status !== "accept") unmet.push(`the record is ${rec.final_status}, not accept${rec.qualifier ? ` (${rec.qualifier})` : ""}`);
+  // The verifier arm's repeat count, from the scored metrics in the record's measurement item.
+  const parse = (text) => {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return null; // not JSON (or cut short): no metrics to read
+    }
+  };
+  const metrics = rec.evidence.filter((e) => e.kind === "measurement").map((e) => parse(e.result)).find((m) => m && m.arms);
+  const repeats = metrics?.arms?.verifier?.repeats;
+  if (!Number.isInteger(repeats)) unmet.push("the record does not show the verifier arm's repeat count — L3 needs a bench of the verifier arm at repeat ≥ 2");
+  else if (repeats < 2) unmet.push(`the verifier arm ran ${repeats} repeat(s) — needs repeat ≥ 2 (F3, procedural invariance, cannot fire on fewer)`);
+  const blocking = rec.failed_gates.filter((g) => /^F[034](?![0-9])/.test(g));
+  if (blocking.length) unmet.push(`its failed_gates contain ${blocking.join(", ")} — any F0, F3 or F4 keeps loops at ≤ L2`);
+  const named = rec.evidence.find((e) => e.kind === "file_line" && e.ref === VERIFIER_FILE && VERIFIER_HASH.test(String(e.result || "")));
+  const recordHash = named ? VERIFIER_HASH.exec(named.result)[1] : null;
+  if (!recordHash) {
+    unmet.push(`the record carries no <loop-verifier> hash (a file_line item on ${VERIFIER_FILE}), so it cannot show which verifier it measured — records scored before L3 freshness carry none: re-bench with /bench-checkers`);
+  } else if (currentHash && recordHash !== currentHash) {
+    unmet.push(`the record measured another <loop-verifier> block (sha256 ${recordHash.slice(0, 12)}…; the current block's is ${currentHash.slice(0, 12)}…) — the verifier changed after the bench: re-bench with /bench-checkers`);
+  }
+  return { ok: unmet.length === 0, unmet, record_id: rec.record_id, verdict: rec.final_status, repeats: Number.isInteger(repeats) ? repeats : null, failed_gates: rec.failed_gates, recordHash, currentHash: currentHash || null };
 }

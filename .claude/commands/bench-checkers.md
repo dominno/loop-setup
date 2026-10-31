@@ -44,7 +44,10 @@ $ARGUMENTS
    every agent label and the result carry, so a run is covered only by its OWN non-empty
    transcripts — another run's transcript dir cannot vouch for it (F0 coverage). That
    holds only with fresh args per Workflow invocation: re-run step 2 for every run, never
-   reuse an args file (`--record` refuses a run id that is already recorded).
+   reuse an args file (`--record` refuses a run id that is already recorded). The record
+   also names the verifier the run measured: the sha256 of the `<loop-verifier>` block in
+   `.claude/workflows/loop-iteration.js`, read when you score — so score the run before
+   editing that block or its copy in `trace-bench.js`.
 5. **Report** a table per arm (WrongAcceptRate, FalseHoldRate, defer rate, gate
    downgrades, invariance; single-pass vs panel recall / false-block; n_eff), the
    excluded runs (contaminated / no verdict) and the missing runs (`missingRuns`: started
@@ -54,7 +57,9 @@ $ARGUMENTS
    tests; `neither` is undefended ground), and every fired flag with what it means for
    the design (`bench-score` emits F0–F4; F5 comes from `pnpm trace metrics`). Say which
    flags *could not* fire: F1 needs the `panel` arm, F3 needs `repeat ≥ 2`. Don't explain
-   a flag away after the fact — they are pre-registered.
+   a flag away after the fact — they are pre-registered. Then run `pnpm trace l3-check` and
+   report its result: exit 0 only when this record meets the L3 measured-checker item of
+   `.claude/loop-checklist.md`, else exit 1 with every unmet condition listed.
 6. If a flag fires, propose (don't apply) the response: F1 → shrink the fan-out; F3 →
    don't trust single-run verdicts / raise repeat; F4 → keep loops at ≤ L2 and tighten
    the verifier via `/improve-skills`. Then run `/dream` to file any durable lesson.

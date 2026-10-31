@@ -2,10 +2,11 @@
 // paths, and the bench-judge safety helpers.
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { encodeBench, opaqueFixtureId, readBench, ROOT } from "./lib.mjs";
+import { DEFAULT_STORE, encodeBench, latestByClaim, loadEntries, loadSchema, opaqueFixtureId, readBench, readPolicyVersion, replay, ROOT } from "./lib.mjs";
 import { appliedFixtures, benchPreconditionStep, benchPreflight, judgeEnv, runBenchJudge, runJudge, SIGNALS } from "./bench-judge.mjs";
 import { DEFAULT_PLAN, parsePlan, readyIds } from "./plan.mjs";
 import { STORY_MAP_PATHS } from "./story-map.mjs";
@@ -26,6 +27,27 @@ const draft = (over = {}) =>
     reason: "checked",
     provenance: { workflow: "test" },
     ...over,
+  });
+// The sha256 of the production <loop-verifier> block (marker lines included), computed here
+// independently of lib.mjs, and a bench record draft that names it (override any field).
+const verifierSha = (text) => createHash("sha256").update(/\/\/ <loop-verifier>\n[\s\S]*?\/\/ <\/loop-verifier>\n/.exec(text)[0]).digest("hex");
+const CURRENT_VERIFIER = verifierSha(readFileSync(join(ROOT, ".claude/workflows/loop-iteration.js"), "utf8"));
+const benchDraft = ({ status = "accept", repeats = 2, gates = ["F2 (informational)"], hash = CURRENT_VERIFIER } = {}) =>
+  JSON.stringify({
+    writer_id: "trace-bench/score",
+    claim_id: "bench:trace-bench-lite",
+    claim_text: `TRACE-Bench-lite (2 bad / 2 good fixtures): ${status} at ${repeats} repeat(s)`,
+    claim_type: "measured",
+    evidence: [
+      { kind: "measurement", ref: "pnpm trace bench-score runs.json [runs 0a1b2c3d]", result: JSON.stringify({ arms: { verifier: { repeats } } }) },
+      { kind: "file_line", ref: ".claude/workflows/loop-iteration.js", result: `<loop-verifier> sha256=${hash}` },
+    ],
+    failed_gates: gates,
+    missing: [],
+    final_status: status,
+    ...(status === "qualify" ? { qualifier: "measured on the clean runs only — 1 contaminated run(s) were excluded" } : {}),
+    reason: "deterministic scoring of the raw bench runs",
+    provenance: { workflow: "trace-bench" },
   });
 
 beforeEach(() => {
@@ -565,10 +587,11 @@ describe("round-3 CLI fixes", () => {
 
   describe("bench-score --record fails closed", () => {
     const RUN = "0a1b2c3d";
-    const setup = (transcripts, { runId = RUN, agents } = {}) => {
+    const setup = (transcripts, { runId = RUN, agents, repeats = 1 } = {}) => {
       const m = readBench();
       const runs = join(dir, "runs.json");
-      writeFileSync(runs, JSON.stringify({ ...(runId ? { runId } : {}), ...(agents != null ? { agents } : {}), runs: m.fixtures.map((f) => ({ arm: "verifier", repeat: 0, fixtureId: opaqueFixtureId(f.id), verdict: "defer", failedGates: [], missing: ["x"] })) }));
+      const verifierRuns = m.fixtures.flatMap((f) => Array.from({ length: repeats }, (_, repeat) => ({ arm: "verifier", repeat, fixtureId: opaqueFixtureId(f.id), verdict: "defer", failedGates: [], missing: ["x"] })));
+      writeFileSync(runs, JSON.stringify({ ...(runId ? { runId } : {}), ...(agents != null ? { agents } : {}), runs: verifierRuns }));
       const tdir = join(dir, "transcripts");
       mkdirSync(tdir);
       transcripts(m).forEach((t, i) => {
@@ -579,7 +602,8 @@ describe("round-3 CLI fixes", () => {
     };
     // Boolean checks only: bench-score's stdout names fixtures, and a failing toMatch would print it.
     const says = (out, re) => re.test(out.stdout);
-    const covering = (m, run = RUN) => m.fixtures.map((f, i) => ({ label: `bench-verify:${opaqueFixtureId(f.id)}-r0-${i}@${run}`, text: "clean" }));
+    const covering = (m, run = RUN, repeats = 1) =>
+      m.fixtures.flatMap((f, i) => Array.from({ length: repeats }, (_, r) => ({ label: `bench-verify:${opaqueFixtureId(f.id)}-r${r}-${i}@${run}`, text: "clean" })));
     it("on an empty transcript dir", () => {
       const out = setup(() => [])();
       expect(out.status).toBe(1);
@@ -629,6 +653,23 @@ describe("round-3 CLI fixes", () => {
       expect(rec).toMatchObject({ claim_id: "bench:trace-bench-lite", final_status: "qualify" });
       expect(rec.failed_gates).toContain("F0 validity");
     });
+    // L3 freshness: the recorded run names the verifier it measured, and l3-check reads that record.
+    const namesCurrentVerifier = () =>
+      JSON.parse(readFileSync(store, "utf8").trim().split("\n").at(-1)).evidence.some((e) => e.kind === "file_line" && e.ref === ".claude/workflows/loop-iteration.js" && e.result === `<loop-verifier> sha256=${CURRENT_VERIFIER}`);
+    it("records the sha256 of loop-iteration.js's <loop-verifier> block; at one repeat l3-check still exits 1 on the repeat count", () => {
+      expect(setup(covering)().status).toBe(0);
+      expect(namesCurrentVerifier()).toBe(true);
+      const out = trace(["l3-check", "--json"]);
+      expect(out.status).toBe(1);
+      expect(JSON.parse(out.stdout).unmet).toEqual([expect.stringMatching(/ran 1 repeat\(s\)/)]);
+    });
+    it("a clean run at repeat 2 is recorded with the current verifier's hash, and l3-check exits 0 on it", () => {
+      expect(setup((m) => covering(m, RUN, 2), { repeats: 2 })().status).toBe(0);
+      expect(namesCurrentVerifier()).toBe(true);
+      const out = trace(["l3-check", "--json"]);
+      expect(out.status).toBe(0);
+      expect(JSON.parse(out.stdout)).toMatchObject({ ok: true, unmet: [], verdict: "accept", repeats: 2, recordHash: CURRENT_VERIFIER, currentHash: CURRENT_VERIFIER });
+    });
     it("refuses to record when the results path itself carries ground truth (the evidence ref is screened)", () => {
       const m = readBench();
       const named = join(dir, `${m.fixtures[0].id}.json`);
@@ -638,6 +679,64 @@ describe("round-3 CLI fixes", () => {
       expect(out.status).toBe(1);
       expect(says(out, /bench ground truth/)).toBe(true);
     });
+  });
+});
+
+// L3 freshness, as a process: loop-checklist.md's measured-checker item computed from the latest
+// bench record (a temp store) and the working tree's <loop-verifier> block.
+describe("l3-check (CLI process)", () => {
+  it("exits 0 on a temp store whose latest bench record is an accept from repeat ≥ 2 that measured the current block; text and --json agree", () => {
+    expect(trace(["write", "-"], benchDraft()).status).toBe(0);
+    const json = trace(["l3-check", "--json"]);
+    expect(json.status).toBe(0);
+    expect(JSON.parse(json.stdout)).toMatchObject({ ok: true, unmet: [], record_id: expect.stringMatching(/^TR-[0-9a-f]{12}$/), verdict: "accept", repeats: 2, recordHash: CURRENT_VERIFIER, currentHash: CURRENT_VERIFIER });
+    const text = trace(["l3-check"]);
+    expect(text.status).toBe(0);
+    expect(text.stdout.startsWith("l3-check: met")).toBe(true);
+  });
+
+  it.each([
+    ["a hash mismatch (the verifier changed after the bench)", { hash: "0".repeat(64) }, /another <loop-verifier> block/],
+    ["a qualify", { status: "qualify" }, /qualify, not accept/],
+    ["a single repeat", { repeats: 1 }, /ran 1 repeat\(s\)/],
+    ["an F3", { gates: ["F2 (informational)", "F3 instability"] }, /F3 instability/],
+  ])("exits 1 on %s, listing exactly that unmet condition", (_what, over, re) => {
+    expect(trace(["write", "-"], benchDraft(over)).status).toBe(0);
+    const json = trace(["l3-check", "--json"]);
+    expect(json.status).toBe(1);
+    const res = JSON.parse(json.stdout);
+    expect(res.ok).toBe(false);
+    expect(res.unmet).toHaveLength(1);
+    expect(res.unmet[0]).toMatch(re);
+    const text = trace(["l3-check"]);
+    expect(text.status).toBe(1);
+    expect(text.stdout.startsWith("l3-check: NOT met")).toBe(true);
+    expect(text.stdout).toMatch(re);
+  });
+
+  it("at HEAD: while the committed store's latest bench record names no verifier, l3-check exits 1 for the missing hash", () => {
+    // The committed store is append-only state a re-bench extends: compare, never pin it.
+    const state = replay(loadEntries(DEFAULT_STORE), loadSchema(), readPolicyVersion());
+    const latest = latestByClaim(state.records, state.superseded).get("bench:trace-bench-lite");
+    const named = !!latest && latest.evidence.some((e) => e.kind === "file_line" && /^<loop-verifier> sha256=/.test(e.result || ""));
+    const out = trace(["l3-check", "--json", "--store", DEFAULT_STORE]);
+    const res = JSON.parse(out.stdout);
+    expect(out.status).toBe(res.ok ? 0 : 1);
+    expect(res.record_id).toBe(latest ? latest.record_id : null);
+    if (!named) {
+      expect(out.status).toBe(1);
+      expect(res.unmet.some((u) => u.includes("no <loop-verifier> hash"))).toBe(true);
+    }
+  });
+
+  it("fails closed (exit 1) with no bench record, and when the store does not replay", () => {
+    const empty = trace(["l3-check", "--json"]);
+    expect(empty.status).toBe(1);
+    expect(JSON.parse(empty.stdout).unmet).toEqual([expect.stringMatching(/no bench:trace-bench-lite record/)]);
+    writeFileSync(store, "{not json\n");
+    const broken = trace(["l3-check", "--json"]);
+    expect(broken.status).toBe(1);
+    expect(JSON.parse(broken.stdout).unmet.some((u) => /does not replay/.test(u))).toBe(true);
   });
 });
 
@@ -732,6 +831,32 @@ describe("CLI wiring, end to end in a throwaway repo", () => {
       expect(rec.status).toBe(0); // with a judge of `false`, running on would fail the baseline
       expect(JSON.parse(rec.stdout).reversed).toEqual([opaqueFixtureId("B90-synthetic")]);
       expect(existsSync(join(r.d, file))).toBe(false);
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  it("l3-check hashes the working tree's <loop-verifier> block: an edit inside it fails a matching record, an edit outside it does not, a missing file fails closed", () => {
+    const r = tempRepo();
+    try {
+      expect(r.cli(["write", "-"], benchDraft()).status).toBe(0); // the copy's block hashes like the real one
+      expect(r.cli(["l3-check"]).status).toBe(0);
+      const wf = join(r.d, ".claude/workflows/loop-iteration.js");
+      const src = readFileSync(wf, "utf8");
+      const outside = src.replace("// </loop-verifier>\n", "// </loop-verifier>\n// a comment below the block\n");
+      const inside = src.replace("You are a SEPARATE verifier", "You are a SEPARATE, edited verifier");
+      expect(outside).not.toBe(src);
+      expect(inside).not.toBe(src);
+      writeFileSync(wf, outside);
+      expect(r.cli(["l3-check"]).status).toBe(0);
+      writeFileSync(wf, inside); // uncommitted: the current verifier is the working tree's, not HEAD's
+      const edited = r.cli(["l3-check", "--json"]);
+      expect(edited.status).toBe(1);
+      expect(JSON.parse(edited.stdout).unmet).toEqual([expect.stringMatching(/another <loop-verifier> block/)]);
+      rmSync(wf);
+      const gone = r.cli(["l3-check", "--json"]);
+      expect(gone.status).toBe(1);
+      expect(JSON.parse(gone.stdout).unmet).toEqual([expect.stringMatching(/cannot be read/)]);
     } finally {
       r.cleanup();
     }
