@@ -1,7 +1,7 @@
 export const meta = {
   name: 'loop-iteration',
   description:
-    'Maker/checker for an L2/L3 loop iteration: for each ready plan node (already triaged, denylist-cleared), an implementer subagent (isolated git worktree) applies the smallest safe fix and runs the relevant checks there; a SEPARATE verifier subagent adversarially reviews the real diff and returns a typed TRACE verdict (accept/qualify/revise/defer/reject). Returns per-item outcomes plus TRACE-lite record drafts; the caller applies licensed changes, holds deferred ones, and escalates the rest.',
+    'Maker/checker for an L2/L3 loop iteration: for each ready plan node (already triaged, denylist-cleared), an implementer subagent (isolated git worktree) applies the smallest safe fix and runs the relevant checks there; a SEPARATE verifier subagent adversarially reviews the real diff and returns a typed TRACE verdict (accept/qualify/revise/defer/reject). Returns per-item outcomes plus TRACE-lite record drafts; the caller applies licensed changes, holds deferred ones, and escalates the rest. Engine of /loop at L2/L3 — invoke only from the loop\'s step 10.',
   phases: [
     { title: 'Implement', detail: 'implementer per item, in an isolated worktree' },
     { title: 'Verify', detail: 'a separate verifier adjudicates the real diff with a typed verdict' },

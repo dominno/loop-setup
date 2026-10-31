@@ -1,7 +1,7 @@
 export const meta = {
   name: 'gap-analysis',
   description:
-    'Deterministic gap analysis: fan out one finder agent per gap dimension (docs↔code↔tests, edge cases, UX/design, ambiguity; an opt-in catch-all), then a separate skeptic per non-empty dimension types each gap (accept/qualify/revise/defer/reject) under a deterministic evidence gate, then synthesize a recommended next-implementation order over the licensed (accept/qualify) gaps only. Read-only; the verdicts are advisory and no records are written.',
+    'Deterministic gap analysis: fan out one finder agent per gap dimension (docs↔code↔tests, edge cases, UX/design, ambiguity; an opt-in catch-all), then a separate skeptic per non-empty dimension types each gap (accept/qualify/revise/defer/reject) under a deterministic evidence gate, then synthesize a recommended next-implementation order over the licensed (accept/qualify) gaps only. Read-only; the verdicts are advisory and no records are written. Engine of /story-gap-analysis — invoke it through that command so its advisory verdicts are reported the way that command requires.',
   phases: [
     { title: 'Dimensions', detail: 'one finder agent per gap dimension, each pipelined into its skeptic' },
     { title: 'Verify', detail: 'a separate skeptic per non-empty dimension types each gap; a deterministic evidence gate caps overclaims' },

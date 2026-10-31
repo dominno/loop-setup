@@ -1,7 +1,7 @@
 export const meta = {
   name: 'trace-bench',
   description:
-    'TRACE-Bench-lite: measure this project\'s own checkers on seeded-defect fixtures. Arms: the loop-iteration verifier (its exact production prompt + evidence gate) on every fixture diff, a single-pass all-lens reviewer, and optionally a critics-only panel. Agents never see ground truth. Returns raw per-fixture outcomes; `pnpm trace bench-score` computes WrongAcceptRate, procedural invariance, the external-judge gap, effective panel size and the pre-registered falsification flags.',
+    'TRACE-Bench-lite: measure this project\'s own checkers on seeded-defect fixtures. Arms: the loop-iteration verifier (its exact production prompt + evidence gate) on every fixture diff, a single-pass all-lens reviewer, and optionally a critics-only panel. Agents never see ground truth. Returns raw per-fixture outcomes; `pnpm trace bench-score` computes WrongAcceptRate, procedural invariance, the external-judge gap, effective panel size and the pre-registered falsification flags. Engine of the manual-only /bench-checkers — run only when the user invoked that command.',
   phases: [
     { title: 'Verifier', detail: 'the loop-iteration checker on every fixture diff, repeated for invariance' },
     { title: 'Reviewers', detail: 'single-pass all-lens reviewer and/or one agent per critic on the same diffs' },

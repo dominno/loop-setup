@@ -1,7 +1,7 @@
 export const meta = {
   name: 'critic-panel',
   description:
-    'Deterministic multi-agent critic round: fan out the critics as parallel subagents (each in its own context, each typing its claims; a code-only round uses one all-lens reviewer instead), adversarially adjudicate every blocker, and important findings up to a verifier cap (the rest are recorded as defers), each with a separate skeptic that returns a typed TRACE verdict (accept/qualify/revise/defer/reject) held to the claim type evidence standard, reuse unchanged prior verdicts, then return a synthesized matrix plus TRACE-lite record drafts.',
+    'Deterministic multi-agent critic round: fan out the critics as parallel subagents (each in its own context, each typing its claims; a code-only round uses one all-lens reviewer instead), adversarially adjudicate every blocker, and important findings up to a verifier cap (the rest are recorded as defers), each with a separate skeptic that returns a typed TRACE verdict (accept/qualify/revise/defer/reject) held to the claim type evidence standard, reuse unchanged prior verdicts, then return a synthesized matrix plus TRACE-lite record drafts. Engine of /critic-round, /multi-agent-dev, /qa-pass and /loop — invoke it through one of them so its verdicts are recorded.',
   phases: [
     { title: 'Review', detail: 'each critic reviews independently, in its own context, and types each claim (a code-only round: one all-lens reviewer)' },
     { title: 'Coverage', detail: 'opt-in (args.completeness: true; off by default, unmeasured): one completeness critic, given the lenses reviewed and the titles already raised, looks for the important problem the round missed' },

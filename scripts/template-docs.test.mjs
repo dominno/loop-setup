@@ -124,3 +124,23 @@ describe("adoption docs", () => {
     expect(drift).toEqual([]);
   });
 });
+
+describe("workflow lists", () => {
+  // Each list that enumerates the workflows for a reader names every script under .claude/workflows/.
+  const names = readdirSync(join(ROOT, ".claude/workflows")).filter((f) => f.endsWith(".js")).map((f) => f.slice(0, -3)).sort();
+
+  it("the README workflow table, the README file tree and the adoption guide's orchestration list name every workflow", () => {
+    const readme = read("README.md");
+    // The table's rows after its header, and the file tree's entries under the first `  workflows/` line (.claude's).
+    const table = /^\| Workflow \| Backs \|.*\n\|[-| ]+\|\n((?:\|.*\n)+)/m.exec(readme)?.[1] ?? "";
+    const tree = /^ {2}workflows\/.*\n((?: {4}.*\n)+)/m.exec(readme)?.[1] ?? "";
+    const orchestration = section(read("docs/adoption-guide.md"), "## Multi-agent orchestration (Workflows)").split("\nTo adapt them:")[0];
+    const missing = (text, form) => names.filter((n) => !text.includes(form(n)));
+    expect(names.length).toBeGreaterThan(0);
+    expect({
+      table: missing(table, (n) => `| \`${n}.js\` |`),
+      tree: missing(tree, (n) => ` ${n}.js `),
+      orchestration: missing(orchestration, (n) => `\`${n}\``),
+    }).toEqual({ table: [], tree: [], orchestration: [] });
+  });
+});

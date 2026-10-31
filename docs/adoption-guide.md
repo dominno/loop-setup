@@ -374,12 +374,20 @@ first-class:
    sets first; rename or merge conflicts deliberately, don’t clobber.
 2. **Add a `description`** (and `argument-hint` if it takes input) to each — this
    is what Claude routes on. Without it, selection falls back to the filename.
-3. **Decide what may auto-fire.** A `description` doesn’t just help *you* choose —
-   Claude can **auto-invoke** the command from a matching request. That’s fine for
-   read-only commands, but a heavy or code-changing one (`/multi-agent-dev`,
-   `/qa-pass`, `/fix-localhost`) firing unprompted is surprising. Add
-   `disable-model-invocation: true` to any command that should be **manual-only**
-   (you still type `/name`); leave it off for ones Claude may pick on its own.
+3. **Decide what may auto-fire — the manual-only rule.** A `description` doesn’t just
+   help *you* choose — Claude can **auto-invoke** the command from a matching request.
+   `disable-model-invocation: true` stops that (you still type `/name`), but it also
+   blocks Claude’s Skill call and hides the command, so Claude can no longer run it
+   even where `CLAUDE.md` tells it to. Make a command **manual-only** only if it
+   rewrites the governing prompt surface (as `/improve-skills` does) or runs a measured
+   fan-out that `CLAUDE.md` never tells Claude to run (as `/bench-checkers` does), and
+   mark its `.claude/skills-index.md` row `(manual-only)`. Any command `CLAUDE.md` tells
+   Claude to run (here `/dream`, `/multi-agent-dev` and the doc-scanner commands) stays
+   model-invocable. Cost is bounded elsewhere: the engine workflows stay model-invocable
+   skills, so the bound is their own per-call caps and token-budget floor checks (*Cost
+   is real*, under Multi-agent orchestration below); in Auto mode, the Workflow approval
+   appears only on the first launch. `pnpm test` fails when a command’s flag and its
+   index row disagree.
 4. **Add a row to `.claude/skills-index.md`** under the right group, with a
    one-line “when to use”.
 5. **Resolve overlaps.** If your command duplicates a template one (e.g. your
@@ -415,7 +423,8 @@ Don’t bulk-paste them into the wiki. Triage each item by destination:
 ```txt
 [ ] Checked for command NAME collisions before copying (no silent clobber)
 [ ] Existing commands kept; each given a description (+ argument-hint)
-[ ] Heavy/code-changing commands set disable-model-invocation: true (manual-only)
+[ ] disable-model-invocation: true only per the manual-only rule (.claude/skills-index.md),
+    with (manual-only) in its index row; never on a command CLAUDE.md tells Claude to run
 [ ] Each existing command added to .claude/skills-index.md, grouped
 [ ] Duplicate commands merged (one canonical per job)
 [ ] Old notes triaged: facts → memory topics, rules → CLAUDE.md,
@@ -516,7 +525,10 @@ Adapt it to your stack:
 The critic-bearing commands don't simulate critics in one context — they invoke
 deterministic **`Workflow`-tool scripts** under `.claude/workflows/` that fan out
 parallel subagents (own context each) with adversarial / maker-checker verification:
-`critic-panel`, `scan-docs`, `gap-analysis`, `e2e-design`, and `loop-iteration`.
+`critic-panel`, `scan-docs`, `gap-analysis`, `e2e-design`, `loop-iteration`,
+`improve-skills` and `trace-bench`. Each registers as a skill under its `meta.name`, which
+is its file name except for `improve-skills.js`: its skill name is `prompt-meta-critic`,
+because a skill named like the `/improve-skills` command would be listed twice.
 
 To adapt them:
 
@@ -542,7 +554,8 @@ To adapt them:
   incomplete, never clean.
 - **Name workflows distinctly from commands** — a workflow whose `meta.name`
   matches a command shows up as a duplicate in the skills list (that's why the
-  critic workflow is `critic-panel`, not `critic-round`).
+  critic workflow is `critic-panel`, not `critic-round`, and `improve-skills.js`
+  registers as `prompt-meta-critic`); `pnpm test` fails on a shared name.
 - **Requires a Claude Code build with the `Workflow` tool.** If yours lacks it, the
   commands still work as a single Lead agent simulating the panel — just without the
   independent contexts.
@@ -586,7 +599,7 @@ issues; record nice-to-haves; avoid unrelated refactors.
 [ ] If a docs/ wiki already exists: namespaced the story map + picked ONE canonical
     memory home (see "Reconciling with an existing docs/ wiki")
 [ ] Checked command name collisions; existing commands given descriptions + skills-index rows;
-    heavy commands set disable-model-invocation; old notes triaged (no secrets)
+    disable-model-invocation only per the manual-only rule; old notes triaged (no secrets)
 [ ] Playwright/browser setup chosen (local install vs. web pre-provisioned)
 [ ] Ran my own `verify` chain green once
 [ ] Ran /scan-project-docs against my real docs

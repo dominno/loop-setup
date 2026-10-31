@@ -144,7 +144,7 @@ flowchart LR
 > completion is at least `defer` (`reject` when a blocker is confirmed); it never makes or prevents
 > `error`. Off, dead or not started, its prior records stay in `notRechecked`.
 
-## `improve-skills` — meta-critic over our own prompts (`/improve-skills`)
+## `improve-skills` — meta-critic over our own prompts (`/improve-skills`; skill: `prompt-meta-critic`)
 
 ```mermaid
 flowchart LR
@@ -360,4 +360,7 @@ flowchart LR
 These diagrams are hand-maintained to mirror `.claude/workflows/*.js`. When you add a
 node, change a tier, or add an edge, update the matching diagram here. `/improve-skills`
 (Consistency lens) and `/dream lint` should flag a diagram that has drifted from its
-script.
+script. `pnpm test` checks two things mechanically: every workflow has a section headed
+with its file name, and each agent a stub run starts carries its model's tier marker on
+its node (the "model tiers" check in `scripts/trace/workflows.test.mjs` maps each agent
+to its node).

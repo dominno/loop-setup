@@ -1,28 +1,38 @@
 export const meta = {
-  name: 'improve-skills',
+  name: 'prompt-meta-critic',
   description:
-    "Deterministic meta-critic over the project's OWN prompts and orchestration: fan out one reviewer per quality lens across the command/workflow/instruction surface (.claude/commands/*.md, .claude/workflows/*.js, CLAUDE.md, skills-index, loop files), adversarially verify each blocker and important finding with a separate skeptic (important findings are uncapped by default; args.maxVerifiers caps them, and the rest are recorded as defers), and return PROPOSED edits. The caller applies them only on confirmation — this workflow never writes files.",
+    "Deterministic meta-critic over the project's OWN prompts and orchestration: fan out one reviewer per quality lens across the command/workflow/instruction surface (.claude/commands/*.md, .claude/workflows/*.js, CLAUDE.md, skills-index, loop files), adversarially verify each blocker and important finding with a separate skeptic (important findings are uncapped by default; args.maxVerifiers caps them, and the rest are recorded as defers), and return PROPOSED edits. The caller applies them only on confirmation — this workflow never writes files. Engine of the manual-only /improve-skills — run only when the user invoked that command.",
   phases: [
     { title: 'Review', detail: 'one meta-critic per lens reviews the prompt/workflow surface' },
     { title: 'Verify', detail: 'a separate skeptic refutes each blocker and important finding AND its proposed edit; important findings are uncapped by default, args.maxVerifiers caps them, and the rest are recorded as defers' },
   ],
 }
 
-// Normalize args: a command may pass `args` as an object, a plain string, or a
-// JSON-encoded string (e.g. '{"scope":"..."}'). Parse the JSON-string case so
-// `a.scope`/`a.targets` resolve instead of leaking the raw JSON into `scope`.
+// The skill name is not 'improve-skills': a workflow named like a command shows up twice in the
+// skills list. The file name, writer_id and provenance keep 'improve-skills', so records continue.
+
+// Normalize args: an object, or a JSON-encoded string (e.g. '{"scope":"..."}'), parsed
+// so `a.scope`/`a.targets` resolve. Anything else is refused just below.
 let a = args
 if (typeof a === 'string') {
   const s = a.trim()
   if (s.startsWith('{') || s.startsWith('[')) {
-    try { a = JSON.parse(s) } catch { /* keep the string as a plain scope note */ }
+    try { a = JSON.parse(s) } catch { /* not JSON: refused below */ }
   }
 }
 
+// Only /improve-skills starts a pass, and it always passes { scope } ({ scope: '' } runs the
+// default full-surface pass); a caller may pass { targets } instead. No args, a plain string, or
+// an object with neither key is refused before any agent starts: a bare invocation of this skill
+// must not fan out the full pass (six reviewers plus a skeptic per blocker and important finding).
+if (!a || typeof a !== 'object' || Array.isArray(a) || !('scope' in a || 'targets' in a)) {
+  const error = `argument error: pass args = { scope } (and optionally targets), as /improve-skills does; got ${(JSON.stringify(a) || String(a)).slice(0, 80)} — no agent started`
+  log(`ERROR: ${error}`)
+  return { error, failedReviewers: [], applyReady: [], needsDesign: [], deferred: [], niceToHaves: [], refuted: [], traceRecords: [] }
+}
+
 // Optional focus note + explicit target list, passed via the Workflow `args`.
-const scope =
-  (a && (a.scope || (typeof a === 'string' ? a : null))) ||
-  'all custom prompts, skills, and workflow orchestration in this repo'
+const scope = a.scope || 'all custom prompts, skills, and workflow orchestration in this repo'
 // The default prompt surface to review. Callers can pass args.targets to scope it.
 const DEFAULT_TARGETS = [
   '.claude/commands/*.md',
@@ -68,8 +78,8 @@ const LENSES = [
   { key: 'instruction-following', code: false, label: 'Instruction-Following Risk Critic', lens: 'Where would an LLM plausibly misread, skip, or over-comply? Conflicting directives, a critical rule buried mid-paragraph, ambiguous ordering, "should" where "must" is meant, or prompts so long the key constraint is lost.' },
   { key: 'safety-gating', code: false, label: 'Safety & Gating Critic', lens: 'Are destructive or auto-applied actions properly confirmation-gated and denylist-aware? Flag any prompt that could auto-create/rewrite/delete files, commit/push, or self-modify core prompts WITHOUT an explicit confirmation gate. This is the most important lens for a self-improving system.' },
   { key: 'consistency-dry', code: false, label: 'Consistency & DRY Critic', lens: 'Contradictions or duplication ACROSS CLAUDE.md, the commands, skills-index.md, and the memory wiki. Flag facts/lists stated in multiple places that can drift apart (single-source-of-truth risk), and any command whose body contradicts CLAUDE.md or the wiki. Also: for each diagram in docs/workflow-graphs.md, verify its node list, model-tier annotations (🟢/🔵/⚪/▫️), and edges match the actual agent() calls (CRITICS/LENSES/DIMENSIONS/CATEGORIES arrays and FANOUT_MODEL/JUDGE_MODEL usage) in the corresponding .claude/workflows/*.js — flag any diagram that has drifted from its script.' },
-  { key: 'workflow-dsl', code: true, label: 'Workflow DSL & Schema Critic', lens: 'For .claude/workflows/*.js only: fail-safe verifiers (a null/failed verdict must NOT confirm), unique agent labels that include the map index, a pipeline first stage that never resolves to null (the engine ends an item at the first stage that resolves to null, so wrap its result) and no dropped null slot (a null pipeline or parallel slot is filled or read as a failure, never filtered away), fail-closed defaults, maker/checker given the REAL artifact (not a self-report), valid JSON Schemas, and a meta block that is a pure literal. Also check the graph-engineering conventions: correct FANOUT_MODEL/JUDGE_MODEL tiering (fan-out nodes on the fast tier; gates/judgment/synthesis on the strong tier; any code-writing node explicitly exempted rather than silently downgraded); and, where a budget guard exists, that it fails safe (skips or escalates on a floor breach and never auto-approves unverified work). For verdict-producing workflows also check the TRACE-lite contract (.claude/memory/topics/trace.md): typed verdicts (accept/qualify/revise/defer/reject), a null/failed verdict becomes defer (never confirmed, never counted as refuted), defer carries missing and revise carries repair, and the returned record drafts match what the workflow actually decided. Flag deviations.' },
-  { key: 'routing', code: false, label: 'Routing & Discoverability Critic', lens: 'Does each command have a one-line description (for model routing) and a matching skills-index row? Flag near-duplicate commands, dead index rows, missing argument-hints, and heavy/code-changing commands that lack disable-model-invocation where they should be manual-only.' },
+  { key: 'workflow-dsl', code: true, label: 'Workflow DSL & Schema Critic', lens: 'For .claude/workflows/*.js only: fail-safe verifiers (a null/failed verdict must NOT confirm), unique agent labels that include the map index, a pipeline first stage that never resolves to null (the engine ends an item at the first stage that resolves to null, so wrap its result) and no dropped null slot (a null pipeline or parallel slot is filled or read as a failure, never filtered away), a catch before mapping a missing verdict to defer (an agent() that throws must reach the same defer as one that returns nothing), fail-closed defaults, maker/checker given the REAL artifact (not a self-report), valid JSON Schemas, and a meta block that is a pure literal. Also check the graph-engineering conventions: correct FANOUT_MODEL/JUDGE_MODEL tiering (fan-out nodes on the fast tier; gates/judgment/synthesis on the strong tier; any code-writing node explicitly exempted rather than silently downgraded); and, where a budget guard exists, that it fails safe (skips or escalates on a floor breach and never auto-approves unverified work). For verdict-producing workflows also check the TRACE-lite contract (.claude/memory/topics/trace.md): typed verdicts (accept/qualify/revise/defer/reject), a null/failed verdict becomes defer (never confirmed, never counted as refuted), defer carries missing and revise carries repair, and the returned record drafts match what the workflow actually decided. Flag deviations.' },
+  { key: 'routing', code: false, label: 'Routing & Discoverability Critic', lens: 'Does each command have a one-line description (for model routing) and a matching skills-index row? Flag near-duplicate commands, dead index rows, missing argument-hints, and commands whose disable-model-invocation contradicts the manual-only rule in .claude/skills-index.md — or propose a change to that rule when a new heavy command falls outside it.' },
 ]
 
 const FINDINGS_SCHEMA = {

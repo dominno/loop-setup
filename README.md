@@ -18,9 +18,9 @@ The workflow starts with critique, not coding — and ends with proof, not confi
 
 ![Task cycle: intent, /write-goal, pre-critique, plan, TDD implementation, verify, post-critique, 0 blockers?, /qa-pass, /dream](docs/infographic-1-task-cycle.png)
 
-**2. The multi-agent workflows** — each node is a subagent with its own context.
+**2. The multi-agent workflows** — six of the seven workflows (`trace-bench`, added later, is drawn in [`docs/workflow-graphs.md`](docs/workflow-graphs.md)); each node is a subagent with its own context.
 
-![The six multi-agent workflows: critic-panel, scan-docs, gap-analysis, e2e-design, loop-iteration, improve-skills](docs/infographic-2-multi-agent-workflows.png)
+![Six of the seven multi-agent workflows: critic-panel, scan-docs, gap-analysis, e2e-design, loop-iteration, improve-skills — trace-bench, added later, is drawn in docs/workflow-graphs.md](docs/infographic-2-multi-agent-workflows.png)
 
 **3. The components** — four layers of files, and the evidence-based story statuses.
 
@@ -120,7 +120,9 @@ in **[`docs/adoption-guide.md`](docs/adoption-guide.md)** — the short version:
 5. **Mind the integration gotchas** — already have a `docs/` wiki? Namespace the
    story map and *bridge* (don't run two memories). Already have slash commands?
    Check name collisions, give each a `description`, and set
-   `disable-model-invocation: true` on heavy ones. Put shared permissions in a
+   `disable-model-invocation: true` only where the manual-only rule in
+   `.claude/skills-index.md` applies (never on a command `CLAUDE.md` tells Claude to
+   run). Put shared permissions in a
    committed `.claude/settings.json` (create it — the template ships only
    `settings.local.json`); the `git add`/`git commit` auto-allow is opt-in. In CI,
    install the browser normally (no `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD`).
@@ -158,6 +160,8 @@ maker-checker verification:
 | `gap-analysis.js` | `/story-gap-analysis` | per-dimension gap analysis → a separate skeptic per dimension types each gap → a synthesized next-order over the licensed (accept/qualify) gaps only |
 | `e2e-design.js` | `/multi-agent-e2e` | per-category E2E case enumeration → dedup → a separate judge types each case; only licensed (accept/qualify) cases are returned |
 | `loop-iteration.js` | `/loop` (L2/L3) | worktree implementer → separate verifier per item |
+| `improve-skills.js` | `/improve-skills` (manual-only) | per-lens meta-critic over the project's own prompts and workflows → a separate skeptic per blocker and important finding → proposed edits, applied only on confirmation (skill name `prompt-meta-critic`) |
+| `trace-bench.js` | `/bench-checkers` (manual-only) | the production loop verifier, a single-pass reviewer and an opt-in critic panel run on seeded-defect fixtures; `pnpm trace bench-score` scores the runs |
 
 It's heavier by design — independent review beats a single context role-playing the
 panel. Commands that don't fan out (`/fix-localhost`, `/write-goal`, `/dream`,

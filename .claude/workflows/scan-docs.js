@@ -1,7 +1,7 @@
 export const meta = {
   name: 'scan-docs',
   description:
-    'Deterministic doc-scanner: for each user story (passed in), pipeline an evidence-gathering agent then a separate status-verifier agent. Returns evidence-based per-story status records plus TRACE-lite record drafts; the caller writes the docs/stories files.',
+    'Deterministic doc-scanner: for each user story (passed in), pipeline an evidence-gathering agent then a separate status-verifier agent. Returns evidence-based per-story status records plus TRACE-lite record drafts; the caller writes the docs/stories files. Engine of /scan-project-docs and /sync-story-status — invoke it through one of them so its verdicts are recorded.',
   phases: [
     { title: 'Evidence', detail: 'gather implementation + test evidence per story' },
     { title: 'Verify', detail: 'a separate agent confirms an evidence-based status (no overclaiming)' },

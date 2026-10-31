@@ -3,7 +3,7 @@
 // what each workflow decides and that every record draft it emits satisfies the schema.
 // Compile/parity checks alone cannot catch a deleted gate call or a broken reuse key.
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { benchArgs, briefRecords, finalizeRecord, loadSchema, loadWorkflowBlock, markUnscanned, opaqueFixtureId, readPolicyVersion, ROOT, scoreBench, semanticViolations, validate } from "./lib.mjs";
 
@@ -2655,5 +2655,215 @@ describe("critic-panel: the opt-in completeness critic (args.completeness, defau
     expect(result.confirmed[0].alsoFlaggedBy.map((x) => x.critic)).toEqual(["security", "regression", "completeness"]);
     expect(result.confirmed[0].independentEvidence).toEqual([{ critic: "regression", evidence: "src/app/page.tsx:9" }]);
     expect(result.traceRecords.map((r) => r.claim_id)).toEqual(["critic:qa-e2e:input-has-no-accessible-name"]);
+  });
+});
+
+// The workflow registry: every script under .claude/workflows/ is named where Claude and a reader
+// look for it, and registers under a skill name (meta.name) that no command takes: workflows and
+// commands share the skills list, so a match shows up there as a duplicate entry. Portable: a check
+// whose document an adopter does not have is skipped.
+describe("workflow registry", () => {
+  const exists = (rel) => existsSync(join(ROOT, rel));
+  const read = (rel) => readFileSync(join(ROOT, rel), "utf8");
+  const workflows = readdirSync(join(ROOT, ".claude/workflows"))
+    .filter((f) => f.endsWith(".js"))
+    .sort()
+    .map((f) => {
+      const metaSrc = /^export const meta = (\{[\s\S]*?\n\})\n/m.exec(read(`.claude/workflows/${f}`))?.[1];
+      return { base: f.slice(0, -3), name: metaSrc ? new Function(`return (${metaSrc})`)().name : undefined };
+    });
+
+  it("reads every workflow's skill name", () => {
+    expect(workflows.length).toBeGreaterThan(0);
+    expect(workflows.filter((w) => typeof w.name !== "string").map((w) => w.base)).toEqual([]);
+  });
+
+  it.skipIf(!exists("CLAUDE.md"))("CLAUDE.md names every workflow script as <name>.js", () => {
+    const text = read("CLAUDE.md");
+    expect(workflows.filter((w) => !text.includes(`${w.base}.js`)).map((w) => w.base)).toEqual([]);
+  });
+
+  it.skipIf(!exists(".claude/skills-index.md"))("the skills index names every workflow by its file name and by its skill name", () => {
+    const text = read(".claude/skills-index.md");
+    expect([...new Set(workflows.flatMap((w) => [w.base, w.name]))].filter((n) => !text.includes(n))).toEqual([]);
+  });
+
+  it.skipIf(!exists("docs/workflow-graphs.md"))("docs/workflow-graphs.md has a section headed '## `<name>`' for every workflow", () => {
+    const headings = read("docs/workflow-graphs.md").split("\n").filter((l) => l.startsWith("## `"));
+    expect(workflows.filter((w) => !headings.some((h) => h.startsWith(`## \`${w.base}\``))).map((w) => w.base)).toEqual([]);
+  });
+
+  it("no workflow's skill name (meta.name) is also a command's name", () => {
+    const commands = exists(".claude/commands") ? readdirSync(join(ROOT, ".claude/commands")).filter((f) => f.endsWith(".md")).map((f) => f.slice(0, -3)) : [];
+    expect(workflows.filter((w) => commands.includes(w.name)).map((w) => `${w.base}.js: meta.name '${w.name}' is also .claude/commands/${w.name}.md`)).toEqual([]);
+  });
+});
+
+// Model tiers, as docs/workflow-graphs.md draws them (its legend): 🟢 sonnet, 🔵 opus, ⚪ no model set
+// (the agent inherits the session's model). Each workflow's stub runs below reach every kind of agent
+// it starts, opt-in ones included. `nodes` ties each agent label (first matching pattern) to text that
+// names its node in the workflow's section, and the first line there holding that text must carry
+// exactly the call's marker. A call no pattern maps, a node no call reaches, or a workflow with no
+// runs here fails, so a new agent or workflow is drawn (and mapped) before it ships. Drift is fixed
+// in the doc, not in the script.
+const GRAPHS = join(ROOT, "docs/workflow-graphs.md");
+describe.skipIf(!existsSync(GRAPHS))("model tiers: each agent's model matches the marker on its node in docs/workflow-graphs.md", () => {
+  // A skipped describe body still runs (to collect its tests), so the read is guarded.
+  const lines = existsSync(GRAPHS) ? readFileSync(GRAPHS, "utf8").split("\n") : [];
+  // A workflow's section: from its '## `<name>`' heading to the next '## ' heading.
+  const sectionOf = (base) => {
+    const start = lines.findIndex((l) => l.startsWith(`## \`${base}\``));
+    if (start < 0) return [];
+    const end = lines.findIndex((l, i) => i > start && l.startsWith("## "));
+    return lines.slice(start, end < 0 ? lines.length : end);
+  };
+  const MARKER = { sonnet: "🟢", opus: "🔵" };
+  const tierOf = (model) => (model === undefined ? "⚪" : MARKER[model] || `(no marker for model ${model})`);
+  const markersOn = (line) => [...new Set(line.match(/🟢|🔵|⚪/gu) || [])].join("");
+  const diff = "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-a\n+b\n";
+  const metaBlocker = { severity: "blocker", file: "CLAUDE.md", title: "Gate weakened", evidence: "CLAUDE.md:1", proposedEdit: "restore it" };
+  const storyEvidence = { implementationFiles: ["src/lib/greeting.ts"], unitTests: "Present", e2eTests: "Present", proposedStatus: "E2E tested", notes: "" };
+  const SCENARIOS = {
+    "critic-panel": {
+      runs: [
+        // The panel (every lens) and the opt-in completeness critic, each raising a blocker for a skeptic.
+        [{ focus: "x", completeness: true }, (label) => (label === "critic:completeness-0" ? { findings: [finding({ title: "Retry loop has no bound" })] } : label.startsWith("critic:") ? onlySecurity([finding()])(label) : verdict())],
+        // A code-only round: one all-lens reviewer.
+        [{ focus: "x", uiInScope: false }, (label) => (label.startsWith("critic:") ? { findings: [finding({ lens: "security" })] } : verdict())],
+      ],
+      nodes: [
+        [/^critic:all-lenses-0$/, "`critic:all-lenses-0`"],
+        [/^critic:completeness-0$/, "Coverage — one completeness critic"],
+        [/^critic:/, "Review — parallel barrier"],
+        [/^verify:/, "Verify — one skeptic per blocker"],
+      ],
+    },
+    "improve-skills": {
+      runs: [[{ targets: ["CLAUDE.md"] }, (label) => (label.startsWith("meta:safety") ? { findings: [metaBlocker] } : label.startsWith("meta:") ? { findings: [] } : null)]],
+      nodes: [
+        [/^meta:/, "Review — per lens"],
+        [/^verify:/, "Verify — 2-axis skeptic"],
+      ],
+    },
+    "scan-docs": {
+      runs: [[{ stories: [{ id: "US-001", title: "Greeting", source: "docs/prd.md" }] }, (label) => (label.startsWith("evidence:") ? storyEvidence : null)]],
+      nodes: [
+        [/^evidence:/, "gather code+test evidence"],
+        [/^verify:/, "strict status verifier"],
+      ],
+    },
+    "gap-analysis": {
+      runs: [[{ scope: "mvp", completeness: true }, gapStub({ "docs-not-impl": [gapItem("a documented feature is missing")], other: [gapItem("an uncovered gap")] })]],
+      nodes: [
+        [/^gap:/, "finder: the gaps along one dimension"],
+        [/^gap-verify:/, "skeptic: one typed verdict per numbered gap"],
+        [/^synthesize$/, "synthesize prioritized order"],
+      ],
+    },
+    "e2e-design": {
+      runs: [[{ flow: "greeting" }, happyOnly([e2eCase("greets by name")], () => ({ verdicts: [caseVerdict(1)] }))]],
+      nodes: [
+        [/^e2e:judge-0$/, "judge: one typed verdict per numbered case"],
+        [/^e2e:/, "Design — per path category"],
+      ],
+    },
+    "loop-iteration": {
+      runs: [
+        [
+          { items: [{ id: "LP-010", description: "x" }], level: "L2", headSha: HEAD_SHA },
+          (label) => (label.startsWith("impl:") ? { baseSha: HEAD_SHA, changedFiles: ["src/a.ts"], diff, checksPassed: true, notes: "" } : verdict({ evidenceChecked: [{ kind: "diff", ref: "src/a.ts" }] })),
+        ],
+      ],
+      nodes: [
+        [/^impl:/, "implementer<br/>fresh worktree"],
+        [/^verify:/, "verifier: typed verdict on the real diff"],
+      ],
+    },
+    "trace-bench": {
+      runs: [
+        [
+          { fixtures: [{ id: "fx-0000000a", item: "x", patch: diff }], arms: ["verifier", "single-pass", "panel"], critics: ["security"] },
+          (label) => (label.startsWith("bench-verify:") ? verdict() : { block: false, findings: [], reason: "" }),
+        ],
+      ],
+      nodes: [
+        [/^bench-verify:/, "verifier arm × repeat"],
+        [/^bench-single:/, "single-pass arm"],
+        [/^bench-panel:/, "panel arm (opt-in)"],
+      ],
+    },
+  };
+  const bases = readdirSync(join(ROOT, ".claude/workflows")).filter((f) => f.endsWith(".js")).map((f) => f.slice(0, -3)).sort();
+
+  it("every workflow has stub runs here", () => {
+    expect(bases.filter((b) => !SCENARIOS[b])).toEqual([]);
+  });
+
+  it.each(bases.filter((b) => SCENARIOS[b]))("%s", async (base) => {
+    const { runs, nodes } = SCENARIOS[base];
+    const section = sectionOf(base);
+    const drift = [];
+    const reached = new Set();
+    for (const [args, reply] of runs) {
+      const { calls } = await runWorkflow(`${base}.js`, args, reply);
+      for (const c of calls) {
+        const row = nodes.findIndex(([pattern]) => pattern.test(c.label));
+        if (row < 0) {
+          drift.push(`${c.label}: no node pattern maps this agent`);
+          continue;
+        }
+        reached.add(row);
+        const text = nodes[row][1];
+        const line = section.find((l) => l.includes(text));
+        const want = tierOf(c.opts.model);
+        if (line === undefined) drift.push(`${c.label}: no line of the section holds its node text "${text}"`);
+        else if (markersOn(line) !== want) drift.push(`${c.label}: model ${c.opts.model ?? "unset"} is ${want}, but its node "${text}" is marked ${markersOn(line) || "with no tier"}`);
+      }
+    }
+    nodes.forEach(([, text], i) => {
+      if (!reached.has(i)) drift.push(`no agent of the stub runs reached the node "${text}"`);
+    });
+    expect([...new Set(drift)]).toEqual([]);
+  });
+});
+
+// /improve-skills always passes { scope } ({ scope: "" } runs the documented full-surface pass), so only
+// an args object with a scope or targets key starts a pass. A bare invocation of the skill (no args, a
+// plain string, an object with neither key) is refused before any agent starts.
+describe("improve-skills: only an args object with scope or targets starts a pass", () => {
+  it("no args, null, a plain or empty string, an array, or an object with neither key: an argument error with zero agent calls and no records", async () => {
+    for (const args of [undefined, null, "review the loop workflows", "", [], {}, { maxVerifiers: 3 }, '{"maxVerifiers":3}']) {
+      const name = JSON.stringify(args) ?? "undefined";
+      const { result, calls, logs } = await runWorkflow("improve-skills.js", args, () => ({ findings: [] }));
+      expect(calls, name).toEqual([]);
+      expect(result.error, name).toMatch(/^argument error: /);
+      expect(result.traceRecords, name).toEqual([]);
+      expect(logs.map((l) => l.text), name).toEqual([`ERROR: ${result.error}`]);
+    }
+  });
+
+  it("{ scope: '' } (the command run with no arguments) starts the default full-surface pass; a JSON string and { targets } start a pass too", async () => {
+    const reply = (label) => (label.startsWith("meta:") ? { findings: [] } : null);
+    const bare = await runWorkflow("improve-skills.js", { scope: "" }, reply);
+    expect(bare.result.error).toBeUndefined();
+    expect(bare.calls.map((c) => c.label)).toEqual(["meta:clarity-0", "meta:instruction-following-1", "meta:safety-gating-2", "meta:consistency-dry-3", "meta:workflow-dsl-4", "meta:routing-5"]);
+    expect(bare.result.scope).toBe("all custom prompts, skills, and workflow orchestration in this repo");
+    expect(bare.result.targets).toEqual(expect.arrayContaining([".claude/commands/*.md", ".claude/workflows/*.js", "CLAUDE.md", ".claude/skills-index.md"]));
+    for (const args of ['{"scope":"the loop workflows"}', { targets: ["CLAUDE.md"] }]) {
+      const { result, calls } = await runWorkflow("improve-skills.js", args, reply);
+      expect(result.error, JSON.stringify(args)).toBeUndefined();
+      expect(calls, JSON.stringify(args)).toHaveLength(6);
+    }
+  });
+
+  it("the routing lens checks each command's disable-model-invocation against the manual-only rule (or proposes changing the rule); the workflow-dsl lens asks for a catch before a missing verdict maps to defer", async () => {
+    const { calls } = await runWorkflow("improve-skills.js", { targets: [".claude/commands/*.md"] }, (label) => (label.startsWith("meta:") ? { findings: [] } : null));
+    const prompt = (key) => calls.find((c) => c.label.startsWith(`meta:${key}-`)).prompt;
+    expect(prompt("routing")).toContain(
+      "commands whose disable-model-invocation contradicts the manual-only rule in .claude/skills-index.md — or propose a change to that rule when a new heavy command falls outside it",
+    );
+    expect(prompt("routing")).not.toContain("lack disable-model-invocation where they should be manual-only");
+    expect(prompt("workflow-dsl")).toContain("a catch before mapping a missing verdict to defer");
+    expect(prompt("workflow-dsl")).toContain("never resolves to null"); // Step 10b's pipeline clause stays
   });
 });

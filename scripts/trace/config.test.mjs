@@ -1,6 +1,7 @@
 // Permission and hook gates for the committed .claude/settings.json and for the commands'
-// allowed-tools. Portable: an adopter who copies scripts/trace/ keeps these checks, and the
-// settings checks skip while the project has no .claude/settings.json.
+// allowed-tools, and the manual-only routing rule for the commands' disable-model-invocation.
+// Portable: an adopter who copies scripts/trace/ keeps these checks; the settings checks skip
+// while the project has no .claude/settings.json, the routing checks without a skills index.
 import { describe, it, expect } from "vitest";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -8,6 +9,9 @@ import { ROOT } from "./lib.mjs";
 
 const SETTINGS = join(ROOT, ".claude/settings.json");
 const settings = () => JSON.parse(readFileSync(SETTINGS, "utf8"));
+const COMMANDS = join(ROOT, ".claude/commands");
+const SKILLS_INDEX = join(ROOT, ".claude/skills-index.md");
+const frontmatter = (text) => /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1] ?? "";
 
 // Approximates Claude Code's documented Bash rule matching (code.claude.com/docs/en/permissions,
 // "Wildcard patterns"): a trailing ':*' is the same as ' *'; '*' matches any text, spaces
@@ -142,5 +146,30 @@ describe("pre-approvals", () => {
       s.rules.filter((r) => /^Workflow\b/.test(r) || BENCH_WRITERS.some((cmd) => coversBash(r, cmd))).map((r) => `${s.file}: ${r}`),
     );
     expect(offending).toEqual([]);
+  });
+});
+
+// The manual-only rule (.claude/skills-index.md, "Conventions for adding a command"): a command is
+// manual-only (disable-model-invocation: true) exactly when its index row says "(manual-only)". The
+// flag blocks Claude's Skill call and hides the command, so a command CLAUDE.md tells Claude to run
+// never carries it (I5); the engine workflows stay model-invocable, bounded by their own caps.
+describe.skipIf(!existsSync(SKILLS_INDEX) || !existsSync(COMMANDS))("manual-only routing rule", () => {
+  const manualOnly = (file) => /^disable-model-invocation:[ \t]*true[ \t]*$/m.test(frontmatter(readFileSync(join(COMMANDS, file), "utf8")));
+  // A skipped describe body still runs (to collect its tests), so reads here are guarded.
+  const index = existsSync(SKILLS_INDEX) ? readFileSync(SKILLS_INDEX, "utf8") : "";
+  const rows = new Map([...index.matchAll(/^\| `\/([a-z0-9-]+)` \|.*$/gm)].map((m) => [m[1], m[0]]));
+  const files = existsSync(COMMANDS) ? readdirSync(COMMANDS).filter((f) => f.endsWith(".md")) : [];
+
+  it("a command sets disable-model-invocation: true exactly when its skills-index row says (manual-only)", () => {
+    expect(files.length).toBeGreaterThan(0);
+    const drift = files
+      .map((f) => ({ name: f.slice(0, -3), flag: manualOnly(f), row: (rows.get(f.slice(0, -3)) ?? "").includes("(manual-only)") }))
+      .filter((c) => c.flag !== c.row)
+      .map((c) => `/${c.name}: disable-model-invocation ${c.flag}, index row ${c.row ? "says" : "does not say"} (manual-only)`);
+    expect(drift).toEqual([]);
+  });
+
+  it("/dream and /multi-agent-dev stay model-invocable: CLAUDE.md tells Claude to run them (I5)", () => {
+    expect(["dream.md", "multi-agent-dev.md"].filter((f) => existsSync(join(COMMANDS, f)) && manualOnly(f))).toEqual([]);
   });
 });

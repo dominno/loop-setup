@@ -1,7 +1,7 @@
 export const meta = {
   name: 'e2e-design',
   description:
-    'Deterministic E2E test design: fan out one agent per path category (happy, failure, edge, accessibility, regression) to enumerate concrete Playwright test cases for a flow, dedup them, then a separate judge types each case (accept/qualify/revise/defer/reject) under the visible-outcome rule and a deterministic evidence gate. Only licensed (accept/qualify) cases are returned for the caller to implement; the verdicts are advisory and no records are written.',
+    'Deterministic E2E test design: fan out one agent per path category (happy, failure, edge, accessibility, regression) to enumerate concrete Playwright test cases for a flow, dedup them, then a separate judge types each case (accept/qualify/revise/defer/reject) under the visible-outcome rule and a deterministic evidence gate. Only licensed (accept/qualify) cases are returned for the caller to implement; the verdicts are advisory and no records are written. Engine of /multi-agent-e2e — invoke it through that command so only its licensed cases are implemented, then reviewed.',
   phases: [
     { title: 'Design', detail: 'one agent per path category enumerates test cases in parallel' },
     { title: 'Judge', detail: 'a separate judge types each deduped case; a deterministic evidence gate caps overclaims' },
