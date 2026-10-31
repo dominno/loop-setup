@@ -96,6 +96,25 @@ const throwingSync = (prefix, reply) => (label, ...rest) => {
   if (label.startsWith(prefix)) throw Object.assign(new Error(`agent died synchronously: ${label}`), { sync: true });
   return reply(label, ...rest);
 };
+// e2e-design: the category agents propose cases, then ONE separate judge ('e2e:judge-0') types each
+// deduped case by its number (1-based). Only the happy category proposes here, so case #n is the n-th
+// proposed case; `judge` gets the judge's prompt and returns its reply.
+const e2eCase = (title) => ({ title, steps: "fill the name and submit", expected: `the page shows: ${title}` });
+const happyOnly = (proposed, judge) => (label, prompt) =>
+  label.startsWith("e2e:judge") ? judge(prompt) : label.startsWith("e2e:happy") ? { cases: proposed } : { cases: [] };
+const caseVerdict = (index, over = {}) => ({
+  index,
+  verdict: "accept",
+  evidenceChecked: [{ kind: "file_line", ref: "src/components/GreetingForm.tsx:60" }],
+  missing: [],
+  repair: "",
+  qualifier: "",
+  reason: "a distinct case with a visible outcome",
+  ...over,
+});
+const JUDGE = (c) => c.label.startsWith("e2e:judge");
+const NO_VERDICT = "a verdict from the checker (none, or an unknown value, was returned)";
+const NO_COUNTS = { accept: 0, qualify: 0, revise: 0, defer: 0, reject: 0 };
 
 describe("critic-panel (real body, stub agents)", () => {
   it("a missing skeptic verdict defers the finding — never confirmed, never refuted", async () => {
@@ -773,11 +792,20 @@ describe("round integrity: a whole-phase failure is an error, a partial one stay
     const CATEGORY_LABELS = ["e2e:happy-0", "e2e:failure-1", "e2e:edge-2", "e2e:accessibility-3", "e2e:regression-4"];
     for (const reply of deadReplies("e2e:")) {
       const { result, calls } = await runWorkflow("e2e-design.js", { flow: "greeting" }, reply);
-      expect(result).toEqual({ flow: "greeting", error: expect.stringContaining("failed (infra)"), failedCategories: ["happy", "failure", "edge", "accessibility", "regression"], count: 0, cases: [] });
+      // No case was designed, so none is judged (no 'e2e:judge' call); every key of a judged run is still present.
+      expect(result).toEqual({
+        flow: "greeting", error: expect.stringContaining("failed (infra)"), judged: false, failedCategories: ["happy", "failure", "edge", "accessibility", "regression"],
+        count: 0, cases: [], covered: [], revised: [], deferred: [], rejected: [], verdictCounts: NO_COUNTS,
+      });
       expect(calls.map((c) => c.label).sort()).toEqual([...CATEGORY_LABELS].sort());
     }
+    // The four live categories' cases are #1-#4 in category order; the judge accepts all of them.
     const { result } = await runWorkflow("e2e-design.js", { flow: "greeting" }, (label) =>
-      label.startsWith("e2e:edge") ? null : { cases: [{ title: `case for ${label}`, steps: "s", expected: "a visible greeting" }] },
+      label.startsWith("e2e:edge")
+        ? null
+        : label.startsWith("e2e:judge")
+          ? { verdicts: [1, 2, 3, 4].map((i) => caseVerdict(i)) }
+          : { cases: [{ title: `case for ${label}`, steps: "s", expected: "a visible greeting" }] },
     );
     expect(result.error).toBeUndefined();
     expect(result.failedCategories).toEqual(["edge"]);
@@ -876,7 +904,7 @@ describe("agent SAFETY: every prompt of a read-only workflow carries the <agent-
     ["improve-skills.js", "improve-skills.js", { targets: ["CLAUDE.md"] }, (label) => (label.startsWith("meta:safety") ? { findings: [metaBlocker] } : label.startsWith("meta:") ? { findings: [] } : null), ["meta:", "verify:"]],
     ["scan-docs.js", "scan-docs.js", { stories: [story] }, (label) => (label.startsWith("evidence:") ? storyEvidence : { finalStatus: "E2E tested", justification: "j", missing: [], evidenceChecked: [] }), ["evidence:", "verify:"]],
     ["gap-analysis.js", "gap-analysis.js", { scope: "mvp" }, (label) => (label.startsWith("gap:") ? { gaps: [{ item: label, detail: "src/a.ts:1", priority: "high" }] } : { order: [] }), ["gap:", "synthesize"]],
-    ["e2e-design.js", "e2e-design.js", { flow: "greeting" }, () => ({ cases: [] }), ["e2e:"]],
+    ["e2e-design.js", "e2e-design.js", { flow: "greeting" }, happyOnly([e2eCase("greets by name")], () => ({ verdicts: [caseVerdict(1)] })), ["e2e:happy", "e2e:judge"]],
   ])("%s: every agent prompt carries AGENT_SAFETY", async (_name, file, args, reply, reached) => {
     const { AGENT_SAFETY } = loadWorkflowBlock("critic-panel.js", "agent-safety", ["AGENT_SAFETY"]);
     const { calls } = await runWorkflow(file, args, reply);
@@ -1275,6 +1303,14 @@ describe("cost bounds: with no token target no floor fires, even at remaining() 
     expect(result.recommendedOrder).toEqual([{ next: "x", why: "y" }]);
     expect(result.missing).toEqual([]);
   });
+
+  it("e2e-design judge floor: the judge runs and settles the cases", async () => {
+    const { result, calls } = await runWorkflow("e2e-design.js", { flow: "greeting" }, happyOnly([e2eCase("greets by name")], () => ({ verdicts: [caseVerdict(1)] })), NO_TARGET);
+    expect(calls.filter(JUDGE).map((c) => c.label)).toEqual(["e2e:judge-0"]);
+    expect(result.judged).toBe(true);
+    expect(result.cases.map((c) => c.index)).toEqual([1]);
+    expect(result.deferred).toEqual([]);
+  });
 });
 
 // Cases the round-integrity tests did not pin (each kills a named mutation of critic-panel.js).
@@ -1336,6 +1372,14 @@ describe("only workflow code sets 'agent-failed': a live checker cannot forge th
         : { finalStatus: "E2E tested", justification: "a spec covers it", missing: [], evidenceChecked: [{ kind: "file_line", ref: "e2e/greeting.spec.ts:1" }], ...forged },
     );
     expect(scan.result.traceRecords.map((r) => r.failed_gates)).toEqual([[]]);
+  });
+
+  it("e2e-design: a live judge's own 'agent-failed' gate is dropped from the case; its other gates are kept", async () => {
+    const { result } = await runWorkflow("e2e-design.js", { flow: "greeting" }, happyOnly([e2eCase("greets by name")], () => ({
+      verdicts: [caseVerdict(1, { verdict: "defer", evidenceChecked: [], missing: ["an acceptance criterion for the greeting"], failedGates: ["agent-failed", "no-ac-found"] })],
+    })));
+    expect(result.judged).toBe(true);
+    expect(result.deferred).toEqual([expect.objectContaining({ index: 1, verdict: "defer", failedGates: ["no-ac-found"], missing: ["an acceptance criterion for the greeting"] })]);
   });
 
   it("loop-iteration: a live verifier's own 'agent-failed' gate is dropped from the outcome and its record; its other gates are kept", async () => {
@@ -1534,5 +1578,148 @@ describe("pipeline labels carry the map index (a first stage takes it as its thi
     expect(calls.filter((c) => c.label.startsWith("verify:")).map((c) => c.label)).toEqual(["verify:LP-050-0", "verify:LP-051-1"]);
     const { logs } = await runWorkflow("loop-iteration.js", { items, level: "L2", headSha: HEAD_SHA }, throwing("impl:LP-051", reply));
     expect(logs.map((l) => l.text)).toContain("agent failed: impl:LP-051-1: agent died: impl:LP-051-1");
+  });
+});
+
+// e2e-design's category agents make a claim per case ("a distinct case worth implementing, whose
+// expected outcome is user-visible, that no existing spec asserts"). One separate judge types each
+// deduped case and the factual evidence gate settles it: only accept/qualify cases come back in
+// `cases`. The verdicts are advisory: no traceRecords, and no durable state changes on them.
+describe("e2e-design: a separate judge types each case; only licensed cases are returned", () => {
+  it("only accept/qualify cases come back in cases (here citing file_line or browser evidence), each with its verdict and qualifier; the rest are sorted, counted, and no record is drafted", async () => {
+    const proposed = ["greets by name", "greets again after reload", "rejects an empty name", "stores the name", "shows a spinner", "says goodbye"].map(e2eCase);
+    const { result, calls } = await runWorkflow("e2e-design.js", { flow: "greeting" }, happyOnly(proposed, () => ({
+      verdicts: [
+        caseVerdict(1),
+        caseVerdict(2, { evidenceChecked: [{ kind: "browser", ref: "http://localhost:3000/ after a reload" }] }),
+        caseVerdict(3, { verdict: "qualify", qualifier: "only an empty name; whitespace is not covered" }),
+        caseVerdict(4, { verdict: "revise", repair: "after a reload the input shows the stored name" }),
+        caseVerdict(5, { verdict: "reject", evidenceChecked: [], reason: "no spinner is rendered: nothing to observe" }),
+        caseVerdict(6, { verdict: "defer", evidenceChecked: [], missing: ["an acceptance criterion for a farewell"] }),
+      ],
+    })));
+    expect(calls.filter(JUDGE).map((c) => [c.label, c.opts.phase, c.opts.model])).toEqual([["e2e:judge-0", "Judge", "opus"]]);
+    const judgePrompt = calls.find(JUDGE).prompt;
+    for (const c of proposed) expect(judgePrompt).toContain(c.title);
+    expect(judgePrompt).toContain("visible outcome, not just page load"); // the rule of docs/e2e-coverage-map.md
+    expect(result.judged).toBe(true);
+    expect(result.cases.map((c) => [c.index, c.title, c.category, c.verdict, c.qualifier])).toEqual([
+      [1, "greets by name", "happy", "accept", ""],
+      [2, "greets again after reload", "happy", "accept", ""],
+      [3, "rejects an empty name", "happy", "qualify", "only an empty name; whitespace is not covered"],
+    ]);
+    expect(result.count).toBe(3);
+    expect(result.revised.map((c) => [c.index, c.repair])).toEqual([[4, "after a reload the input shows the stored name"]]);
+    expect(result.rejected.map((c) => [c.index, c.reason])).toEqual([[5, "no spinner is rendered: nothing to observe"]]);
+    expect(result.deferred.map((c) => [c.index, c.missing])).toEqual([[6, ["an acceptance criterion for a farewell"]]]);
+    expect(result.covered).toEqual([]);
+    expect(result.verdictCounts).toEqual({ accept: 2, qualify: 1, revise: 1, defer: 1, reject: 1 });
+    expect(result.failedCategories).toEqual([]);
+    expect(result.traceRecords).toBeUndefined(); // advisory: nothing to write
+  });
+
+  it("an accept citing only 'reading' lands in deferred, capped by the factual evidence gate", async () => {
+    const { result } = await runWorkflow("e2e-design.js", { flow: "greeting" }, happyOnly([e2eCase("greets by name")], () => ({
+      verdicts: [caseVerdict(1, { evidenceChecked: [{ kind: "reading", ref: "src/components/GreetingForm.tsx" }] })],
+    })));
+    expect(result.cases).toEqual([]);
+    expect(result.deferred).toEqual([
+      expect.objectContaining({
+        index: 1,
+        verdict: "defer",
+        preGateVerdict: "accept",
+        failedGates: ["evidence-gate:factual:accept-needs-file_line|command|browser|measurement|diff"],
+        missing: ["a file:line, diff, command output, or browser observation that reproduces it"],
+      }),
+    ]);
+  });
+
+  it("a case the live judge gave no verdict is deferred with 'a verdict from the checker…' (verdict-missing only: the judge did not fail); a verdict for no listed case is ignored", async () => {
+    const proposed = [e2eCase("greets by name"), e2eCase("greets again after reload")];
+    const { result } = await runWorkflow("e2e-design.js", { flow: "greeting" }, happyOnly(proposed, () => ({ verdicts: [caseVerdict(1), caseVerdict(3), caseVerdict(0)] })));
+    expect(result.judged).toBe(true);
+    expect(result.cases.map((c) => c.index)).toEqual([1]);
+    expect(result.deferred).toEqual([expect.objectContaining({ index: 2, verdict: "defer", preGateVerdict: null, failedGates: ["verdict-missing"], missing: [NO_VERDICT] })]);
+  });
+
+  it("a judge that returns nothing or throws gives judged:false and defers every case (verdict-missing + agent-failed); none is dropped and it is no error", async () => {
+    const proposed = [e2eCase("greets by name"), e2eCase("greets again after reload")];
+    for (const [reply, threw] of [[happyOnly(proposed, () => null), false], [throwing("e2e:judge", happyOnly(proposed, () => null)), true]]) {
+      const { result, calls, logs } = await runWorkflow("e2e-design.js", { flow: "greeting" }, reply);
+      // A throwing judge is caught by the file's agentFailed helper (logged), never left to crash the run.
+      expect(logs.map((l) => l.text).includes("agent failed: e2e:judge-0: agent died: e2e:judge-0")).toBe(threw);
+      expect(calls.filter(JUDGE)).toHaveLength(1);
+      expect(result.error).toBeUndefined(); // a dead checker defers per case; only a dead first phase is an error
+      expect(result.judged).toBe(false);
+      expect(result.cases).toEqual([]);
+      expect(result.count).toBe(0);
+      expect(result.deferred.map((c) => [c.index, c.title, c.verdict, c.failedGates, c.missing])).toEqual(
+        proposed.map((c, i) => [i + 1, c.title, "defer", ["verdict-missing", "agent-failed"], [NO_VERDICT]]),
+      );
+      expect(result.verdictCounts).toEqual({ ...NO_COUNTS, defer: 2 });
+    }
+  });
+
+  it("a coveredBy reject citing the spec's file:line lands in covered, in no gap list; without file_line evidence it is deferred", async () => {
+    const proposed = [e2eCase("persists the name across a reload"), e2eCase("clears the remembered name")];
+    const { result } = await runWorkflow("e2e-design.js", { flow: "remember-me" }, happyOnly(proposed, () => ({
+      verdicts: [
+        caseVerdict(1, { verdict: "reject", coveredBy: "e2e/remember-me.spec.ts:6", evidenceChecked: [{ kind: "file_line", ref: "e2e/remember-me.spec.ts:6" }], reason: "already asserted" }),
+        caseVerdict(2, { verdict: "reject", coveredBy: "e2e/remember-me.spec.ts:28", evidenceChecked: [{ kind: "reading", ref: "e2e/remember-me.spec.ts" }], reason: "already asserted" }),
+      ],
+    })));
+    expect(result.covered.map((c) => [c.index, c.verdict, c.coveredBy])).toEqual([[1, "reject", "e2e/remember-me.spec.ts:6"]]);
+    // The coverage gaps are the deferred, revised and unobservable rejected cases: the covered case is in none.
+    expect([...result.cases, ...result.revised, ...result.rejected].map((c) => c.index)).toEqual([]);
+    expect(result.deferred).toEqual([expect.objectContaining({ index: 2, verdict: "defer", preGateVerdict: "reject", failedGates: ["evidence-gate:covered-needs-file_line"] })]);
+    expect(result.deferred[0].missing).toEqual([expect.stringContaining("e2e/remember-me.spec.ts:28")]);
+    expect(result.verdictCounts).toEqual({ ...NO_COUNTS, defer: 1, reject: 1 });
+  });
+
+  it("mutual duplicates are both deferred, each naming its twin; a duplicate of a licensed case stays rejected beside it", async () => {
+    const proposed = ["greets by name", "says hello by name", "greets again after reload", "shows the greeting after a reload", "greets twice"].map(e2eCase);
+    const dup = (index, of) => caseVerdict(index, { verdict: "reject", duplicateOf: of, evidenceChecked: [], reason: `the same case as #${of}` });
+    const { result } = await runWorkflow("e2e-design.js", { flow: "greeting" }, happyOnly(proposed, () => ({ verdicts: [dup(1, 2), dup(2, 1), caseVerdict(3), dup(4, 3), dup(5, 9)] })));
+    expect(result.cases.map((c) => c.index)).toEqual([3]);
+    expect(result.rejected.map((c) => [c.index, c.duplicateOf])).toEqual([[4, 3]]);
+    expect(result.deferred.map((c) => [c.index, c.verdict, c.preGateVerdict, c.failedGates])).toEqual([
+      [1, "defer", "reject", ["duplicate-of-unlicensed"]],
+      [2, "defer", "reject", ["duplicate-of-unlicensed"]],
+      [5, "defer", "reject", ["duplicate-of-unlicensed"]],
+    ]);
+    expect(result.deferred.map((c) => c.missing)).toEqual([[expect.stringContaining("#2")], [expect.stringContaining("#1")], [expect.stringContaining("#9")]]);
+  });
+
+  it("repeated verdicts for one case that disagree defer it (verdict-conflict) instead of letting one win; agreeing repeats settle as one", async () => {
+    const proposed = [e2eCase("greets by name"), e2eCase("greets again after reload")];
+    const { result } = await runWorkflow("e2e-design.js", { flow: "greeting" }, happyOnly(proposed, () => ({
+      verdicts: [caseVerdict(1), caseVerdict(1, { verdict: "reject", evidenceChecked: [], reason: "unobservable" }), caseVerdict(2), caseVerdict(2)],
+    })));
+    expect(result.cases.map((c) => c.index)).toEqual([2]);
+    expect(result.deferred).toEqual([expect.objectContaining({ index: 1, verdict: "defer", failedGates: ["verdict-conflict"] })]);
+    expect(result.deferred[0].missing).toEqual([expect.stringContaining("#1")]);
+  });
+
+  it("the judge floor (20k, only with a token target): below it no 'e2e:judge' call and every case is deferred not-verified:budget; above it the judge runs", async () => {
+    const proposed = [e2eCase("greets by name"), e2eCase("greets again after reload")];
+    const reply = happyOnly(proposed, () => ({ verdicts: [caseVerdict(1), caseVerdict(2)] }));
+    const low = draining(100_000, 10_000);
+    const { result, calls } = await runWorkflow("e2e-design.js", { flow: "greeting" }, low.tap(reply), low.budget);
+    expect(calls.filter(JUDGE)).toEqual([]);
+    expect(calls).toHaveLength(5); // the five category agents ran: e2e-design has no start floor
+    expect(result.judged).toBe(false);
+    expect(result.cases).toEqual([]);
+    expect(result.deferred.map((c) => [c.index, c.verdict, c.failedGates])).toEqual([[1, "defer", ["not-verified:budget"]], [2, "defer", ["not-verified:budget"]]]);
+    for (const c of result.deferred) expect(c.missing).toEqual([expect.stringContaining("token budget floor reached before Judge (10k left < 20k)")]);
+    const enough = draining(100_000, 30_000);
+    const above = await runWorkflow("e2e-design.js", { flow: "greeting" }, enough.tap(reply), enough.budget);
+    expect(above.calls.filter(JUDGE)).toHaveLength(1);
+    expect(above.result.cases.map((c) => c.index)).toEqual([1, 2]);
+  });
+
+  it("no proposed case: no judge starts, judged is false and every list is empty", async () => {
+    const { result, calls } = await runWorkflow("e2e-design.js", { flow: "greeting" }, () => ({ cases: [] }));
+    expect(calls.filter(JUDGE)).toEqual([]);
+    expect(result).toEqual({ flow: "greeting", judged: false, count: 0, cases: [], covered: [], revised: [], deferred: [], rejected: [], failedCategories: [], verdictCounts: NO_COUNTS });
   });
 });

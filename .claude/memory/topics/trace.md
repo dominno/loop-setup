@@ -133,8 +133,10 @@ denylist path still needs a human).
 
 Read-only rounds (`/critic-round`) still write their verdict records (memory, not code) —
 that is what verdict reuse reads — and record their decision not to act (`HOLD`, note
-"review-only round"). `gap-analysis` and `e2e-design` write no records: they propose,
-they do not adjudicate, and no durable state changes on their output.
+"review-only round"). `e2e-design` returns advisory typed verdicts but writes no records: a
+separate judge types each proposed case under the evidence gate, only `accept`/`qualify`
+cases are returned for implementation, and no durable state changes on its output.
+`gap-analysis` writes no records either: it proposes, it does not adjudicate.
 
 ## Record guarantees ↔ how this repo enforces them
 - **Immutability** — append-only store; ids are content hashes, so `pnpm trace lint` detects

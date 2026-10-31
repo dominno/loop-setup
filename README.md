@@ -54,7 +54,7 @@ CLAUDE.md                         Project rules + multi-agent workflow + doc-sca
     critic-panel.js               Fan-out critics → adversarial verify → severity matrix
     scan-docs.js                  Per-story parallel evidence-gathering → status verifier
     gap-analysis.js               Per-dimension gap analysis → synthesized next-order
-    e2e-design.js                 Per-category E2E test-case enumeration → dedup
+    e2e-design.js                 Per-category E2E test-case enumeration → dedup → separate judge (typed verdict per case)
     loop-iteration.js             Maker/checker: worktree implementer → separate verifier (typed verdict)
     improve-skills.js             Meta-critic over the project's own prompts → proposed edits
     trace-bench.js                Measure our own checkers on seeded-defect fixtures
@@ -62,7 +62,7 @@ CLAUDE.md                         Project rules + multi-agent workflow + doc-sca
     write-goal.md                 Write a production-grade /goal (or /loop) prompt for a task
     multi-agent-dev.md            Full critic-led development pass
     critic-round.md               Review-only multi-agent critic round
-    multi-agent-e2e.md            Critic-driven E2E test design + run
+    multi-agent-e2e.md            E2E test design (enumerate → judge) + run + a critic round on the new specs
     qa-pass.md                    Pre-ship QA checklist
     fix-localhost.md              Drive localhost back to a working state
     memory-audit.md               Audit project memory vs CLAUDE.md
@@ -156,7 +156,7 @@ maker-checker verification:
 | `critic-panel.js` | `/critic-round`, `/multi-agent-dev`, `/qa-pass`, `/loop` | fan-out critics → adversarial verify → severity matrix |
 | `scan-docs.js` | `/scan-project-docs` | per-story parallel evidence → separate status verifier |
 | `gap-analysis.js` | `/story-gap-analysis` | per-dimension gap analysis → synthesized next-order |
-| `e2e-design.js` | `/multi-agent-e2e` | per-category E2E case enumeration → dedup |
+| `e2e-design.js` | `/multi-agent-e2e` | per-category E2E case enumeration → dedup → a separate judge types each case; only licensed (accept/qualify) cases are returned |
 | `loop-iteration.js` | `/loop` (L2/L3) | worktree implementer → separate verifier per item |
 
 It's heavier by design — independent review beats a single context role-playing the

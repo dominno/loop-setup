@@ -57,7 +57,7 @@ describe("workflow scripts", () => {
     const canonical = block(lib, "trace-evidence-gate");
     expect(canonical).not.toBeNull();
     const carriers = workflows.filter((w) => w.text.includes("// <trace-evidence-gate>"));
-    expect(carriers.map((w) => w.name).sort()).toEqual(["critic-panel.js", "improve-skills.js", "loop-iteration.js", "scan-docs.js", "trace-bench.js"]);
+    expect(carriers.map((w) => w.name).sort()).toEqual(["critic-panel.js", "e2e-design.js", "improve-skills.js", "loop-iteration.js", "scan-docs.js", "trace-bench.js"]);
     for (const w of carriers) expect(block(w.text, "trace-evidence-gate"), w.name).toBe(canonical);
   });
 
@@ -123,7 +123,8 @@ describe("workflow scripts", () => {
     }
   });
 
-  it("every verdict-producing workflow returns traceRecords", () => {
+  // e2e-design produces typed verdicts too, but they are advisory and write no records.
+  it("every record-writing workflow returns traceRecords", () => {
     for (const name of ["critic-panel.js", "loop-iteration.js", "improve-skills.js", "scan-docs.js"]) {
       const w = workflows.find((x) => x.name === name);
       expect(w, name).toBeTruthy();
@@ -251,6 +252,7 @@ describe("round-integrity consumers", () => {
     ".claude/loop.md",
     ".claude/commands/scan-project-docs.md",
     ".claude/commands/sync-story-status.md",
+    ".claude/commands/multi-agent-e2e.md", // its post-implementation round over the new specs
   ])("%s gates on completion.verdict", (rel) => {
     expect(readFileSync(join(ROOT, rel), "utf8")).toContain("completion.verdict");
   });

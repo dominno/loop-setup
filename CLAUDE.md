@@ -171,7 +171,9 @@ multi-agent opt-in:
 - `scan-docs.js` — per-story parallel evidence → separate status verifier
   (`/scan-project-docs`).
 - `gap-analysis.js` — per-dimension gaps → synthesized order (`/story-gap-analysis`).
-- `e2e-design.js` — per-category E2E case enumeration → dedup (`/multi-agent-e2e`).
+- `e2e-design.js` — per-category E2E case enumeration → dedup → a separate judge types
+  each case; only licensed (accept/qualify) cases are returned for implementation
+  (`/multi-agent-e2e`).
 - `loop-iteration.js` — worktree implementer → separate verifier per item
   (`/loop` at L2/L3).
 - `improve-skills.js` — per-lens meta-critic over the project's OWN prompts and

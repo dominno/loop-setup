@@ -201,7 +201,7 @@ flowchart LR
   ns --> out
 ```
 
-## `e2e-design` — Playwright case enumeration (`/multi-agent-e2e`)
+## `e2e-design` — Playwright case enumeration + judge (`/multi-agent-e2e`)
 
 ```mermaid
 flowchart LR
@@ -214,12 +214,27 @@ flowchart LR
     d5[regression]
   end
   D --> allf{"▫️ every category failed?"}
-  allf -- "yes (infra)" --> err[▫️ error: no cases designed, re-run]
-  allf -- no --> dedup[▫️ dedup on category+title]
-  dedup --> out([concrete test cases + failedCategories])
+  allf -- "yes (infra)" --> err[▫️ error: no cases designed, none judged, re-run<br/>every other key kept, empty]
+  allf -- no --> dedup[▫️ dedup on category+title<br/>number the cases from 1]
+  dedup --> jf{"▫️ judge floor:<br/>under 20k tokens left?"}
+  jf -- yes --> bd[▫️ defer every case, no agent:<br/>not-verified:budget]
+  bd --> out
+  jf -- no --> J["🔵 judge: one typed verdict per numbered case<br/>visible-outcome rule · duplicateOf · coveredBy spec file:line"]
+  J --> gate["▫️ evidence gate (factual) per case<br/>no verdict for a case → defer verdict-missing<br/>disagreeing repeats → defer verdict-conflict<br/>a coveredBy reject needs file_line evidence<br/>a duplicate of an unlicensed twin → defer naming it"]
+  gate --> out(["cases: accept/qualify only · covered · revised · deferred · rejected<br/>+ judged + failedCategories + verdictCounts · no traceRecords"])
   D -.->|a category agent threw or returned nothing| fc["▫️ failedCategories, named by key<br/>not enumerated, never 'no cases'"]
   fc --> out
+  J -.->|the judge threw or returned nothing| af[▫️ defer every case: verdict-missing + agent-failed<br/>judged false · infra failure: re-run<br/>set only by workflow code, never by the judge]
+  af --> out
 ```
+
+> The judge never licenses a case on its enumerator's word: each verdict is settled as a
+> `factual` claim by the canonical `<trace-evidence-gate>` block, so an `accept` or `qualify`
+> citing only `reading` becomes `defer`. The verdicts are advisory: `e2e-design` writes no
+> records and no durable state changes on its output. The caller implements `cases` only; a
+> `revised` case's `repair` is a new claim for the post-implementation round. `covered` cases
+> and duplicate rejects are not coverage gaps; deferred, revised and unobservable (no
+> `duplicateOf`) rejected cases are. With no proposed case, no judge starts (`judged: false`).
 
 ## `loop-iteration` — maker/checker for `/loop` L2/L3
 
