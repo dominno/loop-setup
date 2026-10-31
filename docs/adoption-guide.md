@@ -529,8 +529,9 @@ To adapt them:
   items per call; `improve-skills` is uncapped unless you pass `args.maxVerifiers`. With
   a `+Nk` token target, the workflows also stop at budget floors (output tokens left)
   instead of failing mid-run: `critic-panel` 80k before Review and 60k before Verify,
-  `scan-docs` 60k, `gap-analysis` 40k and 20k before synthesis, `improve-skills` 60k
-  before Verify, `loop-iteration` 80k, `trace-bench` 60k. A round stopped at its start
+  `scan-docs` 60k, `gap-analysis` 40k, then 20k before each dimension's skeptic and
+  before synthesis, `e2e-design` 20k before the judge, `improve-skills` 60k before
+  Verify, `loop-iteration` 80k, `trace-bench` 60k. A round stopped at its start
   floor returns `error` and `budgetStopped`: it is incomplete, never clean.
 - **Name workflows distinctly from commands** — a workflow whose `meta.name`
   matches a command shows up as a duplicate in the skills list (that's why the

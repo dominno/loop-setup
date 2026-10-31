@@ -244,6 +244,9 @@ const unsettled = (c, index, gate, missing, reason) => ({
   ...c, index, verdict: 'defer', preGateVerdict: null, qualifier: '', repair: '', evidenceChecked: [],
   failedGates: [gate], missing: [missing], reason,
 })
+// The covering spec and the twin a verdict names ('' / null when it names none): the grounds of a reject.
+const coveredByOf = (v) => (v && typeof v.coveredBy === 'string' && v.coveredBy.trim()) || ''
+const twinOf = (v) => (v && Number.isInteger(v.duplicateOf) ? v.duplicateOf : null)
 const gated = designed.map((c, i) => {
   const index = i + 1
   if (judgeStop) return unsettled(c, index, 'not-verified:budget', `a judge verdict — skipped: ${judgeStop}; re-run with a larger budget`, 'not judged: no judge started below the budget floor')
@@ -254,6 +257,13 @@ const gated = designed.map((c, i) => {
     return unsettled(c, index, 'verdict-conflict', `one verdict for case #${index} (the judge returned ${said})`, `the judge returned disagreeing verdicts for this case: ${said}`)
   }
   const v = entries[0]
+  // A licensing verdict that also names a covering spec or a twin contradicts itself: it would return a
+  // case for implementation that it also calls covered or a duplicate. It settles nothing either.
+  const named = v && LICENSING.includes(v.verdict) ? [coveredByOf(v) && `coveredBy ${coveredByOf(v)}`, twinOf(v) !== null && `duplicateOf #${twinOf(v)}`].filter(Boolean) : []
+  if (named.length) {
+    const said = `${v.verdict} with ${named.join(' and ')}`
+    return unsettled(c, index, 'verdict-conflict', `one consistent verdict for case #${index} (the judge returned ${said}; only a reject names a covering spec or a twin)`, `the judge's verdict contradicts itself: ${said}`)
+  }
   // Fail safe: a dead judge (threw, or returned nothing) or an index it skipped is defer
   // ('verdict-missing'; never confirmed, never rejected). A dead judge is also 'agent-failed':
   // an infra failure to re-run. Only this code sets that gate, so a live judge's own
@@ -270,8 +280,8 @@ const gated = designed.map((c, i) => {
     failedGates: judge ? g.failedGates.filter((x) => x !== 'agent-failed') : [...g.failedGates, 'agent-failed'],
     evidenceChecked: g.evidenceChecked,
     reason: (v && v.reason) || (judge ? 'the judge gave no verdict for this case' : 'the judge returned nothing — deferred, not judged'),
-    ...(v && Number.isInteger(v.duplicateOf) ? { duplicateOf: v.duplicateOf } : {}),
-    ...(v && typeof v.coveredBy === 'string' && v.coveredBy.trim() ? { coveredBy: v.coveredBy.trim() } : {}),
+    ...(twinOf(v) !== null ? { duplicateOf: twinOf(v) } : {}),
+    ...(coveredByOf(v) ? { coveredBy: coveredByOf(v) } : {}),
   }
   // "Already covered" is itself a factual claim about an existing spec: it needs that spec's file:line.
   if (out.verdict === 'reject' && out.coveredBy && !out.evidenceChecked.some((e) => e.kind === 'file_line')) {

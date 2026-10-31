@@ -241,7 +241,7 @@ flowchart LR
   jf -- yes --> bd[▫️ defer every case, no agent:<br/>not-verified:budget]
   bd --> out
   jf -- no --> J["🔵 judge: one typed verdict per numbered case<br/>visible-outcome rule · duplicateOf · coveredBy spec file:line"]
-  J --> gate["▫️ evidence gate (factual) per case<br/>no verdict for a case → defer verdict-missing<br/>disagreeing repeats → defer verdict-conflict<br/>a coveredBy reject needs file_line evidence<br/>a duplicate of an unlicensed twin → defer naming it"]
+  J --> gate["▫️ evidence gate (factual) per case<br/>no verdict for a case → defer verdict-missing<br/>disagreeing repeats, or an accept/qualify naming<br/>coveredBy or duplicateOf → defer verdict-conflict<br/>a coveredBy reject needs file_line evidence<br/>a duplicate of an unlicensed twin → defer naming it"]
   gate --> out(["cases: accept/qualify only · covered · revised · deferred · rejected<br/>+ judged + failedCategories + verdictCounts · no traceRecords"])
   D -.->|a category agent threw or returned nothing| fc["▫️ failedCategories, named by key<br/>not enumerated, never 'no cases'"]
   fc --> out

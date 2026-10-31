@@ -24,8 +24,10 @@ synthesizes the recommended order over the licensed (`accept`/`qualify`) gaps on
 - The gate settles each gap under its dimension's claim type (`factual`; `predictive` for
   `ux-design`) and the skeptic's, keeping the stricter: a `factual` gap's `accept` or
   `qualify` citing only `reading` becomes `defer`, and a `ux-design` gap not observed in
-  the browser or by a human is licensed at most as `qualify`. An absence ("no test", "not
-  documented") counts only through the search command the skeptic ran and its empty result.
+  the browser or by a human is licensed at most as `qualify`. The skeptic is told an
+  absence ("no test", "not documented") counts only through the search it ran and its
+  empty result; the gate checks only the evidence kind, not that the search was run or
+  came back empty.
 - **Opt-in catch-all:** when the scope asks for a completeness pass (e.g. it ends with
   `completeness`), drop that word from the scope and add `"completeness": true` to the
   args. It adds an `other` dimension for gaps none of the seven covers, facing the same
@@ -53,21 +55,24 @@ Render first:
 - then any `failedDimensions` (those dimensions were not analysed — never read their
   absence from `byDimension` as "no gaps");
 - then `verdictCounts`. Every gap accepted means the skeptics changed nothing: check a
-  sample of their evidence before you rely on the run;
+  sample of their evidence before you rely on the run. Every gap rejected: check a sample
+  of the skeptics' reasons;
 - a `recommendedOrder` of `null` means no order was synthesized: show its `missing`. If
   licensed gaps exist (the synthesizer failed, or the token budget floor skipped it), list
   them unordered; if none is licensed, no order can be made until the deferred and revised
   gaps are settled.
 
-Then render the recommended order (each item cites the ids of the gaps it addresses) and
-the licensed gaps by dimension, each `qualify` gap with its `qualifier`. Then list the gaps
-that are not licensed, which no order covers:
+Then render the recommended order and the licensed gaps by dimension, each `qualify` gap
+with its `qualifier`. The synthesizer is told to cite in each item's `why` the ids of the
+gaps it addresses, but no code checks that it did: check each item, and flag any ordered
+item that cites no licensed gap id (nothing traces it to a licensed gap). Then list the
+gaps that are not licensed, which no order covers:
 - every `deferred` gap with its `missing`: it is unverified, not refuted. `agent-failed` in
   its `failedGates` is an infra failure (re-run); `not-verified:budget` means no skeptic
   started below the token budget floor (re-run with a larger budget); for the rest, supply
   the missing evidence and re-run;
 - every gap with verdict `revise` and its `repair`: a restated gap, not licensed until a
-  re-run adjudicates it.
+  re-run adjudicates it;
+- every `rejected` gap, one line each: its `id` and the skeptic's `reason` (refuted).
 
-`rejected` gaps were refuted; show them, with their `reason`, only when asked. Act only on
-licensed gaps. Do not edit files unless explicitly asked.
+Act only on licensed gaps. Do not edit files unless explicitly asked.

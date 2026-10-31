@@ -1866,6 +1866,9 @@ describe("e2e-design: a separate judge types each case; only licensed cases are 
     expect(calls.filter(JUDGE).map((c) => [c.label, c.opts.phase, c.opts.model])).toEqual([["e2e:judge-0", "Judge", "opus"]]);
     const judgePrompt = calls.find(JUDGE).prompt;
     for (const c of proposed) expect(judgePrompt).toContain(c.title);
+    // Each case reaches the judge with its 1-based number, the index its verdict names (the title pins
+    // which case: under a 0-based numbering the second case would carry index 1).
+    proposed.forEach((c, i) => expect(judgePrompt).toContain(`{"index":${i + 1},"category":"happy","title":${JSON.stringify(c.title)}`));
     expect(judgePrompt).toContain("visible outcome, not just page load"); // the rule of docs/e2e-coverage-map.md
     expect(result.judged).toBe(true);
     expect(result.cases.map((c) => [c.index, c.title, c.category, c.verdict, c.qualifier])).toEqual([
@@ -1953,6 +1956,73 @@ describe("e2e-design: a separate judge types each case; only licensed cases are 
       [5, "defer", "reject", ["duplicate-of-unlicensed"]],
     ]);
     expect(result.deferred.map((c) => c.missing)).toEqual([[expect.stringContaining("#2")], [expect.stringContaining("#1")], [expect.stringContaining("#9")]]);
+    // Counted after the duplicate guard (not from the judge's raw rejects), so the counts agree with the returned lists.
+    expect(result.verdictCounts).toEqual({ ...NO_COUNTS, accept: 1, defer: 3, reject: 1 });
+    const n = result.verdictCounts;
+    expect([n.accept + n.qualify, n.revise, n.defer, n.reject]).toEqual([result.cases.length, result.revised.length, result.deferred.length, result.rejected.length + result.covered.length]);
+  });
+
+  it("a duplicate of a twin the evidence gate demoted is deferred (duplicate-of-unlicensed) with a missing entry naming the twin: the guard reads the gated verdict, not the judge's", async () => {
+    const proposed = [e2eCase("greets by name"), e2eCase("says hello by name")];
+    const { result } = await runWorkflow("e2e-design.js", { flow: "greeting" }, happyOnly(proposed, () => ({
+      verdicts: [
+        caseVerdict(1, { evidenceChecked: [{ kind: "reading", ref: "src/components/GreetingForm.tsx" }] }), // accepted by the judge, demoted by the gate
+        caseVerdict(2, { verdict: "reject", duplicateOf: 1, evidenceChecked: [], reason: "the same case as #1" }),
+      ],
+    })));
+    expect([result.cases, result.rejected]).toEqual([[], []]);
+    expect(result.deferred.map((c) => [c.index, c.preGateVerdict, c.failedGates])).toEqual([
+      [1, "accept", ["evidence-gate:factual:accept-needs-file_line|command|browser|measurement|diff"]],
+      [2, "reject", ["duplicate-of-unlicensed"]],
+    ]);
+    expect(result.deferred[1].missing).toEqual([expect.stringContaining('case #1 ("greets by name") is defer, not accept/qualify')]);
+  });
+
+  it("a duplicate of a qualify twin stays rejected with its duplicateOf, beside the qualify case in cases", async () => {
+    const proposed = [e2eCase("rejects an empty name"), e2eCase("shows an error for a blank name")];
+    const { result } = await runWorkflow("e2e-design.js", { flow: "greeting" }, happyOnly(proposed, () => ({
+      verdicts: [
+        caseVerdict(1, { verdict: "qualify", qualifier: "only an empty name; whitespace is not covered" }),
+        caseVerdict(2, { verdict: "reject", duplicateOf: 1, evidenceChecked: [], reason: "the same case as #1" }),
+      ],
+    })));
+    expect(result.cases.map((c) => [c.index, c.verdict, c.qualifier])).toEqual([[1, "qualify", "only an empty name; whitespace is not covered"]]);
+    expect(result.rejected.map((c) => [c.index, c.verdict, c.duplicateOf, c.failedGates])).toEqual([[2, "reject", 1, []]]);
+    expect(result.deferred).toEqual([]);
+  });
+
+  it("the claim type is forced to 'factual': a judge-supplied 'causal' cannot lower the bar, so an accept citing only 'reading' lands in deferred", async () => {
+    const { result } = await runWorkflow("e2e-design.js", { flow: "greeting" }, happyOnly([e2eCase("greets by name")], () => ({
+      verdicts: [caseVerdict(1, { claimType: "causal", evidenceChecked: [{ kind: "reading", ref: "src/components/GreetingForm.tsx" }] })],
+    })));
+    expect(result.cases).toEqual([]);
+    expect(result.deferred).toEqual([
+      expect.objectContaining({ index: 1, verdict: "defer", preGateVerdict: "accept", failedGates: ["evidence-gate:factual:accept-needs-file_line|command|browser|measurement|diff"] }),
+    ]);
+  });
+
+  it("a licensing verdict that also names coveredBy or duplicateOf contradicts itself: deferred (verdict-conflict) with a missing entry naming the contradiction; a returned case names neither", async () => {
+    const proposed = ["greets by name", "greets again after reload", "rejects an empty name", "says hello by name"].map(e2eCase);
+    const { result } = await runWorkflow("e2e-design.js", { flow: "greeting" }, happyOnly(proposed, () => ({
+      verdicts: [
+        caseVerdict(1, { coveredBy: "e2e/greeting.spec.ts:12" }),
+        caseVerdict(2, { verdict: "qualify", qualifier: "only after one reload", duplicateOf: 4 }),
+        caseVerdict(3, { coveredBy: " " }), // a blank coveredBy names no spec: no contradiction
+        caseVerdict(4),
+      ],
+    })));
+    expect(result.cases.map((c) => c.index)).toEqual([3, 4]);
+    for (const c of result.cases) expect([c.coveredBy, c.duplicateOf], `case #${c.index}`).toEqual([undefined, undefined]);
+    expect([result.covered, result.rejected]).toEqual([[], []]);
+    expect(result.deferred.map((c) => [c.index, c.verdict, c.failedGates])).toEqual([
+      [1, "defer", ["verdict-conflict"]],
+      [2, "defer", ["verdict-conflict"]],
+    ]);
+    expect(result.deferred.map((c) => c.missing)).toEqual([
+      [expect.stringContaining("case #1 (the judge returned accept with coveredBy e2e/greeting.spec.ts:12")],
+      [expect.stringContaining("case #2 (the judge returned qualify with duplicateOf #4")],
+    ]);
+    expect(result.verdictCounts).toEqual({ ...NO_COUNTS, accept: 2, defer: 2 });
   });
 
   it("repeated verdicts for one case that disagree defer it (verdict-conflict) instead of letting one win; agreeing repeats settle as one", async () => {
@@ -2015,6 +2085,20 @@ describe("gap-analysis: a separate skeptic per non-empty dimension; synthesis ov
     for (const p of [docs, e2e]) expect(p).toContain("its empty result as command evidence");
   });
 
+  it("in the all-dimensions run every skeptic prompt names its dimension's claim type and evidence floor (factual everywhere except ux-design's predictive), and its schema requires counterReasons", async () => {
+    const found = Object.fromEntries(GAP_KEYS.map((k) => [k, [gapItem(`a ${k} gap`)]]));
+    const { calls } = await runWorkflow("gap-analysis.js", { scope: "mvp" }, gapStub(found));
+    expect(calls.filter(SKEPTIC).map((c) => c.label)).toEqual(GAP_KEYS.map((k, i) => `gap-verify:${k}-${i}`));
+    for (const [i, k] of GAP_KEYS.entries()) {
+      const { prompt, opts } = calls.find((c) => c.label === `gap-verify:${k}-${i}`);
+      const [type, needs, cap] = k === "ux-design" ? ["predictive", "browser/human", "qualify"] : ["factual", "file_line/command/browser/measurement/diff", "defer"];
+      expect(prompt, k).toContain(`each a ${type} claim that the gap is real`);
+      expect(prompt, k).toContain(`An accept needs evidence of kind ${needs} that YOU checked`);
+      expect(prompt, k).toContain(`otherwise it is capped at ${cap}.`);
+      expect(opts.schema.properties.verdicts.items.required, k).toContain("counterReasons");
+    }
+  });
+
   it("only licensed gaps reach the synthesizer, with their ids and qualifiers: a rejected, revised or deferred gap never appears in its prompt; every gap is typed in byDimension, and no record is drafted", async () => {
     const found = {
       "docs-not-impl": [gapItem("export to CSV"), gapItem("dark mode"), gapItem("offline sync")],
@@ -2037,6 +2121,7 @@ describe("gap-analysis: a separate skeptic per non-empty dimension; synthesis ov
           };
     const { result, calls } = await runWorkflow("gap-analysis.js", { scope: "mvp" }, gapStub(found, { skeptic }));
     const synthPrompt = calls.find(SYNTH).prompt;
+    expect(synthPrompt).toContain('cite in each "why" the id of every gap the item addresses'); // so the Lead can trace each item to a licensed gap
     for (const licensed of ["export to CSV", "docs-not-impl#1", "offline sync", "docs-not-impl#3", "only the read path; writes already sync"]) expect(synthPrompt, licensed).toContain(licensed);
     for (const unlicensed of ["dark mode", "greeting reset flow", "profile page", "impl-not-e2e"]) expect(synthPrompt, unlicensed).not.toContain(unlicensed);
     expect(result.totalGaps).toBe(5);
@@ -2177,9 +2262,13 @@ describe("gap-analysis: a separate skeptic per non-empty dimension; synthesis ov
   it("completeness: off (default, false, or a non-boolean) makes 7 'gap:' calls; true adds a catch-all 'other' finder (8) whose anti-scope is the 7 dimensions, facing the same skeptic and gate", async () => {
     const finders = (calls) => calls.filter((c) => c.label.startsWith("gap:")).map((c) => c.label);
     for (const args of [{ scope: "mvp" }, { scope: "mvp", completeness: false }, { scope: "mvp", completeness: "true" }]) {
-      const { result, calls } = await runWorkflow("gap-analysis.js", args, gapStub({ other: [gapItem("never asked for")] }));
+      const { result, calls, logs } = await runWorkflow("gap-analysis.js", args, gapStub({ other: [gapItem("never asked for")] }));
       expect(finders(calls), JSON.stringify(args)).toEqual(GAP_KEYS.map((k, i) => `gap:${k}-${i}`));
       expect(Object.keys(result.byDimension), JSON.stringify(args)).toEqual(GAP_KEYS);
+      // A non-boolean is ignored out loud, never silently read as off (or on).
+      expect(logs.map((l) => l.text).filter((t) => t.startsWith("ignored args.completeness")), JSON.stringify(args)).toEqual(
+        args.completeness === "true" ? ['ignored args.completeness="true" (expected true or false) — the catch-all dimension stays off'] : [],
+      );
     }
     const found = { other: [gapItem("the README's dev port disagrees with package.json", "README.md:12"), gapItem("an unspecified mismatch", "somewhere in the docs")] };
     const skeptic = () => ({
