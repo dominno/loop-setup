@@ -28,6 +28,9 @@ Procedure:
    `pnpm build && pnpm check:bundle` yourself and pass their output as `args.priorEvidence`:
    the critics and skeptics never run E2E, and never build or test in the shared checkout
    (their SAFETY rules), so a result you did not supply is reported as missing evidence.
+   Save the exact args you launch with (`priorEvidence` included when you pass it) to a
+   scratchpad file before launching: a round cut off by a limit or a kill resumes only with
+   that file, verbatim (`docs/workflow-graphs.md` → *Running, watching and resuming*).
    Print `error` first if present (every lens failed, or `budgetStopped`: the token
    budget floor stopped the round before any reviewer started — no review happened), then
    `completion` (its claim next to `completion.verdict`, and its `missing`). Render the
@@ -64,7 +67,8 @@ Procedure:
     When UI or perf lenses are in scope, that evidence includes the output of
     `pnpm test:e2e` (including `e2e/a11y.spec.ts`) and `pnpm build && pnpm check:bundle`
     run on the tree this round reviews (step 10's build is then not optional), as in step 4.
-    Pass `priorRecords` + a fresh `treeId` again (reuse only fires on an identical tree).
+    Pass `priorRecords` + a fresh `treeId` again (reuse only fires on an identical tree), and
+    save these args, `priorEvidence` included, as in step 4.
     Fix any remaining blockers and re-run — at most **3** post-implementation rounds
     (infra re-runs of an incomplete round count toward the cap; at the cap, report the
     failed lenses and ask). **Stop re-running on diminishing returns:** when a complete

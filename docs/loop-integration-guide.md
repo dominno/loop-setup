@@ -27,6 +27,10 @@ layer on top.
                                    only via `pnpm trace`
 .claude/memory/topics/trace.md     The record policy: typed verdicts, evidence gate, consumer actions
 scripts/trace/  .claude/trace/     The `pnpm trace` CLI/tests + schema (and bench fixtures for /bench-checkers)
+.claude/workflows/loop-iteration.js
+                                   The maker/checker Workflow that loop.md step 10 runs at L2/L3
+.claude/workflows/critic-panel.js  The critic-round Workflow that loop.md step 7 runs (both are part
+                                   of the base workflow's .claude/workflows/)
 ```
 
 A node only becomes `done` with an `accept`/`qualify` record and a `CLEAR` action; a
@@ -52,7 +56,7 @@ self-approve).
 
 ## 3. Step-by-step
 
-1. **Copy the three files** above; merge the `CLAUDE.md` loop guidance.
+1. **Copy the files above**; merge the `CLAUDE.md` loop guidance.
 2. **Define purpose & scope** for the loop: one-sentence goal, explicit non-goals,
    and the watched scope (which repos, branches, PRs, tickets, paths). Fill §1 of
    `.claude/loop-checklist.md`.

@@ -34,7 +34,10 @@ $ARGUMENTS
    fixtures × repeat verifier agents + fixtures single-pass agents); invoking Workflow
    here is expected. Save the returned object to your **scratchpad**, never the repo —
    the verdict prose names the defects, and anything committed is greppable by the next
-   run's agents.
+   run's agents. Watching the run, or resuming one that a limit or a kill cut off (a resume
+   is the same unscored run: it keeps that run's args file verbatim, and step 4 scores it
+   with that run's transcript dir, which the resume keeps): `docs/workflow-graphs.md` →
+   *Running, watching and resuming*.
 4. **Score it:** `pnpm trace bench-score <scratch>/run.json --transcripts <the workflow's
    transcript dir> --record` — scans every agent transcript for leaked ground truth
    (fixture ids, defect text) and excludes those runs (**F0**), prints the metrics, and

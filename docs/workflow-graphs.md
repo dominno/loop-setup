@@ -3,7 +3,8 @@
 Visual map of every deterministic multi-agent Workflow under `.claude/workflows/`.
 Each is a **graph**: nodes = subagents (own context), edges = data hand-offs. This is
 the "see the graph before you run it" view (the diagram-first idea from graph
-engineering), kept in-repo so it version-controls alongside the scripts.
+engineering), kept in-repo so it version-controls alongside the scripts. After the graphs:
+how to run, watch and resume a workflow, and what adding one takes.
 
 **Model tiering** (graph-engineering convention): high-volume fan-out runs on the
 **fast tier** (Sonnet); gates, judgment, and synthesis run on the **strong tier**
@@ -355,12 +356,143 @@ flowchart LR
 
 ---
 
+## Running, watching and resuming
+
+A run here takes from about 10 to over 80 minutes (the cost notes in
+`.claude/memory/topics/workflow.md`), so watch it, and after a limit or a kill resume it
+rather than start over. The harness behaviour below is observed, not documented, except where
+the Workflow tool's own description is cited: each observed fact is dated and may change, so
+read it; don't build tooling on it.
+
+**Before launching.** Save the exact args JSON to a scratchpad file (never the repo) and
+launch with it: a resume needs those args verbatim, including the tree they were built on
+(`critic-panel` and `loop-iteration` carry it as `args.treeId`; for another workflow, note
+the `pnpm -s trace tree-id` you launched on). `/critic-round` step 3 and `/multi-agent-dev`
+steps 4 and 11 say so; `/bench-checkers` already saves its `bench-args` output.
+
+**Watching** (observed 2026-10-30; may change):
+- `/workflows` shows live progress.
+- The Workflow tool's launch result names the run (`Run ID: wf_…`), its `Transcript dir`,
+  the saved `Script file` and the background task's ID.
+- `tail -f <transcript dir>/journal.jsonl` follows the run: a `launched` line, then one
+  `started` line per agent as it starts (`key`, `agentId`, `label`, `phase`) and one
+  `result` line per agent when it returns (`key`, `agentId`, `result`; newer runs add
+  `toolsUsed`). A `result` line carries no label: join it to its `started` line on
+  `agentId`. A `started` line with no `result` is an agent still running, or one that died
+  with the run.
+- `<transcript dir>/agent-<agentId>.jsonl` is that agent's live transcript (its
+  `.meta.json` names the label).
+- `trace-bench`: keep anything you capture from a run (journal lines, transcript excerpts,
+  the result) in the scratchpad, never the repo: the verdict prose names the seeded
+  defects, and the next run's agents grep the tree.
+
+**When a run ends, is cut off or is resumed** (observed 2026-10-31; may change):
+- The background task's output file (named after its task ID) holds the script's return
+  value under `.result`; it is empty while the run is in flight, and stays empty if that
+  launch was cut off. A resume gets a new task ID, and so a new output file.
+- After a container restart, an in-flight run is gone and sends no completion notification,
+  while its `journal.jsonl` and agent transcripts persist on disk.
+- Work an agent already committed survives the restart: check `git log` and `git status`
+  before re-launching.
+- A resume keeps the Run ID and the transcript dir: `journal.jsonl` continues in the same
+  file, still with one `launched` line. An agent the cut-off killed keeps its `started` line
+  with no `result`; its re-run adds a `started` line with the same `key` and a new
+  `agentId`. A cached call adds no line. Of the names in the launch result, only the task ID
+  (and with it the output file) is new.
+
+**Resuming** after a limit, a kill or a restart:
+1. Wait for the limit to reset, then confirm the old run is not still in flight
+   (`/workflows`, or whether its `journal.jsonl` mtime still advances). A background run can
+   report long after launch: let it finish, or stop it first with `TaskStop` and the task ID
+   of its latest launch, as the Workflow tool's own description says. Never launch a
+   replacement, or a resume, beside it.
+2. Recompute `pnpm -s trace tree-id`. If it differs from the tree the run was launched on
+   (`args.treeId`, or the one you noted; for `loop-iteration`, also when
+   `git rev-parse HEAD` differs from `args.headSha`), run fresh instead of resuming: the
+   resumed run's records would stamp a tree its live agents never saw.
+3. If it matches, call `Workflow({ scriptPath, resumeFromRunId, args })` with the old Run ID
+   and the saved args file, verbatim, in the session that launched the run: the tool's own
+   description says a resume works only there. From another session, run fresh instead,
+   with args built anew as the command says. The unchanged prefix of `agent()` calls returns
+   cached results (a cached result can itself be empty: check `journal.jsonl` before
+   counting on it), and from the first changed or new call on, everything runs live.
+4. Never regenerate `priorRecords`, `treeId` or the `bench-args` output for a resume. Every
+   critic prompt embeds the prior-records digest, so `priorRecords` that changed since launch
+   miss the cache for every critic; a new `treeId` changes the reuse decisions and with them
+   the calls that follow; new `bench-args` mint a new bench run id.
+5. While a run is in flight, edit neither the files it reviews nor its script: its verdicts
+   would describe a tree its agents never saw, and a resume replays the script as it is
+   then, re-running every call from the first one an edit changed.
+6. After a killed run, check `git status` and `git worktree list`, and run
+   `git worktree prune`, before retrying: agents have registered worktrees in the shared
+   `.git` (bench verifiers did), and a killed run can leave them, or stray edits, behind
+   (cleanup: `docs/loop-integration-guide.md` §5).
+7. `trace-bench`: resume only with the same args (they carry the bench run id that every
+   agent label and the result share), then score with the run's transcript dir, as
+   `/bench-checkers` step 4 says: a resume keeps that dir (above), so it holds the
+   transcripts of the cached agents and of the re-run ones. Only if a resume ever reports a
+   different transcript dir, pass both, comma-separated:
+   `pnpm trace bench-score <run.json> --transcripts <old dir>,<new dir> --record`. If
+   `--record` still refuses, re-run fresh with new `bench-args`.
+
+## Adding a workflow
+
+Prototype a one-off fan-out inline only after the user has opted into a workflow: the
+harness saves each inline script under the session directory, so a draft never needs a home
+in the repo. Promote a pattern to `.claude/workflows/<name>.js` after 2-3 successful uses,
+and never commit drafts under `.claude/`: any `.js` file in `.claude/workflows/` registers
+as a workflow, and agents grep the tree. A promoted workflow needs, in the same change:
+
+- **Its registry entries** (`pnpm test` fails on each one missing):
+  - a section here headed `` ## `<name>` `` with a tier marker on every agent node, and its
+    stub runs in the "model tiers" `SCENARIOS` table of `scripts/trace/workflows.test.mjs`;
+  - a `<name>.js` line in `CLAUDE.md`'s workflow list, and its file name and skill name in
+    `.claude/skills-index.md`;
+  - a row in the README workflow table, a README file-tree line and an entry in the adoption
+    guide's orchestration list (`scripts/template-docs.test.mjs`);
+  - a `meta.name` no command shares (workflows and commands share the skills list).
+- **A command front:** the `.claude/commands/<command>.md` that invokes it, added per
+  *Conventions for adding a command* in `.claude/skills-index.md` (the manual-only rule
+  included), and a `meta.description` that ends by naming it (`Engine of /<command> — …`).
+- **Stub-agent tests** in `scripts/trace/workflows.test.mjs` (`runWorkflow` with a reply
+  stub): a dead agent, returning nothing or throwing, on every path; a whole-phase failure;
+  each argument refusal. `scripts/trace/contracts.test.mjs` compiles every script.
+- **The conventions the scripts share:**
+  - the args parse guard: `args` can arrive as an object, a plain string or a JSON string,
+    so parse the JSON-string case first (`let a = args; if (typeof a === 'string') …`);
+  - `.catch(agentFailed(label))` on every `agent()` call, before its null path and before a
+    missing verdict is mapped to `defer` (each script defines its own `agentFailed`; scripts
+    cannot import): a thrown agent then takes the same path as one that returns nothing, and
+    is never confirmed, refuted or dropped;
+  - only workflow code sets the `agent-failed` gate: strip it from a live checker's
+    `failedGates` (`v ? g.failedGates.filter((x) => x !== 'agent-failed') : [...g.failedGates, 'agent-failed']`);
+  - a whole-phase failure (every agent of the first phase dead) returns `error` with every
+    other key present and empty, and no records;
+  - pipelines: the engine ends an item at the first stage that resolves to `null`, so its
+    later stages never run and its slot is `null`. A first stage whose agent may die wraps
+    its result (`scan-docs`: `.then((evidence) => ({ evidence }))`), so the dead agent
+    reaches the next stage, and a `null` pipeline or `parallel` slot is filled or read as a
+    failure, never dropped with `filter(Boolean)`;
+  - an `<agent-safety>` block (a byte-identical copy) in the prompt of every agent that
+    reads the shared checkout, with the file added to that block's carrier list in
+    `scripts/trace/contracts.test.mjs`, as for any shared block it copies
+    (`<trace-evidence-gate>` when it types verdicts), and a scenario in the "agent SAFETY"
+    prompt test of `scripts/trace/workflows.test.mjs` (a fixed table: nothing fails without
+    it);
+  - cost bounds: refuse an over-size batch before any agent starts where the fan-out size is
+    known up front (`args.maxStories`, `args.maxItems`), and a budget floor guarded on
+    `budget.total` where it is not, written `const <NAME>_FLOOR = <N>_000`; add a new floor
+    to the adoption guide's floor list, which `scripts/template-docs.test.mjs` pins;
+  - model tiers: fan-out on `FANOUT_MODEL`, gates and synthesis on `JUDGE_MODEL`, and an
+    agent that writes code inherits the session model.
+- **A boundary row** in `.claude/memory/topics/trace.md` (*The discipline — no durable state
+  change without a record*) if it writes TRACE records.
+
 ## How to regenerate
 
-These diagrams are hand-maintained to mirror `.claude/workflows/*.js`. When you add a
-node, change a tier, or add an edge, update the matching diagram here. `/improve-skills`
-(Consistency lens) and `/dream lint` should flag a diagram that has drifted from its
-script. `pnpm test` checks two things mechanically: every workflow has a section headed
-with its file name, and each agent a stub run starts carries its model's tier marker on
-its node (the "model tiers" check in `scripts/trace/workflows.test.mjs` maps each agent
-to its node).
+When you add a node, change a tier, or add an edge, update the matching diagram here.
+`pnpm test` fails when a workflow lacks a section or a tier drifts: every workflow needs a
+section headed with its file name, and each agent a stub run starts must carry its model's
+tier marker on its node (the "model tiers" check in `scripts/trace/workflows.test.mjs` maps
+each agent to its node). Edges and node text are not checked mechanically: `/dream lint`
+(step 2b) and the `/improve-skills` Consistency lens review them against the scripts.

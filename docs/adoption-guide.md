@@ -517,6 +517,9 @@ Adapt it to your stack:
   to match your project (or add a `packageManager` field to `package.json`).
 - **Required checks.** In *Settings → Branches → branch protection*, add
   `typecheck`, `lint`, `test`, `build`, `e2e` as required status checks.
+- **Merge method.** Squash-merging a PR that appends TRACE records orphans their provenance
+  commits: once the branch is gone (or in a fresh clone), `pnpm trace reaudit` reports those
+  records as unreachable. Prefer a merge commit for such PRs.
 
 ---
 
@@ -556,6 +559,10 @@ To adapt them:
   matches a command shows up as a duplicate in the skills list (that's why the
   critic workflow is `critic-panel`, not `critic-round`, and `improve-skills.js`
   registers as `prompt-meta-critic`); `pnpm test` fails on a shared name.
+- **Adding a workflow, or watching and resuming a run** — see `docs/workflow-graphs.md`:
+  *Adding a workflow* is the checklist (when to promote a prototype, every registry entry
+  `pnpm test` checks, the conventions the scripts share), and *Running, watching and
+  resuming* covers the run journal and resuming after a limit or a kill with the saved args.
 - **Requires a Claude Code build with the `Workflow` tool.** If yours lacks it, the
   commands still work as a single Lead agent simulating the panel — just without the
   independent contexts.

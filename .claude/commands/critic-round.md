@@ -27,6 +27,9 @@ $ARGUMENTS
    - `scriptPath: .claude/workflows/critic-panel.js`
    - `args: { "focus": "$ARGUMENTS", "priorRecords": <step-2 JSON>, "treeId": "<tree-id>" }`,
      plus `"priorEvidence": "<the step-1 output>"` when UI or perf lenses are in scope
+   - save those exact args to a scratchpad file before launching: a round cut off by a limit
+     or a kill resumes only with that file, verbatim, never with regenerated `priorRecords`
+     or `treeId` (`docs/workflow-graphs.md` → *Running, watching and resuming*)
    This command explicitly opts into multi-agent orchestration — calling Workflow
    here is expected.
 4. The workflow returns `{ error?, budgetStopped?, focus, treeId, reviewMode, failedReviewers, completion, counts, confirmed, deferred, revised, niceToHaves, refuted, traceRecords, reuseActions }`.

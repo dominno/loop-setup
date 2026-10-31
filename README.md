@@ -217,9 +217,7 @@ and uses Claude Code's **real** memory system (`@import` + `/memory`):
 .claude/memory/
   index.md        small catalog: each topic = one-line summary + link (always loaded)
   log.md          append-only history of ingest / lint operations
-  topics/         one page per subject — read ON DEMAND, not all at once
-    tooling.md  build-and-verify.md  testing.md  client-react.md
-    code-organization.md  remote-env.md  workflow.md
+  topics/         one page per subject — read ON DEMAND, not all at once (index.md lists them)
 ```
 
 - **Why a wiki, not one file:** `CLAUDE.md` imports only `index.md`, so per-session
