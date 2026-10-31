@@ -292,10 +292,13 @@ export function planViolations(plan, state = EMPTY_STATE, { preDispatch = false 
       } else if (rec) problems.push(`${rec.record_id} is neither its own ${claimOf(n.id)} record, an escalated ancestor's record (origin 'cascade from <id>'), nor a critic-panel record`);
       if (problems.length) errors.push(`[escalated-record] ${at(n)}: escalated needs a HOLDed record — ${problems.join("; ")}`);
     }
-    if (rec && ["done", "deferred", "escalated"].includes(n.status)) {
+    // A ready or blocked node's own record becomes plan-items' priorRecordId once it is dispatched (the next verdict revises it).
+    const relayed = own && ["ready", "blocked"].includes(n.status);
+    if (rec && (relayed || ["done", "deferred", "escalated"].includes(n.status))) {
       const latest = state.latestOfClaim.get(rec.claim_id);
       if (latest && latest !== rec.record_id) {
-        warnings.push(`[latest] ${at(n)}: ${rec.record_id} is not the newest record for claim ${rec.claim_id} (${latest} is) — order-dependent (e.g. after a union merge); re-plan from the newest verdict`);
+        const why = relayed ? ` — plan-items would pass it on as priorRecordId, and the next verdict would fork the claim's revises chain` : "";
+        warnings.push(`[latest] ${at(n)}: ${rec.record_id} is not the newest record for claim ${rec.claim_id} (${latest} is) — order-dependent (e.g. after a union merge); re-plan from the newest verdict${why}`);
       }
     }
     const attempts = defers.get(claimOf(n.id)) || 0;

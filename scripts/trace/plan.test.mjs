@@ -95,14 +95,20 @@ describe("parsePlan", () => {
     }
   });
 
+  it("only a '#' or '##' heading ends the Plan section: a row under a deeper heading fails closed instead of being skipped", () => {
+    const p = plan(row("LP-001"), "", "### Archive", row("LP-002"));
+    expect(rulesOf(p.errors)).toEqual(["table"]);
+    expect(p.nodes.map((n) => n.id)).toEqual(["LP-001"]);
+  });
+
   it("a row's leading pipe is optional inside the table (GFM), and a pipe row split off it by a blank line or a fence fails closed", () => {
     const bare = "LP-002 | no leading pipe | — | ready | | | human | |";
     const p = plan(row("LP-001"), bare);
     expect(p.errors).toEqual([]);
     expect(p.nodes.map((n) => [n.id, n.description, n.status])).toEqual([["LP-001", "work for LP-001", "ready"], ["LP-002", "no leading pipe", "ready"]]);
     expect(rulesOf(plan(row("LP-001"), "LP-002 | too few | ready").errors)).toEqual(["cells"]);
-    // GFM ends a table at a blank line or a fence; a row after either is never read, and never silently dropped.
-    for (const split of [[""], ["```", row("LP-009"), "```"]]) {
+    // GFM ends a table at a blank line or a fence (``` or ~~~); a row after either is never read, and never silently dropped.
+    for (const split of [[""], ["```", row("LP-009"), "```"], ["~~~", row("LP-009"), "~~~"]]) {
       for (const after of [bare, row("LP-002")]) {
         const q = plan(row("LP-001"), ...split, after);
         expect(rulesOf(q.errors), `${JSON.stringify(split)} ${after}`).toEqual(["table"]);
@@ -125,6 +131,10 @@ describe("readyIds (loop-plan.md's ready-node rule, in table order)", () => {
   it("a blocked node whose deps are done is ready; a ready node with an open dep is not", () => {
     const p = plan(row("LP-001", { status: "done" }), row("LP-002", { after: "LP-001", status: "blocked" }), row("LP-003", { after: "LP-002" }));
     expect(readyIds(p.nodes)).toEqual(["LP-002"]);
+  });
+
+  it("a dangling after id is never read as done (plan-lint names it; until then its node waits)", () => {
+    expect(readyIds(plan(row("LP-002", { after: "LP-001", status: "blocked" }), row("LP-003", { after: "LP-001" })).nodes)).toEqual([]);
   });
 
   it("--max keeps table order", () => {
@@ -325,6 +335,30 @@ describe("plan-lint: TRACE cross-checks (a temp store written by writeRecords / 
     expect(flagged(res.warnings, "latest")).toEqual(["LP-002", "LP-003"]);
   });
 
+  it("the 'latest' warning also covers a ready or blocked node that cites its own superseded loop:<id> record (plan-items would pass it on as priorRecordId)", () => {
+    // loop.md step 10: when the check after an apply fails, a revise of the same claim supersedes the applied
+    // accept and the node goes back to ready with that revise. Left on the accept, the next verdict would fork the chain.
+    const failedCheck = (id) => {
+      const applied = write(loopRec(id));
+      const revise = write(loopRec(id, { final_status: "revise", repair: "the unit test still fails on an empty name", reason: "the smallest relevant check failed after the apply", revises: applied }));
+      act(revise, "HOLD", id);
+      return { applied, revise };
+    };
+    const a = failedCheck("LP-001");
+    const b = failedCheck("LP-002");
+    const nodes = (rec) => [row("LP-001", { record: rec(a), notes: "attempt 1" }), row("LP-002", { after: "LP-003", status: "blocked", record: rec(b), notes: "attempt 1" }), row("LP-003")];
+    const stale = lint(nodes((x) => x.applied));
+    expect(stale.errors).toEqual([]);
+    expect(rulesOf(stale.warnings)).toEqual(["latest", "latest"]);
+    expect(flagged(stale.warnings, "latest")).toEqual(["LP-001", "LP-002"]);
+    expect(stale.warnings[0]).toContain(a.revise); // names the record to cite instead
+    expect(lint(nodes((x) => x.revise))).toEqual({ errors: [], warnings: [] });
+    // Only a node's own record is passed on: one that cites another node's record (a cascade node reset to blocked
+    // keeps its ancestor's, which the ancestor's later verdicts supersede) is left alone by this rule.
+    const cascadeReset = row("LP-004", { after: "LP-001", status: "blocked", record: a.applied, origin: "cascade from LP-001" });
+    expect(lint([...nodes((x) => x.revise), cascadeReset])).toEqual({ errors: [], warnings: [] });
+  });
+
   it("deferred needs a defer record with a HOLD: its own loop:<id> record (an agent-failed defer is one)", () => {
     const held = write(deferRec("LP-001", "a unit test run"));
     act(held, "HOLD", "LP-001");
@@ -408,6 +442,31 @@ describe("plan-lint: TRACE cross-checks (a temp store written by writeRecords / 
     ]);
     expect(flagged(errors, "escalated-record")).toEqual(["LP-003", "LP-005", "LP-006", "LP-007"]);
     expect(rulesOf(errors).every((r) => r === "escalated-record")).toBe(true);
+  });
+
+  it("a cascade reaches a node through an intermediate cascade-escalated node: it cites the root's record, origin 'cascade from <root>'", () => {
+    const root = write(loopRec("LP-001", { final_status: "reject", reason: "touches the auth flow" }));
+    act(root, "HOLD", "LP-001");
+    const cascade = (id, after) => row(id, { after, status: "escalated", record: root, missing: "the human decision LP-001 waits on", origin: "cascade from LP-001" });
+    const res = lint([
+      row("LP-001", { status: "escalated", record: root, missing: "a human decision on: touches the auth flow" }),
+      cascade("LP-002", "LP-001"),
+      cascade("LP-003", "LP-002"), // depends on LP-001 only through LP-002
+    ]);
+    expect(res).toEqual({ errors: [], warnings: [] });
+  });
+
+  it("an escalated node's own HOLDed record is checked before its origin: a leftover 'cascade from <a done node>' is no error", () => {
+    const fixed = write(loopRec("LP-001"));
+    act(fixed, "CLEAR", "LP-001");
+    const own = write(loopRec("LP-002", { final_status: "reject", reason: "touches the auth flow" }));
+    act(own, "HOLD", "LP-002");
+    const res = lint([
+      row("LP-001", { status: "done", record: fixed }),
+      // Cascade-escalated while LP-001 was escalated; once LP-001 was done, LP-002 was re-dispatched and got its own reject.
+      row("LP-002", { after: "LP-001", status: "escalated", record: own, missing: "a human decision on: touches the auth flow", origin: "cascade from LP-001" }),
+    ]);
+    expect(res).toEqual({ errors: [], warnings: [] });
   });
 
   it("a critic-origin escalated node cites a critic revise, reject or human-decision defer, HOLDed for the node (--ref)", () => {

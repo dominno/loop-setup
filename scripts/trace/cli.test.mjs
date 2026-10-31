@@ -8,6 +8,7 @@ import { dirname, join } from "node:path";
 import { encodeBench, opaqueFixtureId, readBench, ROOT } from "./lib.mjs";
 import { appliedFixtures, benchPreconditionStep, benchPreflight, judgeEnv, runBenchJudge, runJudge, SIGNALS } from "./bench-judge.mjs";
 import { DEFAULT_PLAN, parsePlan, readyIds } from "./plan.mjs";
+import { STORY_MAP_PATHS } from "./story-map.mjs";
 
 const CLI = join(ROOT, "scripts/trace/cli.mjs");
 let dir;
@@ -188,6 +189,32 @@ describe("plan commands (CLI process)", () => {
     expect(broken.status).toBe(2);
     expect(broken.stdout).toBe("");
     expect(broken.stderr).toMatch(/does not replay/);
+  });
+});
+
+// story-lint reads a cited spec on disk (cli.mjs): it counts only as a regular file. The other story-lint
+// process tests, with their synthetic story-map builder, are in story-map.test.mjs.
+describe("story-lint: a cited spec is a regular file (CLI process)", () => {
+  it("a coverage row citing the directory e2e/, or a directory named like a spec file, fails rule (4)", () => {
+    const root = join(dir, "checkout");
+    const put = (rel, text) => {
+      mkdirSync(dirname(join(root, rel)), { recursive: true });
+      writeFileSync(join(root, rel), text);
+    };
+    const table = (head, rows) => `| ${head.join(" | ")} |\n|${head.map(() => "---|").join("")}\n${rows.join("\n")}\n`;
+    const ids = ["US-001", "US-002", "US-003"];
+    for (const id of ids) put(`${STORY_MAP_PATHS.stories}/${id}-story.md`, `# ${id}: A story\n\n**Final status:**\nE2E tested\nRecord: (pre-TRACE)\n`);
+    put(STORY_MAP_PATHS.index, table(["ID", "Status"], ids.map((id) => `| ${id} | E2E tested |`)));
+    put(STORY_MAP_PATHS.dashboard, table(["Story", "Final status"], ids.map((id) => `| ${id} | E2E tested |`)));
+    put(STORY_MAP_PATHS.log, table(["Story ID", "Check performed"], [`| ${ids.join(", ")} | Unit tests |`]));
+    put(STORY_MAP_PATHS.coverage, table(["Story ID", "E2E test file"], ["| US-001 | `e2e/` |", "| US-002 | `e2e/flows.spec.ts` |", "| US-003 | `e2e/a.spec.ts` |"]));
+    put("e2e/a.spec.ts", "// a spec\n");
+    put("e2e/flows.spec.ts/a.spec.ts", "// a spec inside a directory named like one\n");
+    const res = trace(["story-lint", "--root", root]);
+    const errors = res.stderr.split("\n").filter((l) => l.startsWith("error: "));
+    expect(errors.map((l) => /^error: \[([a-z0-9-]+)\] (US-\d+)/.exec(l)?.slice(1).join(" "))).toEqual(["e2e-coverage US-001", "e2e-coverage US-002"]);
+    expect(errors[1]).toMatch(/e2e\/flows\.spec\.ts \(line \d+\) is not a file in the repo$/);
+    expect(res.status).toBe(1);
   });
 });
 

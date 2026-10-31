@@ -177,6 +177,20 @@ describe("story-lint: the story map against itself", () => {
     expect(errors.find((e) => e.includes("US-003"))).toContain("e2e/missing.spec.ts");
   });
 
+  it("(4) a spec cited as a markdown link counts by its link text, never its target", () => {
+    const map = storyMap([{ id: "US-001" }, ...["US-002", "US-003", "US-004"].map((id) => ({ id, spec: null }))]);
+    map.coverage.text += "| US-002 | A flow | [e2e/b.spec.ts](../e2e/b.spec.ts) | Yes | Yes | — | 2026-10-01 | None |\n";
+    // The link text names a missing spec, while the target is one that exists (it is never read) — also when
+    // the target stands apart inside its parentheses, which CommonMark allows.
+    map.coverage.text += "| US-003 | A flow | [e2e/missing.spec.ts](e2e/a.spec.ts) | Yes | Yes | — | 2026-10-01 | None |\n";
+    map.coverage.text += "| US-004 | A flow | [e2e/gone.spec.ts]( e2e/a.spec.ts ) | Yes | Yes | — | 2026-10-01 | None |\n";
+    const { errors } = storyMapViolations(map, undefined, { specExists });
+    expect(rulesOf(errors)).toEqual(["e2e-coverage", "e2e-coverage"]);
+    expect(flagged(errors, "e2e-coverage")).toEqual(["US-003", "US-004"]);
+    expect(errors[0]).toContain("e2e/missing.spec.ts");
+    expect(errors[1]).toContain("e2e/gone.spec.ts");
+  });
+
   it("(5) an unchecked AC at Implemented or higher is a warning, never an error", () => {
     const res = lint([
       { id: "US-001", status: "Implemented", acs: ["- [x] AC1: done", "- [ ] AC2: not yet"] },
@@ -216,6 +230,35 @@ describe("story-lint: the story map against itself", () => {
     // An unreadable log table is one [table] error, not a missing row per story.
     const noLogTable = lint([{ id: "US-001" }, { id: "US-002" }], { log: { path: STORY_MAP_PATHS.log, text: "# Story Verification Log\n\n| Date | Check |\n|---|---|\n" } }).errors;
     expect(rulesOf(noLogTable)).toEqual(["table"]);
+  });
+
+  it("an index or dashboard row naming two story ids is an [id] error, never read as one story's row", () => {
+    const map = storyMap([{ id: "US-001" }, { id: "US-002" }]);
+    map.index.text += "| US-001, US-002 | Both stories | `docs/prd.md` | E2E tested | f |\n";
+    map.dashboard.text = map.dashboard.text.replace("\n\n## Status model", "\n| [US-001](./stories/US-001-story.md) [US-002](./stories/US-002-story.md) | `docs/prd.md` | Present | Present | Present | Automated only | E2E tested | a run | none |\n\n## Status model");
+    const { errors } = storyMapViolations(map, undefined, { specExists });
+    expect(rulesOf(errors)).toEqual(["id", "id"]);
+    expect(errors[0]).toContain(`${STORY_MAP_PATHS.index}:8`);
+    expect(errors[1]).toContain(`${STORY_MAP_PATHS.dashboard}:7`);
+  });
+
+  it("a second **Final status:** in a story file is a [status] error (the first one counts)", () => {
+    const { errors } = lint([{ id: "US-001", extra: "**Final status:**\nDone\nRecord: (pre-TRACE)" }]);
+    expect(rulesOf(errors)).toEqual(["status"]);
+    expect(errors[0]).toContain(`${storyPath("US-001")}:12): a second **Final status:** — line 6 is the first`);
+  });
+
+  it("a ``` fenced example table in a story-map file is skipped: only the real table is read", () => {
+    const map = storyMap([{ id: "US-001" }]);
+    const example = `\`\`\`md\n${COVERAGE}\n| US-001 | An example | \`e2e/missing.spec.ts\` | Yes | — | — | 2026-01-01 | None |\n\`\`\`\n`;
+    map.coverage.text = map.coverage.text.replace(COVERAGE, `${example}${COVERAGE}`);
+    expect(storyMapViolations(map, undefined, { specExists })).toEqual({ errors: [], warnings: [], stories: 1, absent: false });
+  });
+
+  it("an escaped \\| stays inside its cell (GFM)", () => {
+    const map = storyMap([{ id: "US-001" }]);
+    map.index.text = map.index.text.replace("| US-001 | A story |", "| US-001 | Sign in \\| out |");
+    expect(storyMapViolations(map, undefined, { specExists })).toEqual({ errors: [], warnings: [], stories: 1, absent: false });
   });
 });
 
@@ -283,6 +326,8 @@ describe("story-lint: a cited TR id (a temp store written by writeRecords / appe
     expect(flagged(errors, "record-unknown")).toEqual(["US-006"]);
     expect(rulesOf(errors).every((r) => r === "status-record" || r === "record-unknown")).toBe(true);
     expect(errors.find((e) => e.includes("US-003"))).toContain(storyClaim("US-003"));
+    // US-004's defer also lacks a COMMIT; the licensing sub-check must name the verdict itself.
+    expect(errors.find((e) => e.includes("US-004"))).toContain("not accept/qualify");
     expect(warnings).toEqual([]);
   });
 

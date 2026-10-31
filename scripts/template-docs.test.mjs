@@ -52,6 +52,16 @@ describe("CLAUDE.md governing rules", () => {
   });
 });
 
+describe("loop.md consumer procedure", () => {
+  it("a check that fails after an apply leaves the node on a revise of its own claim", () => {
+    // plan-items passes a ready node's own loop:<id> record on as priorRecordId: left on the superseded
+    // accept, the next verdict would fork the claim's revises chain (plan-lint only warns [latest]).
+    const loop = prose(".claude/loop.md");
+    const anchors = ["write a `revise` record (same `claim_id`", "leave the node `ready` with that record and the attempt counted"];
+    expect(anchors.filter((a) => !loop.includes(a))).toEqual([]);
+  });
+});
+
 describe.skipIf(!inGitCheckout)("agent files stay out of git", () => {
   it("ignores agent worktrees", () => {
     expect(git("check-ignore", "-q", "--", ".claude/worktrees/x/a.ts").status).toBe(0);
@@ -82,7 +92,7 @@ describe("adoption docs", () => {
     expect({ quickstart: missing(quickstart), checklist: missing(checklist) }).toEqual({ quickstart: [], checklist: [] });
   });
 
-  it("name every workflow's budget floors in the guide's budget-floor paragraph", () => {
+  it("name every workflow's budget floors in the guide's budget-floor paragraph, and no floor the code lacks", () => {
     // Each workflow's distinct floor values: `const <NAME>_FLOOR = <N>_000` gives N (thousands of tokens).
     const names = readdirSync(join(ROOT, ".claude/workflows")).filter((f) => f.endsWith(".js")).map((f) => f.slice(0, -3));
     const floors = new Map();
@@ -105,6 +115,11 @@ describe("adoption docs", () => {
     for (const [name, values] of floors) {
       if (!segments.has(name)) drift.push(`${name}: not named in backticks`);
       else for (const n of values) if (!new RegExp(`(?<![\\d.])${n}k\\b`).test(segments.get(name))) drift.push(`${name}: ${n}k`);
+    }
+    // And back: every <N>k in a workflow's segment is one of that workflow's floors, so a floor changed
+    // in code to a value its segment already names (80k → 60k) still leaves the stale 80k flagged.
+    for (const [name, text] of segments) {
+      for (const [, n] of text.matchAll(/(?<![\d.])(\d+)k\b/g)) if (!floors.get(name)?.has(n)) drift.push(`${name}: the guide says ${n}k, which is none of its floors`);
     }
     expect(drift).toEqual([]);
   });

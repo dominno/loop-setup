@@ -300,9 +300,11 @@ export function storyMapViolations(map = {}, state = EMPTY_STATE, { specExists =
 }
 
 // The spec files an "E2E test file" cell cites: its code spans (or, without any, its words) that end
-// in a file extension; a file:line suffix names the file.
+// in a file extension; a file:line suffix names the file. A markdown link is read by its text, as in an
+// id cell (linkText), never by its target: [e2e/a.spec.ts](../e2e/a.spec.ts) cites e2e/a.spec.ts.
 function specsIn(cell) {
-  const spans = [...String(cell).matchAll(/`([^`]+)`/g)].map((m) => m[1]);
-  const words = spans.length ? spans : String(cell).split(/[\s,;]+/);
+  const text = linkText(cell);
+  const spans = [...text.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+  const words = spans.length ? spans : text.split(/[\s,;[\]]+/);
   return [...new Set(words.map((w) => w.trim().replace(/:\d+(?::\d+)?$/, "")).filter((w) => /\.[A-Za-z0-9]+$/.test(w)))];
 }

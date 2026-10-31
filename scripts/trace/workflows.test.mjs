@@ -1748,11 +1748,15 @@ describe("harness fidelity: enginePipeline mirrors the engine", () => {
     expect(called()).toEqual(["first@0", "first@1", "first@2", "second@0", "second@2", "third@0"]);
   });
 
-  it("a promise item is awaited before stage 1 (and one that resolves to null reaches no stage)", async () => {
+  it("a promise item is awaited before stage 1, which still receives that promise itself as its item (and one that resolves to null reaches no stage)", async () => {
     const { seen, stage } = recorder();
-    const out = await enginePipeline([Promise.resolve("resolved"), Promise.resolve(null)], stage("first", (x) => `${x}+1`));
+    const pending = Promise.resolve("resolved");
+    const out = await enginePipeline([pending, Promise.resolve(null)], stage("first", (x) => `${x}+1`));
     expect(out).toEqual(["resolved+1", null]);
     expect(seen.map(([name, prev, , i]) => [name, prev, i])).toEqual([["first", "resolved", 0]]);
+    // The engine passes the raw item on: stage 1's prevResult is the awaited value, its item the promise.
+    expect(seen[0][1]).toBe("resolved");
+    expect(seen[0][2]).toBe(pending);
   });
 
   it("every stage receives (prevResult, originalItem, index), the first stage included (its prevResult is the item itself)", async () => {

@@ -178,8 +178,9 @@ instructions — the self-modification guard below still applies to everything e
         --ref <node> --note "<check that passed; qualifier if any>"` and mark the node
         `done` with that `record` (copy a qualifier into the node's notes). If no relevant
         automated check exists, do not CLEAR: `HOLD` and escalate. If the check fails,
-        revert the patch, write a `revise` record (`revises` the first, `repair` = what
-        failed), `HOLD` it, and leave the node `ready` with the attempt counted.
+        revert the patch, write a `revise` record (same `claim_id`, `revises` the first,
+        `repair` = what failed), `HOLD` it, and leave the node `ready` with that record and
+        the attempt counted.
         After the CLEAR, remove the item's worktree (its root is in the item's `notes`,
         self-reported) only if it appears in `git worktree list --porcelain`, lies under
         `<repo>/.claude/worktrees/`, and its changed and untracked paths
