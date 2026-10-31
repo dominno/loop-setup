@@ -601,6 +601,38 @@ describe("loop verifier prompt (F4)", () => {
   });
 });
 
+// The verifier reads the checkout it shares with the Lead and other sessions, so it is told to
+// verify in its own scratch copy and to keep a check's exit status unpiped: a prompt instruction,
+// not a worktree, and not enforced. Both copies of the block send it (the production verifier and
+// the bench's verifier arm), as an instruction ahead of the untrusted item and diff. An edit inside
+// <loop-verifier> needs a re-bench before L3 (`pnpm trace l3-check`).
+describe("loop verifier prompt: a scratch copy, never the shared checkout", () => {
+  const SCRATCH =
+    "Verify in your own scratch copy of the working tree, never in the shared checkout: do not apply the diff to, or edit, files there; when a check's exit status is your evidence, do not pipe it through head or tail.";
+  const diff = "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-a\n+b\n";
+  const verifierPromptOf = {
+    "loop-iteration.js": async () => {
+      const { calls } = await runWorkflow("loop-iteration.js", { items: [{ id: "LP-050", description: "x" }], level: "L2", headSha: HEAD_SHA }, (label) =>
+        label.startsWith("impl:") ? { baseSha: HEAD_SHA, changedFiles: ["src/a.ts"], diff, checksPassed: true, notes: "" } : verdict({ evidenceChecked: [{ kind: "diff", ref: "src/a.ts" }] }),
+      );
+      return calls.find((c) => c.label.startsWith("verify:"))?.prompt;
+    },
+    "trace-bench.js": async () => {
+      const { calls } = await runWorkflow("trace-bench.js", { fixtures: [{ id: "fx-00000000", item: "x", patch: diff }], arms: ["verifier"], repeat: 1 }, () =>
+        verdict({ evidenceChecked: [{ kind: "diff", ref: "src/a.ts" }] }),
+      );
+      return calls.find((c) => c.label.startsWith("bench-verify:"))?.prompt;
+    },
+  };
+
+  it.each(Object.keys(verifierPromptOf))("%s's verifier gets it once, among the instructions, before the untrusted item and diff", async (file) => {
+    const prompt = await verifierPromptOf[file]();
+    expect(prompt, "the verifier never ran").toBeDefined();
+    expect(prompt.split(SCRATCH).length - 1).toBe(1);
+    expect(prompt.indexOf(SCRATCH)).toBeLessThan(prompt.indexOf("\n\nItem: "));
+  });
+});
+
 // parallel() and pipeline() turn a throwing stage into a null slot, and the workflows filter
 // null slots out — so before this, a checker or maker that THREW vanished from the result
 // with no record. Each case below must instead take the workflow's own fail-safe null path.

@@ -97,6 +97,11 @@ denylist path still needs a human).
   nothing was weighed. Re-run the workflow that produced it; never wait for evidence and
   never count it as refuted. Many of them in one run is an outage: report it, and re-run
   once its cause is fixed.
+- **`defer` with `base-mismatch` in `failed_gates`** → set only by `loop-iteration`'s base
+  check: the implementer's worktree started from another commit than the Lead's HEAD, so
+  nothing was verified. Re-dispatch only once the worktree base can match HEAD (the user
+  set `worktree.baseRef` to `"head"`); until then report it as the human ask. Each
+  re-dispatch counts as an attempt.
 - **`revise`** → the claim as stated is not licensed; its `repair` is a *new* claim —
   adjudicate it (new record that `revises`) before acting, or HOLD.
 - **`reject`** → nothing to fix; HOLD/REJECT. In a plan node, `missing` becomes
@@ -263,7 +268,10 @@ score, so it cannot see an edit made between the run and the score, or a `trace-
 (the one the Workflow runs) that drifted from the production block — `pnpm test`'s parity check
 fails then; score a run before editing either copy. The hash item is file evidence, so
 `pnpm trace reaudit` also lists the bench record when `loop-iteration.js` changes (path-level;
-`l3-check` is the block-level answer).
+`l3-check` is the block-level answer). The verifier's scratch-copy instruction (verify in its
+own scratch copy, never in the shared checkout; no exit status piped through `head` or `tail`)
+is an edit inside the block: every bench record scored before it measured the verifier without
+it, so L3 needs a re-bench after it.
 
 **Contamination rule (learned the hard way — the first bench run was contaminated):**
 bench agents run inside this repo and grep it, so fixture ground truth must never be

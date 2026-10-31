@@ -108,9 +108,12 @@ user. The Lead runs those after applying the diff.
   verification. Set `worktree.baseRef` to `"head"` in your Claude Code settings so loop
   worktrees branch from your local HEAD; without it, the base check defers every item
   whose base differs (a safe stall: those items are neither verified nor applied).
-- **The verifier is not isolated today.** It reviews the diff in the shared checkout,
-  so it must not apply diffs there; whether it gets its own worktree is an open decision.
-  The Lead applies a licensed diff only after `git apply --check` passes.
+- **The verifier is instructed, not isolated.** It gets no worktree of its own, so it
+  starts in the shared checkout. Its prompt tells it to verify in its own scratch copy of
+  the working tree, never to apply the diff to or edit files in the shared checkout, and
+  not to pipe a check through `head` or `tail` when its exit status is the evidence. That
+  is a prompt instruction, not enforced. The Lead applies a licensed diff only after
+  `git apply --check` passes.
 - **Zero-install alternative.** `worktree.symlinkDirectories: ["node_modules"]` links
   the main checkout's `node_modules` into each worktree, so a worktree starts with
   dependencies. The trade-offs: every worktree shares one install and its caches, and an
