@@ -94,9 +94,10 @@ $ARGUMENTS
   turning it on by default.
 - `completion` sees only the prior records passed in, and `--brief` carries the newest 40.
   Before a task is declared complete, also check the whole store for an open blocker:
-  `pnpm -s trace query --latest --writer critic-panel --json` lists each latest critic
-  record with its `severity`; a `blocker` at accept/qualify/defer/revise is open unless
-  `pnpm trace show <id>` lists a CLEAR on it.
+  `pnpm -s trace query --latest --writer critic-panel --severity blocker --json` lists only
+  the latest critic records whose `severity` is `blocker` (`[]` when there is none; a missing
+  or unknown `--severity` value exits 2, never `[]`); a `blocker` at accept/qualify/defer/revise
+  is open unless `pnpm trace show <id>` lists a CLEAR on it.
 - Agreement between critics is **not** extra evidence (they share a model); only a
   critic bringing *different* evidence corroborates. Verdict semantics, the evidence
   standard per claim type, and the consumer actions: `.claude/memory/topics/trace.md`.

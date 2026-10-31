@@ -163,23 +163,28 @@ implementation, gaps into the synthesized order), and no durable state changes o
   that is not repo-relative (`pnpm trace reaudit` diffs repo paths only). `rule`, `human`,
   `record` and `reading` are exempt from the URL check: a WCAG URL stays citable as a rule,
   and external content is cited as `reading` (`external:<source>`) beside the local check
-  that licenses the fact (`/dream` step 3b). Partial: a page saved into the repo and cited as
-  `file_line` still passes, a `rule`, `human` or `record` item is trusted by its kind (a blog
-  cited as a rule, a PR comment as a human decision, or any id cited as a record passes — a
-  record ref is not checked to name an existing record), and only a `scheme://` URL is
-  recognized (a scheme-less `example.com/x` or an `http:/…` form is not).
+  that licenses the fact (`/dream` step 3b). The boundary follows the commit, not the claim
+  id: only a `wiki:` record can be COMMITted to a topic page (a `--ref` under `topics/`,
+  however written), QUARANTINEd, or cited by a rec comment — the writer refuses the first two
+  for any other record (a story status's `COMMIT --ref US-001` is untouched), and `wiki-check`
+  (below) errs on a rec comment or a `quarantine.md` row naming one, a replayed line included;
+  the fix is to re-admit the fact through `/dream` as `wiki:<topic>:<slug>`. Partial: a page
+  saved into the repo and cited as `file_line` still passes, a `rule`, `human` or `record` item
+  is trusted by its kind (a blog cited as a rule, a PR comment as a human decision, or any id
+  cited as a record passes — a record ref is not checked to name an existing record), and only
+  a `scheme://` URL is recognized (a scheme-less `example.com/x` or an `http:/…` form is not).
 - **Wiki ↔ store agreement** — `pnpm trace wiki-check` (and a contracts test in `pnpm test`):
   each `<!-- rec:TR-… -->` comment in a topic page names the latest record for its claim, a
-  licensing one, with a `COMMIT`/`COMMIT_QUALIFIED` whose `--ref` is that page, and a malformed
-  one is an error, never a legacy bullet; each latest licensing `wiki:` record committed to a
-  `topics/` page is still cited, since a fact leaves the wiki only through a revising record
-  (`/dream` lint 1e), never a silent delete (a ref outside `topics/`, such as a bridged domain
-  wiki, is not checked); `quarantine.md`'s rows are exactly the latest records whose last
-  decision is `QUARANTINE` (`HOLD` and `REAUDIT` decide nothing); `index.md` stays within 150
-  lines (a topic page over 200 lines, or this page over 400, is a warning; this page over 400
-  also fails the contracts test). Partial: a legacy bullet without a rec comment is not
-  checked, and whether a cited fact still holds is `pnpm trace reaudit`'s queue (a record
-  whose commit the repository no longer has is listed apart, as `unreachable`).
+  licensing `wiki:` one, with a `COMMIT`/`COMMIT_QUALIFIED` whose `--ref` is that page, and a
+  malformed one is an error, never a legacy bullet; each latest licensing `wiki:` record
+  committed to a `topics/` page is still cited, since a fact leaves the wiki only through a
+  revising record (`/dream` lint 1e), never a silent delete (a ref outside `topics/`, such as
+  a bridged domain wiki, is not checked); `quarantine.md`'s rows are exactly the latest
+  `wiki:` records whose last decision is `QUARANTINE` (`HOLD` and `REAUDIT` decide nothing);
+  `index.md` stays within 150 lines (a topic page over 200 lines, or this page over 400, is a
+  warning; this page over 400 also fails the contracts test). Partial: a legacy bullet without
+  a rec comment is not checked, and whether a cited fact still holds is `pnpm trace reaudit`'s
+  queue (a record whose commit the repository no longer has is listed apart, as `unreachable`).
 - **Merges** — `.gitattributes` merges `records.jsonl` as a union (both branches' appends
   survive); `pnpm trace lint` (in `pnpm test`) is the post-merge check. Replay errors only
   on merge-invariant violations (schema, content-hash ids, unknown targets, verdict vs

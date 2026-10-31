@@ -650,6 +650,11 @@ const lineCount = (text) => (text === "" ? 0 : text.split("\n").length - (text.e
 const lineOf = (text, index) => text.slice(0, index).split("\n").length;
 /** An action ref as a page path: refs are relative to .claude/memory, written with or without that prefix (and a leading ./). */
 const pageRef = (ref) => String(ref || "").replace(/^(?:\.\/)?(?:\.claude\/memory\/)?/, "");
+/** A record of the memory wiki: /dream files every fact and candidate under claim_id wiki:<topic>:<slug>. */
+const isWikiClaim = (rec) => String(rec?.claim_id ?? "").startsWith("wiki:");
+// The memory write boundary follows the commit, not the claim id: policy v3 screens only a wiki: record's evidence, so
+// only a wiki: record may be committed to a topic page, quarantined or cited by a rec comment. Every refusal names this fix.
+const READMIT = "re-admit the fact through /dream as wiki:<topic>:<slug>";
 /**
  * The text with every inline `code` span and ``` / ~~~ fenced line overwritten by "_" (so offsets and line
  * numbers hold, and code reads as neither a comment nor whitespace). Fences toggle as story-map.mjs reads them.
@@ -672,12 +677,15 @@ const inWikiPages = (ref) => new RegExp(`^${WIKI_TOPICS}/[^/]+\\.md$`).test(ref)
 /**
  * Where the wiki and the store disagree. pages = [{ path: "topics/<page>.md", text }];
  * quarantine and index = that file's text, or null when it is missing; state = replay(…).
- * Errors: a rec comment that names no record, a superseded, outdated or non-licensing one, or
- * one with no COMMIT/COMMIT_QUALIFIED whose ref is the citing page; a malformed rec comment; a
- * latest licensing wiki: record committed to a topics/ page that no page cites (a ref outside
- * topics/, such as a bridged domain wiki, is not checked); quarantine.md rows and the latest
- * records whose last decision is QUARANTINE differing either way; index.md over its limit.
- * Warnings: a page over its limit.
+ * Errors: a rec comment that names no record, one whose claim is not a wiki: claim, a
+ * superseded, outdated or non-licensing one, or one with no COMMIT/COMMIT_QUALIFIED whose ref is
+ * the citing page; a malformed rec comment; a latest licensing wiki: record committed to a
+ * topics/ page that no page cites (a ref outside topics/, such as a bridged domain wiki, is not
+ * checked); a quarantine.md row naming a record whose claim is not a wiki: claim; quarantine.md
+ * rows and the latest wiki: records whose last decision is QUARANTINE differing either way;
+ * index.md over its limit. Warnings: a page over its limit. A replayed line the writer refuses
+ * today (a non-wiki: COMMIT to a topic page, or QUARANTINE) is an error only where it is read:
+ * a rec comment or a quarantine.md row that names its record.
  */
 export function wikiViolations({ pages = [], quarantine = null, index = null, state, limits = WIKI_LIMITS }) {
   const errors = [];
@@ -701,6 +709,11 @@ export function wikiViolations({ pages = [], quarantine = null, index = null, st
       const r = records.get(id);
       if (!r) {
         errors.push(`${at} names no record in the store — admit the fact through /dream (its record, then COMMIT --ref ${path}); if you started the store empty (an adopter), strip the comment and keep the fact as a legacy bullet`);
+        continue;
+      }
+      // Whatever its verdict and actions: no action can make such a citation valid (a replayed COMMIT included).
+      if (!isWikiClaim(r)) {
+        errors.push(`${at} (${r.claim_id}) is not a wiki: record — only a wiki: record licenses a wiki fact, whatever its actions (the memory write boundary follows the commit): ${READMIT}, and cite that record`);
         continue;
       }
       if (superseded.has(id)) {
@@ -756,12 +769,15 @@ export function wikiViolations({ pages = [], quarantine = null, index = null, st
     rows.add(id);
     const r = records.get(id);
     if (!r) errors.push(`${at} names no record in the store — a row lists a candidate /dream deferred (its record, then QUARANTINE --ref quarantine.md)`);
+    else if (!isWikiClaim(r)) errors.push(`${at} (${r.claim_id}) is not a wiki: record — only /dream quarantines, and only a wiki: candidate has a row: remove the row; ${READMIT}`);
     else if (superseded.has(id) || latest.get(r.claim_id).record_id !== id) errors.push(`${at} was re-adjudicated: ${revisedBy.get(id) || latest.get(r.claim_id).record_id} is newer — remove its row (/dream lint 1d)`);
     else if (!actionsOf(id).some((a) => a.action === "QUARANTINE")) errors.push(`${at} has no QUARANTINE action — only a candidate /dream quarantined has a row`);
     else if (!quarantined(id)) errors.push(`${at} is no longer quarantined (its last decision is ${lastDecision(id)}) — remove its row (/dream lint 1d)`);
   }
+  // A row is asked only of /dream's own candidates, as the reverse rule asks only a wiki: fact for its citation: a row
+  // naming any other record is itself the error above, and the writer refuses a QUARANTINE on one.
   for (const r of latest.values()) {
-    if (quarantined(r.record_id) && !rows.has(r.record_id)) {
+    if (isWikiClaim(r) && quarantined(r.record_id) && !rows.has(r.record_id)) {
       errors.push(`${r.record_id} (${r.claim_id}) is QUARANTINEd but quarantine.md has no row for it — add its row (record | candidate fact | missing | since)`);
     }
   }
@@ -1141,7 +1157,25 @@ export function writeRecords(drafts, { storePath, now, policyVersion, commit, br
  */
 export const EVENT_ACTIONS = ["REUSE"];
 
-/** Append consumer actions all-or-nothing, enforcing the action matrix (fail closed). */
+/**
+ * The memory write boundary at the writer (append time only: replay, and so lint, is unchanged — wiki-check catches a
+ * replayed line where it is read). Only a wiki: record is COMMITted or COMMIT_QUALIFIED to a topic page (a ref under
+ * topics/, normalised as wiki-check reads refs, so ./topics/x.md and .claude/memory/topics/x.md count) or QUARANTINEd
+ * (only /dream quarantines). A COMMIT with any other ref (a story status's --ref US-001) is untouched. Never echoes the
+ * ref: a refusal's text is printed, and the action itself is screened for bench ground truth.
+ */
+function wikiActionViolation(rec, action, ref) {
+  if (isWikiClaim(rec)) return null;
+  if (COMMIT_ACTIONS.includes(action) && pageRef(ref).startsWith(`${WIKI_TOPICS}/`)) {
+    return `${action} to a topic page (a --ref under ${WIKI_TOPICS}/) on ${rec.record_id} (${rec.claim_id}), which is not a wiki: record — only a wiki: record is committed to a topic page (the memory write boundary follows the commit): ${READMIT}`;
+  }
+  if (action === "QUARANTINE") {
+    return `QUARANTINE on ${rec.record_id} (${rec.claim_id}), which is not a wiki: record — only /dream quarantines, and only a wiki: candidate: ${READMIT}`;
+  }
+  return null;
+}
+
+/** Append consumer actions all-or-nothing, enforcing the action matrix and the memory write boundary (fail closed). */
 export function appendActions(drafts, { storePath, now, policyVersion, schema, forbidden = [] }) {
   const sch = schema || loadSchema();
   const prior = replay(loadEntries(storePath), sch, policyVersion);
@@ -1165,6 +1199,8 @@ export function appendActions(drafts, { storePath, now, policyVersion, schema, f
     else {
       const why = actionViolation(rec, a.action, prior.superseded, prior.latestOfClaim);
       if (why) violations.push(why);
+      const boundary = wikiActionViolation(rec, a.action, a.ref);
+      if (boundary) violations.push(boundary);
     }
     return { a, violations };
   });

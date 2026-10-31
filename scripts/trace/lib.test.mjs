@@ -615,6 +615,38 @@ describe("memory write boundary (policy v3)", () => {
     expect(why(res)).toBe("");
     expect(res.stored).toBe(true);
   });
+
+  // The boundary follows the commit, not the claim id: the checks above screen only a wiki: record, so no other record
+  // is ever COMMITted to a topic page or QUARANTINEd. Append time only — replay is unchanged (wiki.test.mjs).
+  it("follows the commit: a COMMIT or COMMIT_QUALIFIED whose ref is under topics/ (read as wiki-check reads refs) and any QUARANTINE are refused on a non-wiki: record; any other ref, any other action and every wiki: record are stored", () => {
+    const [critic, criticQ, criticD, wiki, wikiQ, wikiD] = writeRecords(
+      [
+        draft(),
+        draft({ claim_id: "critic:ux:q", final_status: "qualify", qualifier: "on one run" }),
+        draft({ claim_id: "critic:ux:d", final_status: "defer", missing: ["a browser repro"], evidence: [] }),
+        fact([{ kind: "file_line", ref: "vitest.config.ts:8" }]),
+        fact([{ kind: "file_line", ref: "vitest.config.ts:8" }], { claim_id: "wiki:testing:q", final_status: "qualify", qualifier: "on one run" }),
+        fact([], { claim_id: "wiki:testing:d", final_status: "defer", missing: ["a local reproduction"] }),
+      ],
+      v3(),
+    ).map((r) => r.record_id);
+    const one = (record_id, action, ref) => appendActions([{ record_id, consumer: "dream", action, ...(ref ? { ref } : {}) }], ctx())[0];
+    const pageRefs = ["topics/x.md", "./topics/x.md", ".claude/memory/topics/x.md", "./.claude/memory/topics/x.md", "topics/sub/x.md"];
+    for (const ref of pageRefs) {
+      const res = one(critic, "COMMIT", ref);
+      expect(res.stored, ref).toBe(false);
+      expect(why(res), ref).toMatch(/is not a wiki: record — .*re-admit the fact through \/dream as wiki:<topic>:<slug>/);
+      expect(one(criticQ, "COMMIT_QUALIFIED", ref).stored, ref).toBe(false);
+    }
+    for (const ref of ["quarantine.md", undefined]) expect(one(criticD, "QUARANTINE", ref).stored, String(ref)).toBe(false);
+    expect(existsSync(store) && readFileSync(store, "utf8").includes('"kind":"action"')).toBe(false);
+    for (const ref of ["US-001", "docs/wiki/billing.md", undefined]) expect(one(critic, "COMMIT", ref).stored, String(ref)).toBe(true);
+    expect(one(criticD, "HOLD").stored).toBe(true);
+    for (const ref of pageRefs) expect(one(wiki, "COMMIT", ref).stored, ref).toBe(true);
+    expect(one(wikiQ, "COMMIT_QUALIFIED", "topics/x.md").stored).toBe(true);
+    expect(one(wikiD, "QUARANTINE", "quarantine.md").stored).toBe(true);
+    expect(replay(loadEntries(store), schema, POLICY).errors).toEqual([]);
+  });
 });
 
 describe("secrets never enter the store", () => {

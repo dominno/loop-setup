@@ -131,6 +131,87 @@ describe("pnpm trace (CLI process)", () => {
   });
 });
 
+/** Write one draft through the CLI (its gates apply) and return the stored record's id. */
+const writeOne = (over) => {
+  const out = trace(["write", "-"], draft(over));
+  expect(out.status, out.stdout).toBe(0);
+  return JSON.parse(out.stdout)[0].record_id;
+};
+
+// The memory write boundary follows the commit, not the claim id: only a wiki: record is COMMITted to a topic page or
+// QUARANTINEd. The writer refuses the rest at append time; a COMMIT that names no page (a story status) still works.
+describe("act: the memory write boundary follows the commit (CLI process)", () => {
+  const PAGE_REFS = ["topics/x.md", "./topics/x.md", ".claude/memory/topics/x.md"];
+
+  it("refuses a COMMIT or COMMIT_QUALIFIED to a topic page (however the ref is written) and a QUARANTINE on a non-wiki: record, naming the fix and storing nothing", () => {
+    const memo = writeOne({ claim_id: "memo:x", claim_text: "a memo" });
+    const memoQ = writeOne({ claim_id: "memo:q", claim_text: "a qualified memo", final_status: "qualify", qualifier: "on one run" });
+    const memoD = writeOne({ claim_id: "memo:d", claim_text: "a deferred memo", final_status: "defer", missing: ["a reproduction"], evidence: [] });
+    const refused = [...PAGE_REFS.map((ref) => [memo, "COMMIT", ref]), [memoQ, "COMMIT_QUALIFIED", "topics/x.md"], [memoD, "QUARANTINE", "quarantine.md"]];
+    for (const [id, action, ref] of refused) {
+      const out = trace(["act", id, "dream", action, "--ref", ref]);
+      expect(out.status, `${action} --ref ${ref}`).toBe(1);
+      const [res] = JSON.parse(out.stdout);
+      expect(res.stored).toBe(false);
+      expect(res.validation.fail.join("\n"), `${action} --ref ${ref}`).toMatch(/is not a wiki: record — .*re-admit the fact through \/dream as wiki:<topic>:<slug>/);
+    }
+    expect(readFileSync(store, "utf8").trim().split("\n")).toHaveLength(3); // the three records, no action
+  });
+
+  it("stores a story-status COMMIT --ref US-001 on a non-wiki: record, and on wiki: records every one of those actions", () => {
+    const story = writeOne({ writer_id: "scan-docs", claim_id: "story:us-001:status", claim_text: "US-001 is Implemented" });
+    expect(trace(["act", story, "story-status", "COMMIT", "--ref", "US-001"]).status).toBe(0);
+    const fact = writeOne({ writer_id: "dream", claim_id: "wiki:testing:x", claim_text: "a fact" });
+    const factQ = writeOne({ writer_id: "dream", claim_id: "wiki:testing:q", claim_text: "a qualified fact", final_status: "qualify", qualifier: "on one run" });
+    const candidate = writeOne({ writer_id: "dream", claim_id: "wiki:testing:d", claim_text: "a candidate", final_status: "defer", missing: ["a reproduction"], evidence: [] });
+    for (const ref of PAGE_REFS) expect(trace(["act", fact, "dream", "COMMIT", "--ref", ref]).status, ref).toBe(0);
+    expect(trace(["act", factQ, "dream", "COMMIT_QUALIFIED", "--ref", "topics/x.md"]).status).toBe(0);
+    expect(trace(["act", candidate, "dream", "QUARANTINE", "--ref", "quarantine.md"]).status).toBe(0);
+    const actions = readFileSync(store, "utf8").trim().split("\n").map((l) => JSON.parse(l)).filter((e) => e.kind === "action");
+    expect(actions.map((a) => `${a.action} ${a.ref}`)).toEqual(["COMMIT US-001", ...PAGE_REFS.map((ref) => `COMMIT ${ref}`), "COMMIT_QUALIFIED topics/x.md", "QUARANTINE quarantine.md"]);
+    expect(trace(["lint"]).status).toBe(0);
+  });
+});
+
+// The whole-store open-blocker check (critic-round.md, multi-agent-dev.md) asks one question; --severity keeps its
+// answer to the blocker records instead of every latest critic record.
+describe("query --severity (CLI process)", () => {
+  const OPEN_BLOCKER_CHECK = "pnpm -s trace query --latest --writer critic-panel --severity blocker --json";
+  const critic = (claim, over = {}) => ({ writer_id: `critic-panel/verify:${claim}-0`, claim_id: `critic:${claim}`, claim_text: claim, provenance: { workflow: "critic-panel" }, ...over });
+  const ids = (...args) => {
+    const out = trace(["query", ...args, "--json"]);
+    expect(out.status, args.join(" ")).toBe(0);
+    return JSON.parse(out.stdout).map((r) => r.record_id);
+  };
+
+  it("is an exact match on a record's severity and composes with --latest and --writer; the documented open-blocker check is exactly that query", () => {
+    const rerated = writeOne(critic("a11y:rerated", { severity: "blocker" }));
+    const deferred = writeOne(critic("ux:deferred", { severity: "blocker", final_status: "defer", missing: ["a browser repro"], evidence: [] }));
+    const important = writeOne(critic("perf:important", { severity: "important" }));
+    const loopBlocker = writeOne({ writer_id: "loop-iteration/verify:LP-001-0", claim_id: "loop:lp-001", claim_text: "a loop finding", severity: "blocker" });
+    writeOne(critic("qa:unrated")); // no severity: never matched
+    const nowImportant = writeOne(critic("a11y:rerated", { severity: "important", claim_text: "a11y:rerated, re-rated", revises: rerated }));
+    expect(ids("--severity", "blocker")).toEqual([rerated, deferred, loopBlocker]);
+    expect(ids("--severity", "important")).toEqual([important, nowImportant]);
+    expect(ids("--latest", "--severity", "blocker")).toEqual([deferred, loopBlocker]); // the re-rated claim's latest record is important
+    expect(ids("--writer", "critic-panel", "--severity", "blocker")).toEqual([rerated, deferred]);
+    const documented = OPEN_BLOCKER_CHECK.split(" ").slice(4, -1); // the flags between `query` and `--json`
+    expect(ids(...documented)).toEqual([deferred]);
+    for (const doc of [".claude/commands/critic-round.md", ".claude/commands/multi-agent-dev.md"]) {
+      expect(readFileSync(join(ROOT, doc), "utf8"), doc).toContain(OPEN_BLOCKER_CHECK);
+    }
+  });
+
+  it("a missing or unknown value is a usage error (exit 2), never an empty list that would read as 'no open blocker'", () => {
+    writeOne(critic("a11y:x", { severity: "blocker" }));
+    for (const bad of [["--severity"], ["--severity", "blockers"], ["--severity", "Blocker"], ["--severity", "--json"]]) {
+      const out = trace(["query", ...bad]);
+      expect(out.status, bad.join(" ")).toBe(2);
+      expect(out.stdout, bad.join(" ")).toMatch(/--severity blocker\|important\|nice-to-have/);
+    }
+  });
+});
+
 // The loop plan's DAG commands, run as a process on a temp --plan (and the temp store).
 describe("plan commands (CLI process)", () => {
   const HEADER = "| id | description | after | status | record | missing | origin | notes |\n|---|---|---|---|---|---|---|---|";

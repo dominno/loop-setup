@@ -96,8 +96,10 @@ Never mark complete unless:
 - no reviewer failed in the final round (`failedReviewers` is empty, and
   `completion.missing` names no failed lens)
 - no open blocker remains in the store beyond the round's view: `priorRecords` carries only
-  the newest 40 records, so check `pnpm -s trace query --latest --writer critic-panel --json`
-  for a `blocker` at accept/qualify/defer/revise with no CLEAR (`pnpm trace show <id>`)
+  the newest 40 records, so check
+  `pnpm -s trace query --latest --writer critic-panel --severity blocker --json` (the latest
+  blocker records only) for a `blocker` at accept/qualify/defer/revise with no CLEAR
+  (`pnpm trace show <id>`)
 - the round's TRACE records are appended (`pnpm trace lint` passes)
 - files changed are reported
 - remaining risks are listed

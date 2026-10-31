@@ -57,7 +57,9 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
   pnpm trace act --from <file|->       append consumer actions ([{record_id, consumer, action, ref?, note?}], {actions:[...]}, or a critic-panel result's reuseActions)
   pnpm trace tree-id                   fingerprint of HEAD + uncommitted changes (verdict reuse / provenance.tree)
   pnpm trace show <record_id>          a record, its consumer actions, and its revision chain
-  pnpm trace query [--claim-id ID] [--status S] [--writer PREFIX] [--subject S] [--latest] [--json] [--brief]
+  pnpm trace query [--claim-id ID] [--status S] [--severity S] [--writer PREFIX] [--subject S] [--latest] [--json] [--brief]
+                                       --severity: exact match on a record's severity (blocker|important|nice-to-have; a
+                                       missing or other value exits 2), combinable with the other filters
                                        --brief: compact JSON (newest 40, only the fields critic-panel reads) for args.priorRecords
   pnpm trace denylist-check --patch <file>
                                        BEFORE applying a patch: run the loop's production denylist (read from HEAD) over
@@ -483,9 +485,17 @@ async function main() {
   }
 
   if (cmd === "query") {
+    // --severity answers the whole-store open-blocker check (critic-round.md, multi-agent-dev.md), so a missing or
+    // unknown value (the schema's enum) is a usage error, never an empty list that would read as "no open blocker".
+    const severities = schema.$defs.record.properties.severity.enum;
+    if (flags.severity !== undefined && !severities.includes(flags.severity)) {
+      out(`usage: pnpm trace query … --severity ${severities.join("|")}   (an exact match on a record's severity)`);
+      return 2;
+    }
     let recs = flags.latest ? [...latestByClaim(state.records, state.superseded).values()] : [...state.records.values()];
     if (flags["claim-id"]) recs = recs.filter((r) => r.claim_id === flags["claim-id"]);
     if (flags.status) recs = recs.filter((r) => r.final_status === flags.status);
+    if (flags.severity) recs = recs.filter((r) => r.severity === flags.severity);
     if (flags.writer) recs = recs.filter((r) => r.writer_id.startsWith(flags.writer));
     if (flags.subject) recs = recs.filter((r) => r.subject === flags.subject);
     if (flags.brief) {

@@ -4,12 +4,13 @@
 // writer (writeRecords / appendActions), so every record and action below passed the gates a /dream
 // ingest faces; the pages are plain text, as loadWiki reads them.
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   WIKI_LIMITS,
   appendActions,
+  finalizeAction,
   loadEntries,
   loadSchema,
   loadWiki,
@@ -56,6 +57,13 @@ const write = (over) => {
 };
 /** Append one /dream consumer action; true when the writer stored it. */
 const act = (record_id, action, ref) => appendActions([{ record_id, consumer: "dream", action, ...(ref ? { ref } : {}) }], ctx())[0].stored;
+/**
+ * Append one /dream action line straight to the store, as a store written before a writer rule (or merged in from
+ * such a branch) holds it: valid on replay (schema, content hash, verdict), but never through the writer, so a
+ * writer refusal does not stop it. wiki-check must still hold where such a line would be read.
+ */
+const replayed = (record_id, action, ref) =>
+  appendFileSync(store, JSON.stringify(finalizeAction({ record_id, consumer: "dream", action, ...(ref ? { ref } : {}) }, ctx())) + "\n");
 /** A topic page: a heading, a blank line, then the bullets — so the first bullet is line 3. */
 const page = (path, ...bullets) => ({ path, text: ["# Testing conventions", "", ...bullets, ""].join("\n") });
 const cite = (id, text = "a fact") => `- ${text} <!-- rec:${id} -->`;
@@ -141,6 +149,22 @@ describe("wikiViolations: the wiki and the record store agree", () => {
     expect(errors[0].startsWith(`topics/testing.md:3: rec:${d} is a "defer" record`)).toBe(true);
   });
 
+  // The memory write boundary follows the commit, not the claim id: policy v3 screens only a wiki: record's evidence,
+  // so a record under any other claim id (here an external URL cited as file_line) must never reach a page.
+  it("a page citing a licensing, COMMITted record whose claim is not a wiki: one is an error naming the prefix rule, though its replayed COMMIT line is valid; the writer refuses that COMMIT", () => {
+    const memo = write({ claim_id: "memo:x", claim_text: "a fact admitted under another claim id", evidence: [{ kind: "file_line", ref: "https://example.com/post" }] });
+    expect(act(memo, "COMMIT", PAGE)).toBe(false); // the writer refuses the COMMIT…
+    replayed(memo, "COMMIT", PAGE); // …but a store written before the rule (or merged in from one) can hold it
+    expect(replay(loadEntries(store), schema, POLICY).errors).toEqual([]); // replay is unchanged: the line is valid
+    const { errors } = check({ pages: [page(PAGE, cite(memo))] });
+    expect(errors).toHaveLength(1);
+    expect(errors[0].startsWith(`topics/testing.md:3: rec:${memo} (memo:x) is not a wiki: record — `)).toBe(true);
+    expect(errors[0]).toContain("re-admit the fact through /dream as wiki:<topic>:<slug>");
+    // Uncommitted, it names the same rule (not the missing COMMIT): no action on it can make the citation valid.
+    const bare = write({ claim_id: "memo:y", claim_text: "another fact under another claim id" });
+    expect(check({ pages: [page(PAGE, cite(bare))] }).errors).toEqual([expect.stringMatching(/^topics\/testing\.md:3: rec:TR-[0-9a-f]{12} \(memo:y\) is not a wiki: record — /)]);
+  });
+
   it("a committed fact that no page cites is an error when its ref is a topics/ page (even one since deleted); a ref outside topics/, such as a bridged domain wiki, is ignored, and so is a record whose claim is not a wiki: fact", () => {
     const kept = write();
     const gone = write({ claim_id: "wiki:old:x", claim_text: "a fact on a page that was deleted" });
@@ -149,7 +173,11 @@ describe("wikiViolations: the wiki and the record store agree", () => {
     expect(act(kept, "COMMIT", PAGE)).toBe(true);
     expect(act(gone, "COMMIT", "topics/old.md")).toBe(true);
     expect(act(bridged, "COMMIT", "docs/wiki/billing.md")).toBe(true);
-    expect(act(critic, "COMMIT", PAGE)).toBe(true); // licensing and committed to a topics/ page, but not a wiki: claim
+    // Licensing and committed to a topics/ page, but not a wiki: claim. The writer refuses that COMMIT (the memory
+    // write boundary follows the commit), so only a store written before the rule holds the line: replayed, it is
+    // still outside the reverse rule, which asks only a wiki: fact for its citation.
+    expect(act(critic, "COMMIT", PAGE)).toBe(false);
+    replayed(critic, "COMMIT", PAGE);
     const { errors } = check({ pages: [page(PAGE)] });
     expect(errors.map((e) => e.split(" but no topic page cites it")[0])).toEqual([
       `${kept} (wiki:testing:file-parallelism) is committed to topics/testing.md`,
@@ -238,6 +266,22 @@ describe("wikiViolations: the wiki and the record store agree", () => {
     const batch = appendActions([{ record_id: tie, consumer: "dream", action: "QUARANTINE", ref: "quarantine.md" }, { record_id: tie, consumer: "dream", action: "REJECT" }], ctx());
     expect(batch.every((r) => r.stored)).toBe(true);
     expect(check({ quarantine: quarantineTable() })).toEqual({ errors: [], warnings: [] });
+  });
+
+  // Only /dream quarantines, and only a wiki: candidate: the quarantine rule is scoped as the reverse rule is.
+  it("a quarantine.md row naming a record whose claim is not a wiki: one is an error naming the prefix rule; its replayed QUARANTINE needs no row (that row would be the error); the writer refuses that QUARANTINE", () => {
+    const memo = write(candidate({ claim_id: "memo:held", claim_text: "a candidate held under another claim id" }));
+    expect(act(memo, "QUARANTINE", "quarantine.md")).toBe(false); // the writer refuses the QUARANTINE…
+    replayed(memo, "QUARANTINE", "quarantine.md"); // …but a store written before the rule can hold it
+    expect(replay(loadEntries(store), schema, POLICY).errors).toEqual([]);
+    expect(check({ quarantine: quarantineTable() })).toEqual({ errors: [], warnings: [] });
+    const rows = check({ quarantine: quarantineTable(memo) }).errors;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].startsWith(`quarantine.md:5: ${memo} (memo:held) is not a wiki: record — `)).toBe(true);
+    expect(rows[0]).toContain("re-admit the fact through /dream as wiki:<topic>:<slug>");
+    // A row naming one that was never quarantined names the same rule (no QUARANTINE could ever make the row valid).
+    const critic = write({ claim_id: "critic:a11y:x", claim_text: "the input has no label" });
+    expect(check({ quarantine: quarantineTable(critic) }).errors).toEqual([expect.stringMatching(new RegExp(`^quarantine\\.md:5: ${critic} \\(critic:a11y:x\\) is not a wiki: record — `))]);
   });
 
   it("index.md over 150 lines is an error; a topic page over 200 lines is a warning, and the policy page's limit is 400", () => {
