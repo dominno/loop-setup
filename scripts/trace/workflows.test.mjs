@@ -1250,7 +1250,7 @@ describe("cost bounds: with no token target no floor fires, even at remaining() 
         ? { implementationFiles: [], unitTests: "Missing", e2eTests: "Missing", proposedStatus: "Not started", notes: "" }
         : { finalStatus: "Not started", justification: "j", missing: [], evidenceChecked: [{ kind: "file_line", ref: "src/a.ts:1" }] };
     const { result, calls } = await runWorkflow("scan-docs.js", { stories: [{ id: "US-001", title: "Greeting", source: "docs/prd.md" }] }, reply, NO_TARGET);
-    expect(calls.map((c) => c.label.split(":")[0])).toEqual(["evidence", "verify"]);
+    expect(calls.map((c) => c.label)).toEqual(["evidence:US-001-0", "verify:US-001-0"]);
     expect(result.error).toBeUndefined();
     expect(result.budgetStopped).toBeUndefined();
     expect(result.count).toBe(1);
@@ -1503,5 +1503,36 @@ describe("loop dispatch hygiene: base-checked worktree implementers, maxItems, r
       expect(result.escalate).toEqual(["LP-030"]);
       expectWritable(result.traceRecords);
     }
+  });
+});
+
+// pipeline() calls EVERY stage as (prevResult, originalItem, index), the first stage included (its
+// prevResult is the item itself). A first stage declared (story, i) reads the item as its index and
+// labels 'evidence:US-001-[object Object]'. Labels always include the map index
+// (.claude/memory/topics/workflow.md), and both stages of one item carry the same one.
+describe("pipeline labels carry the map index (a first stage takes it as its third parameter)", () => {
+  it("scan-docs: each story's evidence agent is labelled evidence:<id>-<index>, as its status verifier and failure log are", async () => {
+    const stories = [{ id: "US-001", title: "Greeting", source: "docs/prd.md" }, { id: "US-002", title: "Farewell", source: "docs/prd.md" }];
+    const reply = (label) =>
+      label.startsWith("evidence:")
+        ? { implementationFiles: [], unitTests: "Missing", e2eTests: "Missing", proposedStatus: "Not started", notes: "" }
+        : { finalStatus: "Not started", justification: "j", missing: [], evidenceChecked: [{ kind: "file_line", ref: "src/a.ts:1" }] };
+    const { calls } = await runWorkflow("scan-docs.js", { stories }, reply);
+    expect(calls.filter((c) => c.label.startsWith("evidence:")).map((c) => c.label)).toEqual(["evidence:US-001-0", "evidence:US-002-1"]);
+    expect(calls.filter((c) => c.label.startsWith("verify:")).map((c) => c.label)).toEqual(["verify:US-001-0", "verify:US-002-1"]);
+    const { logs } = await runWorkflow("scan-docs.js", { stories }, throwing("evidence:US-002", reply));
+    expect(logs.map((l) => l.text)).toContain("agent failed: evidence:US-002-1: agent died: evidence:US-002-1");
+  });
+
+  it("loop-iteration: each item's implementer is labelled impl:<id>-<index>, as its verifier and failure log are", async () => {
+    const items = [{ id: "LP-050", description: "x" }, { id: "LP-051", description: "y" }];
+    const diff = "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-a\n+b\n";
+    const reply = (label) =>
+      label.startsWith("impl:") ? { baseSha: HEAD_SHA, changedFiles: ["src/a.ts"], diff, checksPassed: true, notes: "" } : verdict({ evidenceChecked: [{ kind: "diff", ref: "src/a.ts" }] });
+    const { calls } = await runWorkflow("loop-iteration.js", { items, level: "L2", headSha: HEAD_SHA }, reply);
+    expect(calls.filter((c) => c.label.startsWith("impl:")).map((c) => c.label)).toEqual(["impl:LP-050-0", "impl:LP-051-1"]);
+    expect(calls.filter((c) => c.label.startsWith("verify:")).map((c) => c.label)).toEqual(["verify:LP-050-0", "verify:LP-051-1"]);
+    const { logs } = await runWorkflow("loop-iteration.js", { items, level: "L2", headSha: HEAD_SHA }, throwing("impl:LP-051", reply));
+    expect(logs.map((l) => l.text)).toContain("agent failed: impl:LP-051-1: agent died: impl:LP-051-1");
   });
 });

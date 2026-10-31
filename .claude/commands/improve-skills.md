@@ -1,5 +1,5 @@
 ---
-description: Meta-critic pass over the project's OWN prompts, skills, and workflow orchestration — fan out one reviewer per quality lens, adversarially verify each finding, and PROPOSE edits to the core prompts. Never auto-applies; every change is confirmation-gated. Use periodically to let the system improve its own machinery, not just its facts.
+description: Meta-critic pass over the project's OWN prompts, skills, and workflow orchestration — fan out one reviewer per quality lens, adversarially verify each blocker and important finding (uncapped unless args.maxVerifiers is set; findings past it are recorded as defers), and PROPOSE edits to the core prompts. Never auto-applies; every change is confirmation-gated. Use periodically to let the system improve its own machinery, not just its facts.
 argument-hint: [scope, e.g. "the loop workflows" | "all commands"]
 disable-model-invocation: true
 ---

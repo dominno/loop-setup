@@ -77,8 +77,9 @@ $ARGUMENTS
 - Exception, measured: a code-only round (`uiInScope: false` — no browser lens in scope)
   runs ONE all-lens reviewer instead of the critic fan-out (`reviewMode: 'single-pass'`):
   TRACE-Bench-lite found it as good as the panel on code-only review at ~5x lower cost
-  (F1; qualified: one run on the 19-fixture bench, 5 of the 10 critics, measured as diff-level block/no-block with the bench's own single-pass prompt — not this round's production prompt). Each finding still names its lens and still gets its own separate
-  skeptic. Pass `reviewMode: 'panel'` to force the fan-out.
+  (F1; qualified: one run on the 19-fixture bench, 5 of the 10 critics, measured as diff-level block/no-block with the bench's own single-pass prompt — not this round's production prompt). Each finding still names its lens; every blocker, and each
+  important finding up to the verifier cap, gets a typed verdict from a separate skeptic,
+  and the rest are recorded as defers. Pass `reviewMode: 'panel'` to force the fan-out.
 - `completion` sees only the prior records passed in, and `--brief` carries the newest 40.
   Before a task is declared complete, also check the whole store for an open blocker:
   `pnpm -s trace query --latest --writer critic-panel --json` lists each latest critic

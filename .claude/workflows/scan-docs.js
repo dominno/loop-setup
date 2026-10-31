@@ -197,10 +197,12 @@ const agentFailed = (label) => (e) => {
 
 phase('Evidence')
 let evidenceFailed = 0 // stories whose evidence agent threw or returned nothing
-// Pipeline: each story flows through evidence → verify independently (no barrier).
+// Pipeline: each story flows through evidence → verify independently (no barrier). Every stage
+// gets (prevResult, story, index), the first included (its prevResult is the story itself), so
+// the map index its labels carry is the third parameter.
 const records = await pipeline(
   stories,
-  (story, i) =>
+  (story, _story, i) =>
     agent(
       `Gather IMPLEMENTATION and TEST evidence for this user story by searching the codebase and tests (do not write any files):\n${JSON.stringify(story)}\n\nReport which files implement it, whether unit and E2E tests cover it, and the most defensible status. "Not started" is correct when no implementation is found.\n\n${AGENT_SAFETY}`,
       { label: `evidence:${story.id || 'story'}-${i}`, phase: 'Evidence', schema: EVIDENCE_SCHEMA, model: FANOUT_MODEL },

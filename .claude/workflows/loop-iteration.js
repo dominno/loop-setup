@@ -277,10 +277,12 @@ const agentFailed = (label) => (e) => {
 
 phase('Implement')
 let implFailed = 0 // items whose implementer threw or returned nothing (never counts an empty diff)
-// Pipeline: each item flows implement → verify independently.
+// Pipeline: each item flows implement → verify independently. Every stage gets (prevResult, item,
+// index), the first included (its prevResult is the item itself), so the map index its labels
+// carry is the third parameter.
 const outcomes = await pipeline(
   items,
-  (item, i) =>
+  (item, _item, i) =>
     agent(
       `Implement the SMALLEST safe fix for this loop work item in your isolated worktree. Stay in scope; NEVER touch denylist paths (auth, payments, secrets/.env, infra, CI config, migrations, .claude/, CLAUDE.md).\n- Your worktree is a fresh checkout without dependencies. First record \`git rev-parse HEAD\` as \`baseSha\`. Then install with the lockfile: \`pnpm install --frozen-lockfile --prefer-offline\`; in the web env, use the pnpm invocation from .claude/memory/topics/remote-env.md (pnpm 10 vs 11).\n- Edit only inside your worktree, and run typecheck, lint and unit tests there.\n- Never run pnpm dev, pnpm build, pnpm test:e2e or pnpm verify: build rewrites tracked files into your diff, and port 3000 belongs to the user. The Lead runs those after applying.\n- Never commit, push, switch branches, stash or reset, and never stop or kill a process you did not start.\n- Before capturing the diff, run \`git add -N .\` so new files appear in it. Then capture the ACTUAL change with \`git diff --src-prefix=a/ --dst-prefix=b/\` (explicit prefixes: the gate parses only a/ and b/, whatever the git config says) and return it as \`diff\` (the real patch, not a summary). Report changedFiles repo-relative, as the a/ and b/ paths in the diff. In notes, give each check command with its exit code (no | tail) and your worktree root. Set checksPassed to whether those checks passed.\n\n${JSON.stringify(item)}`,
       { label: `impl:${item.id || 'item'}-${i}`, phase: 'Implement', schema: IMPL_SCHEMA, isolation: 'worktree' },
