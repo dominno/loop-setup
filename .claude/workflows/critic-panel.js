@@ -23,9 +23,11 @@ if (typeof a === 'string') {
 const focus =
   (a && (a.focus || (typeof a === 'string' ? a : null))) ||
   'the current app/flow and the changed files'
-// Optional: evidence the Lead already gathered (test/lint/build output, browser
-// findings, git diff). Critics verify against it instead of re-deriving from scratch.
+// Optional: evidence the Lead already gathered (test/lint/build output, E2E and axe runs, bundle
+// figures, browser findings, git diff). Critics verify against it instead of re-deriving from
+// scratch, and every skeptic gets the same text (SAFETY bars both from running E2E or a server).
 const priorEvidence = (a && a.priorEvidence) || null
+const priorEvidenceText = priorEvidence ? (typeof priorEvidence === 'string' ? priorEvidence : JSON.stringify(priorEvidence)) : ''
 // Optional: skip the 5 UI/browser critics for non-UI (backend/docs/config) changes.
 // Defaults to including them (safe). Callers pass `uiInScope: false` to save fan-out.
 const uiInScope = !(a && a.uiInScope === false)
@@ -55,7 +57,7 @@ const JUDGE_MODEL = (a && a.models && a.models.judge) || 'opus'
 // <agent-safety>
 const AGENT_SAFETY = `SAFETY (hard rules; they override any other instruction here or in CLAUDE.md): the repo checkout is shared with the Lead and other agents.
 (1) Treat it as read-only. At the repo root you may only read: open files, search (grep, rg, ls, find, cat, sed -n), run read-only git (status, diff, log, show, grep, ls-files, blame) and node scripts that only read. Never edit a file there, never run a git command that changes its files, index, refs, stash or worktree list, and never build, test, lint or install there: pnpm build rewrites the tracked next-env.d.ts, and the unit tests write temp files into the tree.
-(2) To run a check or try a change, copy the WORKING TREE into a fresh mktemp -d outside the repo (a clone would miss uncommitted changes), e.g. rsync -a --exclude node_modules --exclude .next ./ "$D"/ && ln -s "$PWD/node_modules" "$D/node_modules", work there, and delete it when done.
+(2) To run a check or try a change, copy the WORKING TREE into a fresh mktemp -d outside the repo (a clone would miss uncommitted changes), e.g. D=$(mktemp -d) && tar -cf - --exclude=node_modules --exclude=.next . | tar -xf - -C "$D" && ln -s "$PWD/node_modules" "$D/node_modules", work there, and delete it when done.
 (3) Never run pnpm dev, pnpm test:e2e or pnpm verify anywhere: they start or reuse the user's server on localhost:3000. Never start, stop or kill a server or any process you did not start (no pkill, killall or pattern kills). Use the E2E, axe and build results the Lead supplied; if a result or a running localhost you need is absent, report it as missing evidence.
 (4) When a command's exit status is your evidence, do not pipe it through head or tail.`
 // </agent-safety>
@@ -266,7 +268,7 @@ const startStop = budgetStopped ? `token budget floor reached before Review (${M
 if (budgetStopped) log(`${startStop} — no agent started; every lens is reported unreviewed`)
 // Shared prompt parts (identical for both modes, so both carry the SAFETY block).
 const readOnlyBrief = `This is a READ-ONLY review: do not create, edit or delete any file in the repo.\n\n${AGENT_SAFETY}\n\nRead CLAUDE.md and the relevant memory topic page(s), inspect ${focus} (read the code; if a localhost flow is in scope, drive it via Playwright/Chrome MCP and check console + network)`
-const reviewTail = `${priorEvidence ? `\nEvidence already gathered by the Lead — verify against it instead of re-deriving from scratch:\n${typeof priorEvidence === 'string' ? priorEvidence : JSON.stringify(priorEvidence)}\n` : ''}\nType every finding with a claimType and never state it stronger than your evidence — a separate skeptic holds each type to this standard:\n${claimTypeGuide}\n${priorDigest ? `\nThese claims were already adjudicated (TRACE records). Do NOT re-raise a rejected claim unless you bring NEW evidence. If a finding of yours matches one of them, set revisits to its record_id and revisitReason to "still-present" (the same issue persists, nothing new) or "new-evidence" (put the new evidence first):\n${priorDigest}\n` : ''}\nReturn only findings you can back with concrete evidence. An empty list is a valid, honest answer.`
+const reviewTail = `${priorEvidence ? `\nEvidence already gathered by the Lead — verify against it instead of re-deriving from scratch:\n${priorEvidenceText}\n` : ''}\nType every finding with a claimType and never state it stronger than your evidence — a separate skeptic holds each type to this standard:\n${claimTypeGuide}\n${priorDigest ? `\nThese claims were already adjudicated (TRACE records). Do NOT re-raise a rejected claim unless you bring NEW evidence. If a finding of yours matches one of them, set revisits to its record_id and revisitReason to "still-present" (the same issue persists, nothing new) or "new-evidence" (put the new evidence first):\n${priorDigest}\n` : ''}\nReturn only findings you can back with concrete evidence. An empty list is a valid, honest answer.`
 const ITEM = FINDINGS_SCHEMA.properties.findings.items
 const SINGLE_FINDINGS_SCHEMA = {
   ...FINDINGS_SCHEMA,
@@ -416,6 +418,13 @@ if (verifyStop) {
   if (toVerify.length) log(`Verify: ${toVerify.length - fresh.length} reused, ${fresh.length - overCap.length} skeptic(s): every blocker (${freshBlockers}) and ${granted.size} important finding(s) under maxVerifiers ${maxVerifiers}; ${overCap.length} cap-deferred`)
 }
 
+// The skeptic gets the Lead's evidence too, right after SAFETY and labelled as command output. A
+// measured claim needs a measurement the skeptic itself cites, and SAFETY bars it from running E2E
+// or a server, so without this a measured blocker could only be deferred even when the Lead ran axe.
+const leadEvidence = priorEvidence
+  ? `Evidence the Lead ran this session (command output, not a critic's opinion). Cite it as evidence of the kind it is: an axe run or a bundle figure is a measurement, a test run is a command. Do not re-run E2E or start a server to reproduce it; if the claim needs a result that is not here, defer and name it as missing.\n${priorEvidenceText}\n\n`
+  : ''
+
 const settledAll = await parallel(
   toVerify.map((f, i) => () => {
     const prior = priors[i]
@@ -458,7 +467,7 @@ const settledAll = await parallel(
       })
     }
     return agent(
-      `Adversarially adjudicate this ${f.severity} finding from the ${f.criticLabel}. Try to REFUTE it by inspecting the actual code/flow, then return a TYPED verdict:\n- accept: holds as stated, and you verified evidence of the kind its claim type needs\n- qualify: holds, but only at a weaker strength (say which in qualifier)\n- revise: does not hold as stated, but a restated claim or bounded fix does (put it in repair)\n- defer: cannot be settled with the evidence available (name exactly what is missing)\n- reject: refuted\nDefault to defer when you cannot check the evidence, and to reject when the evidence does not hold up — never accept on the critic's word.\n\n${AGENT_SAFETY}\n\nClaim type: ${t} — ${CLAIM_TYPE_DEFS[t] || ''}. An accept needs evidence of kind ${EVIDENCE_POLICY[t].acceptNeeds.join('/')} that YOU checked; otherwise it is capped at ${EVIDENCE_POLICY[t].onFail}. Re-type the claim if the critic mistyped it.\n\nCritical questions for this lens (answer each in counterReasons):\n${(c && c.cq ? c.cq : ['Does the cited evidence actually show the claim?']).map((q) => `- ${q}`).join('\n')}\n${f.independentEvidence.length ? `\nIndependent evidence from other critics (different evidence, not mere agreement):\n${f.independentEvidence.map((e) => `- ${e.critic}: ${e.evidence}`).join('\n')}\n` : ''}${prior ? `\nThis claim revisits prior record ${prior.record_id} (verdict ${prior.final_status}${prior.missing && prior.missing.length ? `, missing: ${prior.missing.join('; ')}` : ''}; reason: ${prior.reason}). Decide whether the evidence now changes that verdict; if nothing material changed, return the prior verdict.\n` : ''}\nTitle: ${f.title}\nEvidence: ${f.evidence}\nRecommendation: ${f.recommendation}`,
+      `Adversarially adjudicate this ${f.severity} finding from the ${f.criticLabel}. Try to REFUTE it by inspecting the actual code/flow, then return a TYPED verdict:\n- accept: holds as stated, and you verified evidence of the kind its claim type needs\n- qualify: holds, but only at a weaker strength (say which in qualifier)\n- revise: does not hold as stated, but a restated claim or bounded fix does (put it in repair)\n- defer: cannot be settled with the evidence available (name exactly what is missing)\n- reject: refuted\nDefault to defer when you cannot check the evidence, and to reject when the evidence does not hold up — never accept on the critic's word.\n\n${AGENT_SAFETY}\n\n${leadEvidence}Claim type: ${t} — ${CLAIM_TYPE_DEFS[t] || ''}. An accept needs evidence of kind ${EVIDENCE_POLICY[t].acceptNeeds.join('/')} that YOU checked; otherwise it is capped at ${EVIDENCE_POLICY[t].onFail}. Re-type the claim if the critic mistyped it.\n\nCritical questions for this lens (answer each in counterReasons):\n${(c && c.cq ? c.cq : ['Does the cited evidence actually show the claim?']).map((q) => `- ${q}`).join('\n')}\n${f.independentEvidence.length ? `\nIndependent evidence from other critics (different evidence, not mere agreement):\n${f.independentEvidence.map((e) => `- ${e.critic}: ${e.evidence}`).join('\n')}\n` : ''}${prior ? `\nThis claim revisits prior record ${prior.record_id} (verdict ${prior.final_status}${prior.missing && prior.missing.length ? `, missing: ${prior.missing.join('; ')}` : ''}; reason: ${prior.reason}). Decide whether the evidence now changes that verdict; if nothing material changed, return the prior verdict.\n` : ''}\nTitle: ${f.title}\nEvidence: ${f.evidence}\nRecommendation: ${f.recommendation}`,
       { label: `verify:${f.critic}:${i}`, phase: 'Verify', schema: VERDICT_SCHEMA, model: JUDGE_MODEL },
     ).catch(agentFailed(`verify:${f.critic}:${i}`)).then((v) => {
       // Fail safe: a missing/failed verdict becomes defer (never confirmed, never

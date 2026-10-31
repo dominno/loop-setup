@@ -24,7 +24,9 @@ it). The repo checkout is shared, so it is read-only for those agents: they read
 and run read-only git there, run any check or trial edit in a `mktemp -d` copy of the
 working tree, never run `pnpm dev`, `pnpm test:e2e` or `pnpm verify`, and never start or
 kill a server. In a critic round, E2E, axe and bundle results come from the Lead's
-`args.priorEvidence`; a result that is absent is reported as missing evidence.
+`args.priorEvidence`, which every critic and every skeptic receives. The skeptic's copy is
+labelled as the Lead's command output, so it can cite an axe run or a bundle figure there as a
+measurement and a test run as a command. A result that is absent is reported as missing evidence.
 `loop-iteration` and `trace-bench` do not carry the block: the implementer works in its
 own worktree under its own rules (no dev, build, E2E or verify; no commit, push, stash or
 reset), and the loop verifier and the bench arms are measured prompts, so adding it there
@@ -72,7 +74,7 @@ flowchart LR
   cd --> comp
   cap -- "within the cap" --> V
   subgraph V["Verify — one skeptic per blocker, and per important up to the cap · 🔵 Opus"]
-    v1[typed verdict #1<br/>+ lens critical questions]
+    v1["typed verdict #1<br/>+ lens critical questions<br/>+ the Lead's priorEvidence, when given"]
     v2[typed verdict #2]
     vn[typed verdict #N]
   end

@@ -88,6 +88,24 @@ describe("workflow scripts", () => {
     for (const rule of ["read-only", "mktemp -d", "pnpm test:e2e", "pkill", "missing evidence", "head or tail"]) expect(AGENT_SAFETY, rule).toContain(rule);
   });
 
+  // rsync is not installed in the remote environment (agents then improvise); tar is everywhere.
+  // The example defines its own scratch dir and extracts into it, never into the checkout. Its
+  // excludes are unanchored: GNU tar matches '--exclude=./node_modules' only at the top level, so
+  // a loop worktree's own node_modules and .next (under .claude/worktrees/) would be copied too.
+  it("SAFETY rule (2)'s scratch-copy example is a portable tar pipe, not rsync", () => {
+    const carriers = workflows.filter((w) => w.text.includes("// <agent-safety>"));
+    expect(carriers).toHaveLength(5);
+    for (const w of carriers) {
+      const safety = block(w.text, "agent-safety");
+      expect(safety, w.name).toContain("mktemp -d");
+      expect(safety, w.name).toContain("tar ");
+      expect(safety, w.name).not.toContain("rsync");
+      expect(safety, w.name).toContain('D=$(mktemp -d) && tar -cf - ');
+      expect(safety, w.name).toContain("--exclude=node_modules --exclude=.next . |");
+      expect(safety, w.name).toContain('| tar -xf - -C "$D" && ln -s "$PWD/node_modules" "$D/node_modules"');
+    }
+  });
+
   it("no measured prompt carries it: neither trace-bench.js nor the <loop-verifier> block", () => {
     const bench = workflows.find((w) => w.name === "trace-bench.js").text;
     expect(bench).not.toContain("agent-safety");

@@ -885,6 +885,53 @@ describe("agent SAFETY: every prompt of a read-only workflow carries the <agent-
   });
 });
 
+// SAFETY bars every agent from running E2E or starting a server, and a `measured` claim needs a
+// measurement the skeptic itself cites. So the skeptic gets the Lead's priorEvidence too (the same
+// text the critics get), right after the SAFETY block and labelled as the Lead's command output;
+// without it, a measured blocker could only be deferred even when the Lead ran axe and supplied it.
+describe("critic-panel: the skeptic also receives the Lead's priorEvidence", () => {
+  const LEAD_EVIDENCE =
+    "Evidence the Lead ran this session (command output, not a critic's opinion). Cite it as evidence of the kind it is: an axe run or a bundle figure is a measurement, a test run is a command. Do not re-run E2E or start a server to reproduce it; if the claim needs a result that is not here, defer and name it as missing.";
+  const a11yBlocker = (label) =>
+    label.startsWith("critic:accessibility")
+      ? { findings: [finding({ claimType: "measured", title: "Submit button text contrast is below 4.5:1", evidence: "src/app/page.tsx:12", recommendation: "darken the button text to reach 4.5:1" })] }
+      : label.startsWith("critic:")
+        ? { findings: [] }
+        : verdict();
+  const prompts = (calls, prefix) => calls.filter((c) => c.label.startsWith(prefix)).map((c) => c.prompt);
+
+  it("with priorEvidence, every verify: prompt carries the label sentence right after AGENT_SAFETY, then the evidence; without it, none does", async () => {
+    const { AGENT_SAFETY } = loadWorkflowBlock("critic-panel.js", "agent-safety", ["AGENT_SAFETY"]);
+    const withEvidence = await runWorkflow("critic-panel.js", { focus: "x", priorEvidence: "AXE-RUN-7f3a" }, a11yBlocker);
+    const verifyPrompts = prompts(withEvidence.calls, "verify:");
+    expect(verifyPrompts).toHaveLength(1);
+    for (const p of verifyPrompts) {
+      expect(p).toContain("AXE-RUN-7f3a");
+      expect(p).toContain(LEAD_EVIDENCE);
+      expect(p).toContain(`${AGENT_SAFETY}\n\n${LEAD_EVIDENCE}\nAXE-RUN-7f3a\n`);
+    }
+    // The critics keep their own label for the same evidence: the new sentence is the skeptic's.
+    const criticPrompts = prompts(withEvidence.calls, "critic:");
+    expect(criticPrompts).toHaveLength(ALL_LENSES.length);
+    expect(criticPrompts.filter((p) => !p.includes("AXE-RUN-7f3a") || p.includes(LEAD_EVIDENCE))).toEqual([]);
+
+    const without = await runWorkflow("critic-panel.js", { focus: "x" }, a11yBlocker);
+    const bare = prompts(without.calls, "verify:");
+    expect(bare).toHaveLength(1);
+    expect(bare.filter((p) => p.includes("Evidence the Lead ran this session"))).toEqual([]);
+  });
+
+  it("an object priorEvidence reaches the skeptic as the same JSON text the critics get", async () => {
+    const evidence = { axe: "AXE-RUN-7f3a: 0 serious or critical violations on /", bundle: "first-load JS 92 kB gzip" };
+    const json = JSON.stringify(evidence);
+    const { calls } = await runWorkflow("critic-panel.js", { focus: "x", priorEvidence: evidence }, a11yBlocker);
+    expect(prompts(calls, "verify:")).toEqual([expect.stringContaining(`${LEAD_EVIDENCE}\n${json}\n`)]);
+    const criticPrompts = prompts(calls, "critic:");
+    expect(criticPrompts).toHaveLength(ALL_LENSES.length);
+    expect(criticPrompts.filter((p) => !p.includes(json))).toEqual([]);
+  });
+});
+
 // Cost bounds: an up-front story-batch cap (scan-docs), a per-round verifier cap whose overflow is
 // recorded as explicit defers, never dropped (critic-panel; opt-in in improve-skills), and budget
 // floors that fire only when the turn has a '+Nk' token target (budget.total set).
