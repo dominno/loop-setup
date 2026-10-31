@@ -4,8 +4,8 @@
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { readdirSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { readdirSync, statSync, writeFileSync } from "node:fs";
+import { join, resolve, sep } from "node:path";
 import {
   appendActions,
   BENCH_BUNDLE,
@@ -40,6 +40,7 @@ import {
   writeRecords,
 } from "./lib.mjs";
 import { DEFAULT_PLAN, parsePlan, planItems, planViolations, readyIds } from "./plan.mjs";
+import { STORY_MAP, STORY_MAP_PATHS, storyMapViolations } from "./story-map.mjs";
 
 const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (policy: .claude/memory/topics/trace.md)
 
@@ -71,6 +72,10 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
                                        missing?}]; priorRecordId only for the node's own loop:<id> record, never a
                                        critic one — exit 1 and no items when any id is not ready, 2 when the store
                                        does not replay
+  pnpm trace story-lint [--root dir]   the story map (${STORY_MAP}/: story files, index, dashboard, verification log, E2E
+                                       coverage map) against itself and the store (consistency, not truth): one status
+                                       per story everywhere, plus the log row, coverage and licensing Record: line its
+                                       level needs — exit 1 on an error; an absent story map passes
   pnpm trace reaudit [--act]           licensing records whose file evidence changed since their commit
   pnpm trace metrics                   store-level consumer-value metrics
   pnpm trace rotate [--max 500] [--keep 200]   lossless move of old lines into <YYYY>.jsonl archives
@@ -86,6 +91,7 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
 
   --store <path>  use another store (default .claude/memory/trace/records.jsonl; env TRACE_STORE)
   --plan <path>   use another loop plan (default .claude/memory/loop-plan.md)
+  --root <dir>    story-lint: read the story map of another checkout, e.g. a scratch copy (default: this repo)
   Actions: CLEAR HOLD COMMIT COMMIT_QUALIFIED QUARANTINE REJECT REUSE REAUDIT`;
 
 function parseArgs(argv) {
@@ -363,6 +369,42 @@ async function main() {
     if (refused.length) return 1;
     out(items, true);
     return 0;
+  }
+
+  if (cmd === "story-lint") {
+    if (flags.root === true) {
+      out("usage: pnpm trace story-lint [--root <checkout>] [--store s]");
+      return 2;
+    }
+    // The story map of this checkout (or --root's), each file read as text (null when missing). Every
+    // path is joined to that checkout (so even a leading / stays in it) and counts only as a regular
+    // file inside it: a cited spec that climbs out with ../ is not one. Errors go to stderr.
+    const root = typeof flags.root === "string" ? resolve(flags.root) : ROOT;
+    const isFile = (rel) => {
+      const abs = join(root, rel);
+      if (!abs.startsWith(root + sep)) return false;
+      try {
+        return statSync(abs).isFile();
+      } catch {
+        return false;
+      }
+    };
+    const file = (rel) => ({ path: rel, text: isFile(rel) ? readFileSync(join(root, rel), "utf8") : null });
+    let names = [];
+    try {
+      names = readdirSync(join(root, STORY_MAP_PATHS.stories)).filter((f) => /^US-.*\.md$/.test(f)).sort();
+    } catch {
+      // no stories/ directory: no story files
+    }
+    const map = {
+      stories: names.map((f) => `${STORY_MAP_PATHS.stories}/${f}`).filter(isFile).map(file),
+      ...Object.fromEntries(["index", "dashboard", "log", "coverage"].map((k) => [k, file(STORY_MAP_PATHS[k])])),
+    };
+    const { errors, warnings, stories, absent } = storyMapViolations(map, state, { specExists: isFile });
+    for (const w of warnings) process.stderr.write(`warn: ${w}\n`);
+    for (const e of errors) process.stderr.write(`error: ${e}\n`);
+    out({ ok: errors.length === 0, errors: errors.length, warnings: warnings.length, stories, ...(absent ? { absent } : {}), storyMap: join(root, STORY_MAP), store: storePath }, true);
+    return errors.length ? 1 : 0;
   }
 
   if (cmd === "show") {

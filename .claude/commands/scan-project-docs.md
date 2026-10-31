@@ -57,21 +57,24 @@ Procedure:
    **No status change without a licensing TRACE record** (consumer protocol in
    `.claude/memory/topics/trace.md`): record the workflow's `traceRecords` (scratchpad
    file → `pnpm trace write <file>`), then per story:
-   - `accept` → write the verified status, cite the `record_id` beside "Final status",
+   - `accept` → write the verified status, cite the `record_id` on the `Record:` line under
+     "Final status" (the template's format, which `pnpm trace story-lint` reads),
      `pnpm trace act <id> story-status COMMIT --ref US-<id>`;
-   - `qualify` (the verifier held it at a lower status) → write that lower status,
-     `COMMIT_QUALIFIED`;
+   - `qualify` (the verifier held it at a lower status) → write that lower status and cite
+     the record the same way, `COMMIT_QUALIFIED`;
    - `revise` or `defer` → **leave the story's current status unchanged**, `HOLD` the
      record, and put its `repair`/`missing` in the story's "Next action" (a defer is
      resolved by supplying the missing evidence and re-running this workflow for the story).
    Raising a story to `Browser verified`/`Done` is the Lead's own claim: only after a
    post-scan critic round (step 15) whose `completion.verdict` is `accept`, write a record
-   (writer_id `lead`, claim_id `story:<id>:status`, `revises` the story's latest record,
+   (writer_id `lead`, claim_id `story:<id>:status` with the id lowercased as scan-docs
+   writes it, e.g. `story:us-001:status`, `revises` the story's latest record,
    evidence = the `browser` observation, the critic round's record ids as `record`, and
    that round's completion as a `record` item (ref: the completion claim, its verdict
-   `accept` and the round's `treeId`)), then COMMIT it. Never cite the completion as
-   `command` evidence: it is derived from the round's records, and it must not stand in
-   for the `browser` observation at the evidence gate.
+   `accept` and the round's `treeId`)), then COMMIT it and cite it on the story's
+   `Record:` line. Never cite the completion as `command` evidence: it is derived from the
+   round's records, and it must not stand in for the `browser` observation at the evidence
+   gate.
 10. Start or reuse localhost when browser verification is possible.
 11. Open relevant pages using Chrome or Playwright MCP.
 12. Verify implemented user flows in browser when possible.
@@ -98,6 +101,17 @@ Procedure:
     not a story-specific note), run `/dream` to file it into the memory wiki.
 17. Do not change product code unless explicitly asked.
 18. Do not mark stories `Done` without implementation evidence, test evidence, and verification evidence.
+19. **Last**, after every story-map write above (step 14's updates, the verification log
+    and the coverage map included, and any status step 9 raises after the step 15 round),
+    run `pnpm -s trace story-lint`. It checks consistency, not truth: the story files, the
+    index and the dashboard agree on each story's status, and each status has the
+    verification-log row, the E2E coverage row and the licensing `Record:` line its level
+    needs. It must exit 0. On an error, fix the projections (the index, the dashboard) to
+    match the story file's recorded status, and add a log or coverage row only for a check
+    that was actually run. Never change a status to satisfy the lint without a licensing
+    record (step 9). `Record: (pre-TRACE)` only grandfathers a status set before TRACE-lite
+    (allowed below `Browser verified`): never add it to a story; the story's next status
+    change cites its record instead.
 
 Output:
 

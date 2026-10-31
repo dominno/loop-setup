@@ -620,7 +620,7 @@ function tempRepo({ manifest, repo = "commit" } = {}) {
     mkdirSync(dirname(join(d, rel)), { recursive: true });
     writeFileSync(join(d, rel), readFileSync(join(ROOT, rel)));
   };
-  for (const f of ["lib.mjs", "cli.mjs", "bench-judge.mjs", "plan.mjs"]) copy(`scripts/trace/${f}`);
+  for (const f of ["lib.mjs", "cli.mjs", "bench-judge.mjs", "plan.mjs", "story-map.mjs"]) copy(`scripts/trace/${f}`);
   for (const f of [".claude/workflows/loop-iteration.js", ".claude/trace/schema-v1.json", ".claude/memory/topics/trace.md"]) copy(f);
   const bundle = join(d, ".claude/trace/bench/fixtures.bundle");
   const setBundle = (m) => {

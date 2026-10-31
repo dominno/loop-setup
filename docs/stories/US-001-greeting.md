@@ -37,6 +37,7 @@ greeting, so that the app feels responsive and I get immediate feedback.
 
 **Final status:**
 E2E tested
+Record: (pre-TRACE)
 
 **Next action:**
 Manually browser-verify on localhost via Chrome/Playwright MCP and run a

@@ -253,6 +253,10 @@ point at `docs/delivery/…`, and add `docs/delivery/` to your wiki’s ignore/e
 list (or register it in the wiki index as a single “Delivery / story status”
 section rather than per-file pages).
 
+Also set `STORY_MAP` in `scripts/trace/story-map.mjs` to the new directory (e.g.
+`"docs/delivery"`): `pnpm trace story-lint` reads the story map there, and an absent
+story map passes vacuously, so a stale path would check nothing.
+
 > Prefer not to touch `docs/` at all? Move the audit out entirely, e.g.
 > `delivery/` at the repo root or `.claude/delivery/`, and repoint the same files.
 

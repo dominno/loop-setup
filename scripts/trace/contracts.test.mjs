@@ -2,8 +2,8 @@
 // the canonical policy is checked here, so `pnpm test` (CI) fails on drift instead of a
 // reviewer having to notice it.
 import { describe, it, expect } from "vitest";
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { join, sep } from "node:path";
 import {
   ACTION_ALLOWED,
   BENCH_BUNDLE,
@@ -28,6 +28,7 @@ import {
   replay,
 } from "./lib.mjs";
 import { DEFAULT_PLAN, NOT_READY, STATUSES, parsePlan, planViolations } from "./plan.mjs";
+import { STORY_MAP_PATHS, STORY_STATUSES, storyMapViolations } from "./story-map.mjs";
 
 const WF_DIR = join(ROOT, ".claude/workflows");
 const workflows = readdirSync(WF_DIR)
@@ -181,6 +182,35 @@ describe("committed loop plan ↔ plan.mjs", () => {
     expect([...statusRow.matchAll(/`([a-z-]+)`/g)].map((m) => m[1]).sort()).toEqual([...STATUSES].sort());
     const excluded = /`status ∉ \{([^}]+)\}`/.exec(doc)?.[1] ?? "";
     expect(excluded.split(",").map((s) => s.trim()).sort()).toEqual([...NOT_READY].sort());
+  });
+});
+
+// The story map is product state: `pnpm trace story-lint` must pass on what is committed, and
+// story-map.mjs must read the same statuses, in the same order, as implementation-status.md's
+// status model (the order is the evidence ladder its "or higher" rules climb). An adopter
+// without a story map passes the lint vacuously, so the legend check skips without one.
+describe("committed story map ↔ story-map.mjs", () => {
+  const file = (rel) => ({ path: rel, text: existsSync(join(ROOT, rel)) ? readFileSync(join(ROOT, rel), "utf8") : null });
+  const dashboard = join(ROOT, STORY_MAP_PATHS.dashboard);
+
+  it("the committed story map and store pass story-lint with no errors", () => {
+    const dir = join(ROOT, STORY_MAP_PATHS.stories);
+    const stories = existsSync(dir) ? readdirSync(dir).filter((f) => /^US-.*\.md$/.test(f)).sort().map((f) => file(`${STORY_MAP_PATHS.stories}/${f}`)) : [];
+    const map = { stories, index: file(STORY_MAP_PATHS.index), dashboard: file(STORY_MAP_PATHS.dashboard), log: file(STORY_MAP_PATHS.log), coverage: file(STORY_MAP_PATHS.coverage) };
+    const state = replay(loadEntries(DEFAULT_STORE), schema, readPolicyVersion());
+    // As in the CLI: a cited spec counts only as a regular file inside the repo, not one that climbs out with ../.
+    const specExists = (p) => {
+      const abs = join(ROOT, p);
+      return abs.startsWith(ROOT + sep) && existsSync(abs) && statSync(abs).isFile();
+    };
+    expect(storyMapViolations(map, state, { specExists }).errors).toEqual([]);
+  });
+
+  it.skipIf(!existsSync(dashboard))("the status model lists STORY_STATUSES, in order", () => {
+    const doc = readFileSync(dashboard, "utf8");
+    const at = doc.search(/^## Status model$/m);
+    expect(at).toBeGreaterThan(-1);
+    expect([...doc.slice(at).matchAll(/^\| `([^`]+)` \|/gm)].map((m) => m[1])).toEqual(STORY_STATUSES);
   });
 });
 

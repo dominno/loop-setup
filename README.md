@@ -72,7 +72,7 @@ CLAUDE.md                         Project rules + multi-agent workflow + doc-sca
     story-gap-analysis.md         Gap analysis: docs vs code vs E2E
     improve-skills.md             Self-improvement pass over the prompts/workflows (confirmation-gated)
     bench-checkers.md             TRACE-Bench-lite: measure the checkers, report falsification flags
-scripts/trace/                    `pnpm trace …` — record writer, linter, re-audit, metrics, bench scoring, loop-plan DAG checks
+scripts/trace/                    `pnpm trace …` — record writer, linter, re-audit, metrics, bench scoring, loop-plan DAG checks, story-map lint
 docs/
   adoption-guide.md               How to adopt this template in a real project
   loop-integration-guide.md       How to add hardened recurring /loop automations to a project
@@ -271,6 +271,7 @@ pnpm trace metrics                 # consumer coverage, defer quality, repeated-
 pnpm trace plan-ready              # the loop plan's ready nodes, computed (table order; --max N)
 pnpm trace plan-lint               # the loop plan vs its contract and the records (consistency, not truth)
 pnpm trace plan-items LP-002 …     # loop-iteration args.items for ready nodes (refuses a non-ready id)
+pnpm trace story-lint              # the story map vs itself and the records (consistency, not truth)
 ```
 
 Policy, verdict semantics and what was deliberately *not* adopted:

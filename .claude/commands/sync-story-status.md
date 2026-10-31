@@ -43,6 +43,12 @@ Procedure:
    licensing record (`.claude/memory/topics/trace.md`).
 10. Update `docs/e2e-coverage-map.md`.
 11. Update `docs/gaps-and-risks.md`.
+12. **Last**, after steps 8-11 (step 8's status writes, which wait for step 9's verdicts;
+    step 9's verification-log rows; step 10's coverage map; step 11's gaps file), run
+    `pnpm -s trace story-lint` and handle it as `/scan-project-docs` step 19 says: it must
+    exit 0; fix the projections (the index, the dashboard) to match each story file's
+    recorded status, add a log or coverage row only for a check that was actually run, and
+    never change a status to satisfy the lint without a licensing record.
 
 Rules:
 
