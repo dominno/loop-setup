@@ -38,6 +38,11 @@ const DEFAULT_TARGETS = [
 ]
 const targets = (a && Array.isArray(a.targets) && a.targets.length ? a.targets : DEFAULT_TARGETS)
 const targetList = targets.join(', ')
+// Optional cost bound: the most skeptics one pass starts (an integer >= 0). Uncapped by default.
+// With a cap, every blocker is verified regardless; important findings fill the slots left
+// (Phase 2), and any beyond the cap is recorded as an unverified defer, never dropped.
+const maxVerifiers = a && Number.isInteger(a.maxVerifiers) && a.maxVerifiers >= 0 ? a.maxVerifiers : Infinity
+if (a && a.maxVerifiers !== undefined && a.maxVerifiers !== maxVerifiers) log(`ignored args.maxVerifiers=${JSON.stringify(a.maxVerifiers)} (expected an integer >= 0) — uncapped`)
 
 // Model tiering (graph-engineering): the fan-out of meta-critics on the fast tier,
 // the two-axis adversarial verifier on the strong tier. Override via args.models.
@@ -253,26 +258,47 @@ const toVerify = deduped.filter((f) => f.severity === 'blocker' || f.severity ==
 // apply-ready or mistaken for a refutation.
 const VERIFY_FLOOR = 60_000 // tokens to leave for the verify phase
 const budgetStop = !error && !!(budget.total && budget.remaining() < VERIFY_FLOOR)
+// A finding no skeptic adjudicated: defer (unverified is evidence of nothing), never apply-ready.
+const unverified = (f, gate, missing, reason) => ({
+  ...f,
+  real: null, // unknown — not checked
+  editSafe: false, // unverified ⇒ never apply-ready
+  verdict: 'defer',
+  missing: [missing],
+  repair: '',
+  failedGates: [gate],
+  evidenceChecked: [],
+  verifyReason: reason,
+})
+// Verifier cap (opt-in, args.maxVerifiers): every blocker gets its skeptic; important findings
+// fill the slots left, one per lens in turn (LENSES order), so review order never starves a lens.
+// The rest are deferred below with no agent (logged here; a later pass verifies them).
+const roundRobin = (queues, slots) => {
+  const out = []
+  for (let r = 0; out.length < slots && queues.some((q) => r < q.length); r += 1) {
+    for (const q of queues) if (r < q.length && out.length < slots) out.push(q[r])
+  }
+  return out
+}
+const blockerCount = toVerify.filter((f) => f.severity === 'blocker').length
+const granted = new Set(roundRobin(
+  LENSES.map((l) => toVerify.map((f, i) => i).filter((i) => toVerify[i].severity === 'important' && toVerify[i].critic === l.key)),
+  Math.max(0, maxVerifiers - blockerCount),
+))
+const getsSkeptic = (f, i) => f.severity === 'blocker' || granted.has(i)
+const overCap = error || budgetStop ? [] : toVerify.filter((f, i) => !getsSkeptic(f, i))
+if (!error) log(`Verify: ${budgetStop ? 0 : toVerify.length - overCap.length} skeptic(s) planned for ${toVerify.length} blocker/important finding(s)${overCap.length ? `; ${overCap.length} important finding(s) over maxVerifiers ${maxVerifiers} are cap-deferred, unverified` : ''}`)
 let verified
 if (error) {
   verified = [] // every lens failed: nothing reached Verify (`error` says so)
 } else if (budgetStop) {
   log(`budget floor reached (${Math.round(budget.remaining() / 1000)}k left) — skipping adversarial verify; ${toVerify.length} findings deferred (unverified, never auto-applied)`)
-  verified = toVerify.map((f) => ({
-    ...f,
-    real: null, // unknown — not checked
-    editSafe: false, // unverified ⇒ never apply-ready
-    verdict: 'defer',
-    missing: ['adversarial verification (skipped: token budget floor reached before the verify phase)'],
-    repair: '',
-    failedGates: ['not-verified'],
-    evidenceChecked: [],
-    verifyReason: 'unverified — token budget floor reached before the verify phase',
-  }))
+  verified = toVerify.map((f) => unverified(f, 'not-verified', 'adversarial verification (skipped: token budget floor reached before the verify phase)', 'unverified — token budget floor reached before the verify phase'))
 } else {
   verified = await parallel(
     toVerify.map((f, i) => () =>
-      agent(
+      // Over the cap: an explicit, unverified defer with no agent.
+      !getsSkeptic(f, i) ? Promise.resolve(unverified(f, 'not-verified:verifier-cap', `adversarial verification — skipped: verifier cap ${maxVerifiers} reached; re-run focused on this finding or raise args.maxVerifiers`, `unverified — verifier cap ${maxVerifiers} reached`)) : agent(
         `You are a SEPARATE skeptic (not the critic who raised this). Read the actual file and try to REFUTE this ${f.severity} finding about the project's own prompts/workflows.\n\n${AGENT_SAFETY}\n\nJudge two things independently:\n1. real — is the problem genuine? Default real:false if the evidence does not hold up.\n2. editSafe — would the proposed edit be a real improvement that does NOT weaken instruction-following, remove a safety/confirmation gate, or break a workflow? Default editSafe:false if you cannot confirm it is safe.\nIf the problem is real but the edit is not safe, propose a saferEdit. If you cannot decide from the files, list what is missing instead of guessing. In evidenceChecked cite what you actually checked: the file:line you read (kind "file_line") and the rule or standard you judged it against (kind "rule": a CLAUDE.md rule, a trace.md / loop.md policy line, or this lens's standard) — a finding accepted without a cited rule is deferred by the evidence gate.\n\nFile: ${f.file}\nTitle: ${f.title}\nEvidence: ${f.evidence}\nProposed edit: ${f.proposedEdit}`,
         { label: `verify:${f.critic}:${i}`, phase: 'Verify', schema: VERDICT_SCHEMA, model: JUDGE_MODEL },
       ).catch(agentFailed(`verify:${f.critic}:${i}`)).then((v) => {
@@ -361,12 +387,13 @@ return {
     applyReady: applyReady.length,
     needsDesign: needsDesign.length,
     deferred: deferred.length,
+    capDeferred: overCap.length, // important findings over args.maxVerifiers: in `deferred`, UNVERIFIED
     niceToHave: niceToHaves.length,
     refuted: refuted.length,
   },
   applyReady, // accept: real problem + verified-safe edit → caller proposes these for confirmation
   needsDesign, // revise: real problem, edit not confirmed safe → `repair` holds a safer edit to design from
-  deferred, // defer: not adjudicated (no verdict, or verification skipped) — UNVERIFIED, never applied
+  deferred, // defer: not adjudicated (no verdict, verification skipped, or over the verifier cap) — UNVERIFIED, never applied
   niceToHaves, // recorded only, not verified
   refuted, // reject: a skeptic refuted these
   traceRecords, // TRACE-lite record drafts → `pnpm trace write`

@@ -164,8 +164,10 @@ multi-agent opt-in:
 
 - `critic-panel.js` — fan-out critics → adversarial verify → matrix
   (`/critic-round`, `/multi-agent-dev`, `/qa-pass`, `/loop`). Exception, measured: a
-  code-only round (`uiInScope: false`) uses one reviewer covering every lens; each finding
-  is still verified by a separate skeptic (TRACE-Bench F1, one run).
+  code-only round (`uiInScope: false`) uses one reviewer covering every lens. Every blocker
+  gets its own separate skeptic, and so does every important finding up to the round's
+  verifier cap (`args.maxVerifiers`, default 30); any beyond the cap is recorded as
+  `defer`, never dropped (TRACE-Bench F1, one run).
 - `scan-docs.js` — per-story parallel evidence → separate status verifier
   (`/scan-project-docs`).
 - `gap-analysis.js` — per-dimension gaps → synthesized order (`/story-gap-analysis`).

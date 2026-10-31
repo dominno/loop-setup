@@ -517,10 +517,20 @@ To adapt them:
 - **They're project-aware via prompts, not config** — the agents read `CLAUDE.md`,
   the memory wiki, and your `src/`/`e2e/`/`docs/` paths. Adjust those paths in the
   scripts if your layout differs (e.g. a monorepo package dir).
-- **Cost is real.** A critic round spawns ~10 critic agents + a verifier per
-  blocker/important finding; `/multi-agent-dev` runs that twice (pre + post). That's
-  the price of genuine independent review — scale the roster down if you want it
-  lighter, or reserve the workflows for substantive changes.
+- **Cost is real.** A critic round spawns ~10 critic agents + a verifier per blocker and
+  per important finding up to a cap; `/multi-agent-dev` runs that twice (pre + post).
+  That's the price of genuine independent review — scale the roster down if you want it
+  lighter, or reserve the workflows for substantive changes. Built-in bounds: a round
+  verifies every blocker and fills the rest of its verifier cap (`args.maxVerifiers`,
+  default 30) with important findings, round-robin across lenses, and records any beyond
+  it as a `defer` (`counts.capDeferred`) instead of dropping it; `scan-docs` refuses more
+  than `args.maxStories` (default 30) stories per call before any agent starts, so pass
+  them in batches; `improve-skills` is uncapped unless you pass `args.maxVerifiers`. With
+  a `+Nk` token target, the workflows also stop at budget floors (output tokens left)
+  instead of failing mid-run: `critic-panel` 80k before Review and 60k before Verify,
+  `scan-docs` 60k, `gap-analysis` 40k and 20k before synthesis, `improve-skills` 60k
+  before Verify, `loop-iteration` 80k. A round stopped at its start floor returns
+  `error` and `budgetStopped`: it is incomplete, never clean.
 - **Name workflows distinctly from commands** — a workflow whose `meta.name`
   matches a command shows up as a duplicate in the skills list (that's why the
   critic workflow is `critic-panel`, not `critic-round`).

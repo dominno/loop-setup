@@ -10,16 +10,29 @@ import { benchArgs, briefRecords, finalizeRecord, loadSchema, loadWorkflowBlock,
 const schema = loadSchema();
 const POLICY = readPolicyVersion();
 const TREE = "0123456789abcdef";
+// The budget of a turn with no '+Nk' token target: total is null, so no budget floor fires.
+const UNLIMITED = { total: null, spent: () => 0, remaining: () => Infinity };
 
-async function runWorkflow(file, args, reply) {
+async function runWorkflow(file, args, reply, budget = UNLIMITED) {
   const text = readFileSync(join(ROOT, ".claude/workflows", file), "utf8").replace(/^export const meta =/m, "const meta =");
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
   const fn = new AsyncFunction("args", "agent", "parallel", "pipeline", "phase", "log", "budget", text);
   const calls = [];
-  const agent = async (prompt, opts = {}) => {
+  // A reply that throws becomes a rejected promise, the path each call site's .catch handles. An
+  // error tagged `sync` (throwingSync) is thrown before agent() returns instead, so that .catch is
+  // never reached and parallel()/pipeline() must turn the thunk or stage into a null slot.
+  const agent = (prompt, opts = {}) => {
     calls.push({ label: opts.label || "", prompt, opts });
-    return reply(opts.label || "", prompt, opts);
+    try {
+      return Promise.resolve(reply(opts.label || "", prompt, opts));
+    } catch (e) {
+      if (e && e.sync) throw e;
+      return Promise.reject(e);
+    }
   };
+  // Each log line, with the number of agent calls made before it was written.
+  const logs = [];
+  const log = (m) => logs.push({ text: String(m), calls: calls.length });
   const parallel = (thunks) => Promise.all(thunks.map((t) => Promise.resolve().then(t).catch(() => null)));
   const pipeline = (items, ...stages) =>
     Promise.all(
@@ -33,9 +46,8 @@ async function runWorkflow(file, args, reply) {
         }
       }),
     );
-  const budget = { total: null, spent: () => 0, remaining: () => Infinity };
-  const result = await fn(args, agent, parallel, pipeline, () => {}, () => {}, budget);
-  return { result, calls };
+  const result = await fn(args, agent, parallel, pipeline, () => {}, log, budget);
+  return { result, calls, logs };
 }
 
 /** Every record draft a workflow returns must be writable as-is (schema + semantic rules). */
@@ -73,6 +85,12 @@ const onlySecurity = (findings) => (label) => (label.startsWith("critic:security
 // is spent, or on a harness error); every other label gets `reply`.
 const throwing = (prefix, reply) => (label, ...rest) => {
   if (label.startsWith(prefix)) throw new Error(`agent died: ${label}`);
+  return reply(label, ...rest);
+};
+// agent() itself throws SYNCHRONOUSLY (before returning a promise) for every label with this
+// prefix, so the call site's .catch is never reached: the parallel() slot becomes null.
+const throwingSync = (prefix, reply) => (label, ...rest) => {
+  if (label.startsWith(prefix)) throw Object.assign(new Error(`agent died synchronously: ${label}`), { sync: true });
   return reply(label, ...rest);
 };
 
@@ -860,5 +878,321 @@ describe("agent SAFETY: every prompt of a read-only workflow carries the <agent-
     const { calls } = await runWorkflow(file, args, reply);
     for (const prefix of reached) expect(calls.some((c) => c.label.startsWith(prefix)), `no ${prefix} agent ran`).toBe(true);
     expect(calls.filter((c) => !c.prompt.includes(AGENT_SAFETY)).map((c) => c.label)).toEqual([]);
+  });
+});
+
+// Cost bounds: an up-front story-batch cap (scan-docs), a per-round verifier cap whose overflow is
+// recorded as explicit defers, never dropped (critic-panel; opt-in in improve-skills), and budget
+// floors that fire only when the turn has a '+Nk' token target (budget.total set).
+const VERIFY = (c) => c.label.startsWith("verify:");
+const ALL_LENSES = ["first-time-user", "ux-flow", "designer", "artistic-direction", "frontend-arch", "qa-e2e", "accessibility", "performance", "security", "regression"];
+const CAP_MISSING = (n) => `adversarial verification — skipped: verifier cap ${n} reached; re-run focused on this finding or raise args.maxVerifiers`;
+const LOW = { total: 100_000, spent: () => 95_000, remaining: () => 5_000 }; // under every floor
+const flat = (left) => ({ total: 1_000_000, spent: () => 1_000_000 - left, remaining: () => left });
+// `start` tokens left until the first agent call, `after` from then on: the start floor sees `start`
+// and a later floor (verify, pre-synth) sees `after`. `tap` wraps a reply so the call is noticed.
+const draining = (start, after) => {
+  let called = false;
+  const budget = { total: 1_000_000, spent: () => 1_000_000 - budget.remaining(), remaining: () => (called ? after : start) };
+  const tap = (reply) => (...rest) => {
+    called = true;
+    return reply(...rest);
+  };
+  return { budget, tap };
+};
+const noAgent = () => {
+  throw new Error("no agent may start below a budget floor");
+};
+
+describe("cost bounds: scan-docs refuses a story batch over maxStories before any agent runs", () => {
+  const stories = (n) => Array.from({ length: n }, (_, i) => ({ id: `US-${String(i + 1).padStart(3, "0")}`, title: `Story ${i + 1}`, source: "docs/prd.md" }));
+  const live = (label) =>
+    label.startsWith("evidence:")
+      ? { implementationFiles: ["src/lib/greeting.ts"], unitTests: "Present", e2eTests: "Missing", proposedStatus: "Unit tested", notes: "" }
+      : { finalStatus: "Unit tested", justification: "a unit test covers it", missing: [], evidenceChecked: [{ kind: "file_line", ref: "src/lib/greeting.test.ts:1" }] };
+
+  it("31 stories (default maxStories 30) is an error with zero agent calls; 30 stories run, two agents each, and the plan is logged first", async () => {
+    const over = await runWorkflow("scan-docs.js", { stories: stories(31) }, live);
+    expect(over.calls).toEqual([]);
+    expect(over.result).toEqual({ error: expect.stringMatching(/^31 stories > maxStories 30 \(62 agents\) — pass them in batches/), records: [], traceRecords: [] });
+    const ok = await runWorkflow("scan-docs.js", { stories: stories(30) }, live);
+    expect(ok.result.error).toBeUndefined();
+    expect(ok.result.count).toBe(30);
+    expect(ok.calls).toHaveLength(60);
+    expect(ok.logs.filter((l) => /60 agents/.test(l.text)).map((l) => l.calls)).toEqual([0]);
+    expectWritable(ok.result.traceRecords);
+  });
+
+  it("args.maxStories lowers the cap; a value that is not an integer > 0 keeps the default 30", async () => {
+    const capped = await runWorkflow("scan-docs.js", { stories: stories(3), maxStories: 2 }, live);
+    expect(capped.calls).toEqual([]);
+    expect(capped.result.error).toMatch(/^3 stories > maxStories 2 \(6 agents\) — pass them in batches/);
+    expect((await runWorkflow("scan-docs.js", { stories: stories(2), maxStories: 2 }, live)).result.count).toBe(2);
+    for (const maxStories of [0, -1, 2.5, "2", null]) {
+      const { result } = await runWorkflow("scan-docs.js", { stories: stories(3), maxStories }, live);
+      expect(result.error, String(maxStories)).toBeUndefined();
+      expect(result.count, String(maxStories)).toBe(3);
+    }
+  });
+});
+
+describe("cost bounds: critic-panel verifier cap (args.maxVerifiers, default 30)", () => {
+  const code = { focus: "x", uiInScope: false, reviewMode: "panel" };
+  const importants = (lens, n) => Array.from({ length: n }, (_, k) => finding({ severity: "important", title: `${lens} finding ${k + 1}`, evidence: `src/${lens}.ts:${k + 1}` }));
+  // 2 blockers + 35 importants over the 5 code lenses, in review order. Filling the cap in that
+  // order would give frontend-arch 15 slots and starve regression.
+  const byLens = {
+    "frontend-arch": importants("frontend-arch", 15),
+    "qa-e2e": importants("qa-e2e", 5),
+    performance: importants("performance", 5),
+    security: [finding({ title: "Token in URL" }), ...importants("security", 5)],
+    regression: [finding({ title: "Route removed" }), ...importants("regression", 5)],
+  };
+  const reply = (label) => {
+    const m = /^critic:([a-z0-9-]+)-\d+$/.exec(label);
+    return m ? { findings: byLens[m[1]] || [] } : verdict();
+  };
+
+  it("2 blockers + 35 importants, cap 30: both blockers and 28 importants get a skeptic, round-robin across lenses; the other 7 are recorded cap defers", async () => {
+    for (const args of [code, { ...code, maxVerifiers: 30 }]) {
+      const { result, calls, logs } = await runWorkflow("critic-panel.js", args, reply);
+      const verifyCalls = calls.filter(VERIFY);
+      expect(verifyCalls).toHaveLength(30);
+      expect(result.confirmed.filter((f) => f.severity === "blocker").map((f) => f.title).sort()).toEqual(["Route removed", "Token in URL"]);
+      const perLens = {};
+      for (const f of result.confirmed.filter((o) => o.severity === "important")) perLens[f.critic] = (perLens[f.critic] || 0) + 1;
+      expect(perLens).toEqual({ "frontend-arch": 8, "qa-e2e": 5, performance: 5, security: 5, regression: 5 });
+      // Labels keep each finding's index in review order (0-36), never a renumbered 0-29.
+      const indices = verifyCalls.map((c) => Number(c.label.split(":").pop())).sort((x, y) => x - y);
+      expect(indices).toEqual([...Array(8).keys(), ...Array.from({ length: 22 }, (_, k) => 15 + k)]);
+      expect(result.counts.capDeferred).toBe(7);
+      expect(result.deferred).toHaveLength(7);
+      for (const f of result.deferred) {
+        expect(f).toMatchObject({ severity: "important", critic: "frontend-arch", verdict: "defer", failedGates: ["not-verified:verifier-cap"], missing: [CAP_MISSING(30)] });
+      }
+      expect(result.traceRecords).toHaveLength(37);
+      expect(result.traceRecords.filter((r) => r.final_status === "defer").map((r) => r.failed_gates)).toEqual(Array(7).fill(["not-verified:verifier-cap"]));
+      expectWritable(result.traceRecords);
+      expect(logs.some((l) => /maxVerifiers 30/.test(l.text) && /7 cap-deferred/.test(l.text) && l.calls === 5)).toBe(true);
+    }
+  });
+
+  it("a reused verdict takes no slot; every blocker is verified even past the cap; an invalid cap keeps the default", async () => {
+    const prior = { record_id: "TR-aaaaaaaaaaaa", claim_id: "critic:security:input-has-no-accessible-name", claim_text: "Input has no accessible name", claim_type: "factual", final_status: "accept", missing: [], reason: "verified earlier", provenance: { tree: TREE } };
+    const reused = await runWorkflow("critic-panel.js", { ...code, maxVerifiers: 1, priorRecords: [prior], treeId: TREE }, (label) =>
+      label.startsWith("critic:")
+        ? onlySecurity([finding({ severity: "important", revisits: prior.record_id, revisitReason: "still-present" }), finding({ severity: "important", title: "Token logged" })])(label)
+        : verdict(),
+    );
+    expect(reused.calls.filter(VERIFY)).toHaveLength(1);
+    expect(reused.result.reuseActions).toEqual([expect.objectContaining({ record_id: prior.record_id, action: "REUSE" })]);
+    expect(reused.result.counts.capDeferred).toBe(0);
+    expect(reused.result.confirmed.map((f) => f.title).sort()).toEqual(["Input has no accessible name", "Token logged"]);
+
+    const blockerAndImportant = (label) => (label.startsWith("critic:") ? onlySecurity([finding(), finding({ severity: "important", title: "Token logged" })])(label) : verdict());
+    const zero = await runWorkflow("critic-panel.js", { ...code, maxVerifiers: 0 }, blockerAndImportant);
+    expect(zero.calls.filter(VERIFY).map((c) => c.label)).toEqual(["verify:security:0"]);
+    expect(zero.result.counts.capDeferred).toBe(1);
+    expect(zero.result.deferred).toEqual([expect.objectContaining({ title: "Token logged", failedGates: ["not-verified:verifier-cap"], missing: [CAP_MISSING(0)] })]);
+    expect(zero.result.completion.verdict).toBe("reject"); // the confirmed blocker; a deferred important never holds the round
+    expectWritable(zero.result.traceRecords);
+    for (const maxVerifiers of [-1, 1.5, "0", null]) {
+      const { calls } = await runWorkflow("critic-panel.js", { ...code, maxVerifiers }, blockerAndImportant);
+      expect(calls.filter(VERIFY), String(maxVerifiers)).toHaveLength(2);
+    }
+  });
+});
+
+describe("cost bounds: improve-skills verifier cap (opt-in: uncapped unless args.maxVerifiers is set)", () => {
+  const mf = (severity, title) => ({ severity, file: "CLAUDE.md", title, evidence: "CLAUDE.md:1", proposedEdit: "tighten it" });
+  // Review order: clarity (c1-c3) comes before routing (r0-r3), so filling a cap of 2 importants in
+  // review order would take c1 and c2 and starve routing.
+  const byLens = { clarity: [mf("important", "c1"), mf("important", "c2"), mf("important", "c3")], routing: [mf("blocker", "r0"), mf("important", "r1"), mf("important", "r2"), mf("important", "r3")] };
+  const safe = { real: true, editSafe: true, saferEdit: "", missing: [], evidenceChecked: [{ kind: "rule", ref: "CLAUDE.md: never weaken a gate" }, { kind: "file_line", ref: "CLAUDE.md:1" }], reason: "ok" };
+  const reply = (label) => {
+    const m = /^meta:([a-z0-9-]+)-\d+$/.exec(label);
+    return m ? { findings: byLens[m[1]] || [] } : safe;
+  };
+
+  it("uncapped by default: every blocker and important finding gets a skeptic, and the planned count is logged before Verify", async () => {
+    const { result, calls, logs } = await runWorkflow("improve-skills.js", { targets: ["CLAUDE.md"] }, reply);
+    expect(calls.filter(VERIFY)).toHaveLength(7);
+    expect(result.counts.capDeferred).toBe(0);
+    expect(logs.filter((l) => /7 skeptic\(s\) planned/.test(l.text)).map((l) => l.calls)).toEqual([6]); // after the 6 lenses, before any skeptic
+  });
+
+  it("args.maxVerifiers: every blocker, then importants round-robin across lenses; the rest are recorded as unverified defers", async () => {
+    const { result, calls } = await runWorkflow("improve-skills.js", { targets: ["CLAUDE.md"], maxVerifiers: 3 }, reply);
+    expect(calls.filter(VERIFY)).toHaveLength(3);
+    expect(result.applyReady.map((f) => f.title).sort()).toEqual(["c1", "r0", "r1"]);
+    expect(result.counts.capDeferred).toBe(4);
+    expect(result.deferred.map((f) => f.title).sort()).toEqual(["c2", "c3", "r2", "r3"]);
+    for (const f of result.deferred) expect(f).toMatchObject({ verdict: "defer", editSafe: false, failedGates: ["not-verified:verifier-cap"], missing: [CAP_MISSING(3)] });
+    expect(result.traceRecords).toHaveLength(7);
+    expectWritable(result.traceRecords);
+  });
+});
+
+describe("cost bounds: budget floors (only with a '+Nk' token target)", () => {
+  const code = { focus: "x", uiInScope: false, reviewMode: "panel" };
+  const securityPrior = {
+    record_id: "TR-aaaaaaaaaaa1", claim_id: "critic:security:token-in-url", claim_text: "Token in URL", claim_type: "factual", severity: "important",
+    final_status: "accept", qualifier: "", repair: "", failed_gates: [], missing: [], reason: "r", provenance: { tree: TREE }, created_at: "2026-10-07T12:00:00.000Z", cleared: false,
+  };
+
+  it("critic-panel start floor (80k): error + budgetStopped with zero agent calls; every in-scope lens failed, every key kept, completion defer naming the floor", async () => {
+    for (const [args, lenses] of [[code, CODE_LENSES], [{ focus: "x", uiInScope: false }, CODE_LENSES], [{ focus: "x" }, ALL_LENSES]]) {
+      const { result, calls } = await runWorkflow("critic-panel.js", { ...args, priorRecords: [securityPrior] }, noAgent, LOW);
+      expect(calls).toEqual([]);
+      expect(result.budgetStopped).toBe(true);
+      expect(result.error).toMatch(/^token budget floor reached before Review \(5k left < 80k\) — no review happened/);
+      expect(result.failedReviewers).toEqual(lenses);
+      expect(result.completion).toEqual({
+        claim: "no open blocker in: x",
+        verdict: "defer",
+        missing: lenses.map((k) => `a review through the ${k} lens — not started: token budget floor reached before Review (5k left < 80k)`),
+        notRechecked: [securityPrior.record_id],
+      });
+      const normal = await runWorkflow("critic-panel.js", args, () => ({ findings: [] }));
+      expect(Object.keys(result).sort()).toEqual([...Object.keys(normal.result), "error", "budgetStopped"].sort());
+      for (const k of ["confirmed", "deferred", "revised", "niceToHaves", "refuted", "traceRecords", "reuseActions"]) expect(result[k], k).toEqual([]);
+      expect(result.counts).toMatchObject({ reviewAgents: 0, failedReviewers: lenses.length, capDeferred: 0 }); // no agent started
+    }
+    // Completion is the normal computation: an open prior blocker of a lens out of scope is named too.
+    const designer = { ...securityPrior, record_id: "TR-eeeeeeeeeee1", claim_id: "critic:designer:button-spacing-is-off", severity: "blocker" };
+    const { result } = await runWorkflow("critic-panel.js", { ...code, priorRecords: [securityPrior, designer] }, noAgent, LOW);
+    expect(result.completion.missing.slice(-1)).toEqual([`re-review of the designer lens for open prior blocker ${designer.record_id} (or CLEAR it on verified evidence)`]);
+    expect(result.completion.notRechecked).toEqual([securityPrior.record_id, designer.record_id]);
+  });
+
+  it("critic-panel start floor boundary: 79k left stops the round, 81k starts it; with no target (total null) nothing stops", async () => {
+    const clean = () => ({ findings: [] });
+    const below = await runWorkflow("critic-panel.js", code, noAgent, flat(79_000));
+    expect([below.result.budgetStopped, below.calls.length]).toEqual([true, 0]);
+    const above = await runWorkflow("critic-panel.js", code, clean, flat(81_000));
+    expect([above.result.budgetStopped, above.calls.length]).toEqual([undefined, 5]);
+    const untargeted = await runWorkflow("critic-panel.js", code, clean, { total: null, spent: () => 0, remaining: () => 0 });
+    expect([untargeted.result.budgetStopped, untargeted.calls.length]).toEqual([undefined, 5]);
+  });
+
+  it("critic-panel verify floor (60k): no skeptic starts; every fresh blocker and important finding is a recorded budget defer, a reused verdict stays reused, and the deferred blocker keeps completion at defer", async () => {
+    const prior = { record_id: "TR-aaaaaaaaaaaa", claim_id: "critic:security:input-has-no-accessible-name", claim_text: "Input has no accessible name", claim_type: "factual", final_status: "accept", missing: [], reason: "verified earlier", provenance: { tree: TREE } };
+    const findings = [
+      finding({ severity: "important", revisits: prior.record_id, revisitReason: "still-present" }),
+      finding({ title: "Token in URL" }),
+      finding({ severity: "important", title: "Token logged" }),
+      finding({ severity: "nice-to-have", title: "Rename a variable" }),
+    ];
+    const run = (left) => {
+      const d = draining(200_000, left);
+      return runWorkflow("critic-panel.js", { ...code, priorRecords: [prior], treeId: TREE }, d.tap((label) => (label.startsWith("critic:") ? onlySecurity(findings)(label) : verdict())), d.budget);
+    };
+    const { result, calls } = await run(50_000);
+    expect(calls.filter(VERIFY)).toEqual([]);
+    expect(result.budgetStopped).toBeUndefined(); // the review ran
+    expect(result.reuseActions).toEqual([expect.objectContaining({ record_id: prior.record_id, action: "REUSE" })]);
+    expect(result.deferred.map((f) => [f.severity, f.title])).toEqual([["blocker", "Token in URL"], ["important", "Token logged"]]);
+    for (const f of result.deferred) {
+      expect(f.failedGates).toEqual(["not-verified:budget"]);
+      expect(f.missing).toEqual([expect.stringContaining("token budget floor reached before Verify (50k left < 60k)")]);
+    }
+    expect(result.counts.capDeferred).toBe(0);
+    expect(result.niceToHaves).toHaveLength(1);
+    expect(result.completion.verdict).toBe("defer");
+    expect(result.completion.missing).toEqual([expect.stringMatching(/^blocker "Token in URL" \(security\) is deferred — missing: .*token budget floor/)]);
+    expectWritable(result.traceRecords);
+    // 70k left at Verify, above its 60k floor: the two skeptics run.
+    expect((await run(70_000)).calls.filter(VERIFY)).toHaveLength(2);
+  });
+
+  it("scan-docs (60k) and gap-analysis (40k) start floors: an error with zero agent calls; just above each floor the run starts", async () => {
+    const story = { id: "US-001", title: "Greeting", source: "docs/prd.md" };
+    const liveScan = (label) => (label.startsWith("evidence:") ? { implementationFiles: [], unitTests: "Missing", e2eTests: "Missing", proposedStatus: "Not started", notes: "" } : { finalStatus: "Not started", justification: "j", missing: [], evidenceChecked: [{ kind: "file_line", ref: "src/a.ts:1" }] });
+    const liveGap = (label) => (label.startsWith("gap:") ? { gaps: [] } : { order: [] });
+    const scan = await runWorkflow("scan-docs.js", { stories: [story] }, noAgent, LOW);
+    expect(scan.calls).toEqual([]);
+    expect(scan.result).toEqual({ error: expect.stringContaining("token budget floor reached (5k left < 60k)"), budgetStopped: true, count: 0, records: [], traceRecords: [] });
+    const gap = await runWorkflow("gap-analysis.js", { scope: "mvp" }, noAgent, LOW);
+    expect(gap.calls).toEqual([]);
+    expect(gap.result).toMatchObject({ error: expect.stringContaining("token budget floor reached (5k left < 40k)"), budgetStopped: true, totalGaps: 0, byDimension: {}, recommendedOrder: null });
+    expect((await runWorkflow("scan-docs.js", { stories: [story] }, noAgent, flat(59_000))).calls).toEqual([]);
+    expect((await runWorkflow("scan-docs.js", { stories: [story] }, liveScan, flat(61_000))).calls).toHaveLength(2);
+    expect((await runWorkflow("gap-analysis.js", { scope: "mvp" }, noAgent, flat(39_000))).calls).toEqual([]);
+    expect((await runWorkflow("gap-analysis.js", { scope: "mvp" }, liveGap, flat(41_000))).calls).toHaveLength(8);
+  });
+
+  it("gap-analysis pre-synth floor (20k): the gaps stand unordered, no synthesize call, a null order with its missing", async () => {
+    const reply = (label) => (label.startsWith("gap:") ? { gaps: [{ item: label, detail: "src/a.ts:1", priority: "high" }] } : { order: [{ next: "x", why: "y" }] });
+    const low = draining(100_000, 10_000);
+    const { result, calls } = await runWorkflow("gap-analysis.js", { scope: "mvp" }, low.tap(reply), low.budget);
+    expect(calls.filter((c) => c.label === "synthesize")).toEqual([]);
+    expect(result.error).toBeUndefined();
+    expect(result.totalGaps).toBe(7);
+    expect(result.recommendedOrder).toBeNull();
+    expect(result.missing).toEqual([expect.stringContaining("synthesis skipped: token budget floor")]);
+    const enough = draining(100_000, 30_000);
+    expect((await runWorkflow("gap-analysis.js", { scope: "mvp" }, enough.tap(reply), enough.budget)).result.recommendedOrder).toEqual([{ next: "x", why: "y" }]);
+  });
+});
+
+// Cases the round-integrity tests did not pin (each kills a named mutation of critic-panel.js).
+describe("critic-panel completion and failedReviewers: qualified blockers, important-only defers, a synchronously throwing critic", () => {
+  const code = { focus: "x", uiInScope: false, reviewMode: "panel" };
+
+  it("a blocker the skeptic confirms at qualify is reject: a qualified blocker is still a confirmed blocker", async () => {
+    const { result } = await runWorkflow("critic-panel.js", code, (label) =>
+      label.startsWith("critic:") ? onlySecurity([finding()])(label) : verdict({ verdict: "qualify", qualifier: "only on the mobile layout" }),
+    );
+    expect(result.confirmed).toEqual([expect.objectContaining({ severity: "blocker", verdict: "qualify", qualifier: "only on the mobile layout" })]);
+    expect(result.completion.verdict).toBe("reject");
+  });
+
+  it("a deferred or revised IMPORTANT finding with no blocker leaves completion accept with nothing missing", async () => {
+    for (const v of [verdict({ verdict: "defer", missing: ["an axe run on /"] }), verdict({ verdict: "revise", repair: "only the email input lacks a name" })]) {
+      const { result } = await runWorkflow("critic-panel.js", code, (label) => (label.startsWith("critic:") ? onlySecurity([finding({ severity: "important" })])(label) : v));
+      expect(result.deferred.length + result.revised.length, v.verdict).toBe(1);
+      expect(result.completion, v.verdict).toMatchObject({ verdict: "accept", missing: [] });
+    }
+  });
+
+  it("panel: a critic whose agent() throws synchronously (a null parallel() slot, past its .catch) is named by its lens key and the round completes", async () => {
+    const { result, logs } = await runWorkflow("critic-panel.js", code, throwingSync("critic:qa-e2e", () => ({ findings: [] })));
+    expect(logs.some((l) => l.text.startsWith("agent failed: critic:qa-e2e"))).toBe(false); // the .catch never ran: the slot itself is null
+    expect(result.failedReviewers).toEqual(["qa-e2e"]);
+    expect(result.error).toBeUndefined();
+    expect(result.completion).toMatchObject({ verdict: "defer", missing: ["a review through the qa-e2e lens — its reviewer failed (infra)"] });
+  });
+});
+
+// 'agent-failed' is the workflow's own infra signal (trace.md: re-run, never wait for evidence), so a
+// live checker must not be able to set it: the evidence gate copies a checker's own failedGates.
+describe("only workflow code sets 'agent-failed': a live checker cannot forge the infra signal", () => {
+  it("critic-panel: a live skeptic's own 'agent-failed' gate is dropped from the finding and its record; its other gates are kept", async () => {
+    const { result } = await runWorkflow("critic-panel.js", { focus: "x", uiInScope: false, reviewMode: "panel" }, (label) =>
+      label.startsWith("critic:") ? onlySecurity([finding()])(label) : verdict({ verdict: "defer", missing: ["an axe run on /"], failedGates: ["agent-failed", "needs-axe"] }),
+    );
+    expect(result.deferred[0].failedGates).toEqual(["needs-axe"]);
+    expect(result.traceRecords[0].failed_gates).toEqual(["needs-axe"]);
+    expectWritable(result.traceRecords);
+  });
+
+  it("improve-skills and scan-docs: a live checker's failedGates never reach the record (workflow code builds the gate input)", async () => {
+    const forged = { failedGates: ["agent-failed"] };
+    const metaFinding = { severity: "important", file: "CLAUDE.md", title: "Gate weakened", evidence: "CLAUDE.md:1", proposedEdit: "restore it" };
+    const skills = await runWorkflow("improve-skills.js", { targets: ["CLAUDE.md"] }, (label) =>
+      label.startsWith("meta:safety")
+        ? { findings: [metaFinding] }
+        : label.startsWith("meta:")
+          ? { findings: [] }
+          : { real: true, editSafe: true, saferEdit: "", missing: [], evidenceChecked: [{ kind: "rule", ref: "CLAUDE.md rule" }, { kind: "file_line", ref: "CLAUDE.md:1" }], reason: "ok", ...forged },
+    );
+    expect(skills.result.traceRecords.map((r) => r.failed_gates)).toEqual([[]]);
+    const story = { id: "US-001", title: "Greeting", source: "docs/prd.md" };
+    const scan = await runWorkflow("scan-docs.js", { stories: [story] }, (label) =>
+      label.startsWith("evidence:")
+        ? { implementationFiles: ["src/lib/greeting.ts"], unitTests: "Present", e2eTests: "Present", proposedStatus: "E2E tested", notes: "" }
+        : { finalStatus: "E2E tested", justification: "a spec covers it", missing: [], evidenceChecked: [{ kind: "file_line", ref: "e2e/greeting.spec.ts:1" }], ...forged },
+    );
+    expect(scan.result.traceRecords.map((r) => r.failed_gates)).toEqual([[]]);
   });
 });

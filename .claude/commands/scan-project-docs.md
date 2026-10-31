@@ -45,8 +45,13 @@ Procedure:
    and a *separate* status-verifier agent (evidence-based status, no overclaiming),
    returning one record per story. This is real multi-agent orchestration, not one
    agent judging every story in a single context. (Invoking Workflow here is expected.)
-9. If the workflow returns `error` (no stories passed, or every evidence agent failed —
-   infra), change no status and write no records: fix the cause and re-run it. Otherwise
+   Pass at most `maxStories` stories per call (`args.maxStories`, default 30; each story
+   costs two agents): split a longer list into batches and run one call per batch. A
+   larger batch is refused with `error` before any agent starts.
+9. If the workflow returns `error` (no stories passed, more than `maxStories`, the token
+   budget floor stopped it before any agent started — `budgetStopped` — or every evidence
+   agent failed — infra), change no status and write no records: fix the cause (batch the
+   stories, or re-run with more budget) and re-run it. Otherwise
    use the returned `records` as the source of truth for status; do browser
    verification yourself where it raises a status to `Browser verified`/`Done`.
    **No status change without a licensing TRACE record** (consumer protocol in

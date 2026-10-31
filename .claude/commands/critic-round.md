@@ -1,12 +1,13 @@
 ---
-description: Run the multi-agent critic round as a deterministic Workflow — critics fan out as parallel subagents (own context each; a code-only round uses one all-lens reviewer), each blocker/important finding gets a typed TRACE verdict (accept/qualify/revise/defer/reject) from a separate skeptic, then a synthesized severity matrix is returned and its verdict records appended. Read-only on code.
+description: Run the multi-agent critic round as a deterministic Workflow — critics fan out as parallel subagents (own context each; a code-only round uses one all-lens reviewer), every blocker and each important finding up to a verifier cap gets a typed TRACE verdict (accept/qualify/revise/defer/reject) from a separate skeptic, then a synthesized severity matrix is returned and its verdict records appended. Read-only on code.
 argument-hint: [focus, e.g. "checkout flow on localhost"]
 ---
 
 Run a **genuine multi-agent critic round** — not a single agent simulating critics.
 Use the **Workflow tool** so each critic runs as its own subagent in its own context
-and every blocker/important finding is verified by a *separate* skeptic. (One measured
-exception: a code-only round, `uiInScope: false`, runs one all-lens reviewer — see Notes.)
+and every blocker (and each important finding up to the round's verifier cap) is verified
+by a *separate* skeptic. (One measured exception: a code-only round, `uiInScope: false`,
+runs one all-lens reviewer — see Notes.)
 
 Focus:
 $ARGUMENTS
@@ -28,20 +29,24 @@ $ARGUMENTS
      plus `"priorEvidence": "<the step-1 output>"` when UI or perf lenses are in scope
    This command explicitly opts into multi-agent orchestration — calling Workflow
    here is expected.
-4. The workflow returns `{ error?, focus, treeId, reviewMode, failedReviewers, completion, counts, confirmed, deferred, revised, niceToHaves, refuted, traceRecords, reuseActions }`.
-   **Print first:** `error` if present (every lens failed: no review happened, re-run),
-   then `completion` — its claim next to `completion.verdict`, its `missing`, and
-   `notRechecked`. The round is clean only when `completion.verdict` is `accept`; `reject`
-   means a blocker is confirmed, `defer` that the round is incomplete or a blocker is still
-   open (Round integrity in `.claude/memory/topics/trace.md`). Then render `confirmed`
-   (verdict `accept` or `qualify`) as the critic matrix and list `niceToHaves` separately:
+4. The workflow returns `{ error?, budgetStopped?, focus, treeId, reviewMode, failedReviewers, completion, counts, confirmed, deferred, revised, niceToHaves, refuted, traceRecords, reuseActions }`.
+   **Print first:** `error` if present (every lens failed, or `budgetStopped`: the token
+   budget floor stopped the round before any reviewer started — either way no review
+   happened, re-run), then `completion` — its claim next to `completion.verdict`, its
+   `missing`, and `notRechecked`. The round is clean only when `completion.verdict` is
+   `accept`; `reject` means a blocker is confirmed, `defer` that the round is incomplete
+   or a blocker is still open (Round integrity in `.claude/memory/topics/trace.md`). Then
+   render `confirmed` (verdict `accept` or `qualify`) as the critic matrix and list
+   `niceToHaves` separately:
 
    | Critic | Severity | Verdict | Finding | Evidence | Recommended action |
    |---|---|---|---|---|---|
 
    Show a `qualify` verdict with its qualifier (the strength the claim actually holds
    at). List `deferred` findings with their `missing` evidence and `revised` ones with
-   their `repair` — neither is actionable as stated. Note `refuted` findings so they
+   their `repair` — neither is actionable as stated. The deferred list includes the
+   cap-deferred findings (`counts.capDeferred`, failedGates `not-verified:verifier-cap`):
+   no skeptic adjudicated them, so list them too. Note `refuted` findings so they
    are not actioned. If `failedReviewers` is non-empty, say which lenses are missing —
    the round is incomplete; re-run it. Never CLEAR a record listed in
    `completion.notRechecked` on this round's evidence: its lens was not reviewed.
@@ -55,8 +60,20 @@ $ARGUMENTS
 
 ## Notes
 - This is the heavier, deterministic path (the workflow spawns ~10 critic agents +
-  one verifier per blocker/important finding, minus reused verdicts). That is intended:
-  real independent review, not one context role-playing ten critics.
+  one verifier per blocker and per important finding up to `args.maxVerifiers`, minus
+  reused verdicts). That is intended: real independent review, not one context
+  role-playing ten critics.
+- Cost bounds. `args.maxVerifiers` (default 30) caps the skeptics a round starts: every
+  blocker is verified regardless, important findings fill the slots left (round-robin
+  across lenses), and the rest come back in `deferred` with failedGates
+  `not-verified:verifier-cap` and `counts.capDeferred` set — listed, never dropped, never
+  actioned. A defer is never reused, so the next round verifies them; re-run focused on
+  them or raise the cap. With a `+Nk` token target, a round started under 80k tokens left
+  returns `error` and `budgetStopped` with every in-scope lens in `failedReviewers`: an
+  incomplete round (re-run it with more budget, never read it as clean). A round that
+  reaches Verify under 60k left starts no skeptic: every fresh blocker and important
+  finding is deferred with failedGates `not-verified:budget`, so a blocker among them keeps
+  `completion.verdict` at `defer`.
 - Exception, measured: a code-only round (`uiInScope: false` — no browser lens in scope)
   runs ONE all-lens reviewer instead of the critic fan-out (`reviewMode: 'single-pass'`):
   TRACE-Bench-lite found it as good as the panel on code-only review at ~5x lower cost

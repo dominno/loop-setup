@@ -20,7 +20,10 @@ $ARGUMENTS
    of files to scope the review). One reviewer per quality lens (clarity,
    instruction-following risk, safety/gating, consistency/DRY, workflow DSL, routing)
    runs in its own context, in parallel; a *separate* skeptic adversarially verifies
-   every blocker/important finding. Invoking Workflow here is expected.
+   every blocker/important finding. Verification is uncapped by default; to bound its
+   cost pass `args.maxVerifiers` (an integer: every blocker is still verified, and
+   important findings fill the slots left, round-robin across lenses). Invoking Workflow
+   here is expected.
 2. The workflow returns `{ error?, scope, targets, budgetStop, failedReviewers, counts, applyReady, needsDesign, deferred, niceToHaves, refuted, traceRecords }`.
    If `error` is set, every lens failed (infra): nothing was reviewed or verified, so
    report it and re-run. A non-empty `failedReviewers` names lenses that did not review —
@@ -41,6 +44,12 @@ $ARGUMENTS
    `deferred` and **UNVERIFIED** (neither its reality nor its edit-safety was checked),
    `applyReady` and `needsDesign` are empty by design, and a follow-up `/improve-skills`
    pass should re-run verification before anything is applied.
+
+   **If `counts.capDeferred` is non-zero**, say so up front the same way: that many
+   important findings were past `args.maxVerifiers`, so no skeptic checked them. They are
+   in `deferred` with failedGates `not-verified:verifier-cap` and are **UNVERIFIED**
+   (neither reality nor edit-safety was checked), never apply-ready; a follow-up pass
+   scoped to them (or with a higher cap) must verify them before anything is applied.
 
 3. **Confirmation gate (hard rule).** This command may propose edits to core prompts
    but must **never apply them without explicit confirmation** — the same rule
@@ -68,8 +77,9 @@ $ARGUMENTS
 
 ## Notes
 - Heavier, deterministic path: the workflow spawns ~6 meta-critics + one verifier per
-  blocker/important finding. That is intended — independent review of our own prompts,
-  not one context grading its own instructions.
+  blocker/important finding (uncapped unless `args.maxVerifiers` is set). That is
+  intended — independent review of our own prompts, not one context grading its own
+  instructions.
 - The verifier judges two things: is the problem **real**, and is the proposed edit
   **safe** (would it weaken instruction-following or a safety gate, or break a
   workflow?). Only real-and-safe findings are `applyReady`.

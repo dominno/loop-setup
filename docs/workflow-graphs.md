@@ -29,13 +29,24 @@ kill a server. In a critic round, E2E, axe and bundle results come from the Lead
 own worktree, and the loop verifier and the bench arms are measured prompts, so adding
 it there needs a re-bench.
 
+**Cost bounds.** Where the agent count is known up front, a workflow refuses an over-size
+batch before any agent starts (`scan-docs`: `args.maxStories`, default 30). A verifier cap
+turns the overflow into recorded defers instead of dropping it (`critic-panel`:
+`args.maxVerifiers`, default 30; `improve-skills`: opt-in, uncapped by default). Budget
+floors compare `budget.remaining()` (output tokens left in the turn's shared pool) with a
+fixed number, and fire only when the turn has a `+Nk` token target: without one,
+`budget.total` is null and no floor fires.
+
 ---
 
 ## `critic-panel` — critic round (`/critic-round`, `/multi-agent-dev`, `/qa-pass`, `/loop`)
 
 ```mermaid
 flowchart LR
-  focus([focus / changed files]) --> R
+  focus([focus / changed files]) --> sf{"▫️ start floor:<br/>under 80k tokens left?"}
+  sf -- yes --> bs[▫️ error + budgetStopped: no agent started<br/>every in-scope lens in failedReviewers]
+  bs --> comp
+  sf -- no --> R
   subgraph R["Review — parallel barrier · 🟢 Sonnet"]
     c1[First-Time User]
     c2[UX Flow]
@@ -50,9 +61,15 @@ flowchart LR
   end
   R --> dedup[▫️ merge-dedup<br/>agreement ≠ evidence; keep only<br/>independent evidence]
   dedup --> reuse{"▫️ same claim (lens+title+type),<br/>licensing verdict, still-present,<br/>identical tree?"}
-  reuse -- yes --> reused[▫️ reuse prior verdict<br/>→ REUSE action]
-  reuse -- no --> V
-  subgraph V["Verify — one skeptic per blocker/important · 🔵 Opus"]
+  reuse -- yes --> reused[▫️ reuse prior verdict<br/>→ REUSE action · takes no verifier slot]
+  reuse -- no --> vf{"▫️ verify floor:<br/>under 60k tokens left?"}
+  vf -- yes --> bd[▫️ defer, no agent: not-verified:budget<br/>every fresh blocker and important finding]
+  bd --> comp
+  vf -- no --> cap{"▫️ verifier cap (args.maxVerifiers, default 30):<br/>every blocker; important findings fill<br/>the slots left, round-robin across lenses"}
+  cap -- "past the cap" --> cd[▫️ defer, no agent: not-verified:verifier-cap<br/>counts.capDeferred · verified next round]
+  cd --> comp
+  cap -- "within the cap" --> V
+  subgraph V["Verify — one skeptic per blocker, and per important up to the cap · 🔵 Opus"]
     v1[typed verdict #1<br/>+ lens critical questions]
     v2[typed verdict #2]
     vn[typed verdict #N]
@@ -60,13 +77,13 @@ flowchart LR
   V --> gate[▫️ strict evidence gate<br/>accept+qualify floor, under critic AND skeptic type]
   gate --> comp
   reused --> comp
-  comp["▫️ completion, computed in code: claim 'no open blocker in focus'<br/>reject = a blocker confirmed · defer = a failed lens, a deferred or revised<br/>blocker, or an open prior blocker in a lens not reviewed · else accept<br/>+ notRechecked = prior records of the lenses not reviewed"]
-  comp --> out([completion · confirmed accept/qualify · deferred · revised · refuted<br/>+ failedReviewers + traceRecords + reuseActions])
+  comp["▫️ completion, computed in code: claim 'no open blocker in focus'<br/>reject = a blocker confirmed · defer = a failed or unstarted lens, a single-pass finding<br/>tagged with no in-scope lens, a deferred or revised blocker, or an open prior blocker<br/>in a lens not reviewed · else accept<br/>+ notRechecked = prior records of the lenses not reviewed"]
+  comp --> out([completion · confirmed accept/qualify · deferred, cap and budget defers included<br/>· revised · refuted + failedReviewers + counts.capDeferred + traceRecords + reuseActions])
   R -.->|a critic threw or returned nothing| fr[▫️ failedReviewers, named by lens key<br/>round incomplete, never a clean pass]
   fr --> comp
   fr -.->|every lens failed| err[▫️ error: no review happened, re-run<br/>every other key kept, empty]
   err --> out
-  V -.->|a skeptic threw or returned nothing| af[▫️ defer: verdict-missing + agent-failed<br/>infra failure: re-run, never refuted]
+  V -.->|a skeptic threw or returned nothing| af[▫️ defer: verdict-missing + agent-failed<br/>infra failure: re-run, never refuted<br/>set only by workflow code, never by a skeptic]
   af --> comp
 ```
 
@@ -87,6 +104,12 @@ flowchart LR
 > `completion` before the matrix and never CLEAR a record in `completion.notRechecked`
 > (Round integrity in `.claude/memory/topics/trace.md`). `completion` is derived, not
 > written as a record.
+>
+> Cost bounds: below the start floor the round returns `error` and `budgetStopped` with
+> every key kept, and its completion comes from the same code as any round (`defer`, each
+> in-scope lens's `missing` naming the floor). Cap and budget defers are records like any
+> other defer; a deferred blocker keeps completion at `defer`, and a cap never defers a
+> blocker.
 
 ## `improve-skills` — meta-critic over our own prompts (`/improve-skills`)
 
@@ -104,7 +127,10 @@ flowchart LR
   R --> dedup[▫️ merge-dedup]
   dedup --> gate{budget floor?}
   gate -- "under floor" --> skip[▫️ skip verify →<br/>deferred, unverified]
-  gate -- ok --> V
+  gate -- ok --> cap{"▫️ verifier cap (args.maxVerifiers, opt-in;<br/>uncapped by default): every blocker;<br/>importants round-robin across lenses"}
+  cap -- "past the cap" --> cd[▫️ defer, no agent: not-verified:verifier-cap<br/>counts.capDeferred · unverified]
+  cd --> out
+  cap -- "within the cap" --> V
   subgraph V["Verify — 2-axis skeptic per finding · 🔵 Opus"]
     v1[real? + editSafe? + saferEdit]
   end
@@ -123,7 +149,11 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  stories([stories]) --> P
+  stories([stories]) --> ms{"▫️ more than maxStories?<br/>(args.maxStories, default 30)"}
+  ms -- yes --> merr[▫️ error before any agent:<br/>pass the stories in batches]
+  ms -- no --> sf{"▫️ start floor:<br/>under 60k tokens left?"}
+  sf -- yes --> berr[▫️ error + budgetStopped:<br/>no story scanned, no records]
+  sf -- no --> P
   subgraph P["pipeline — per story, independent"]
     e[🟢 gather code+test evidence] --> nr{▫️ report returned?}
     nr -- "no: the agent threw or returned nothing" --> d0[defer: status unchanged<br/>no-evidence-report + agent-failed]
@@ -140,7 +170,9 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  scope([scope]) --> D
+  scope([scope]) --> sf{"▫️ start floor:<br/>under 40k tokens left?"}
+  sf -- yes --> berr[▫️ error + budgetStopped:<br/>nothing analysed, no agent started]
+  sf -- no --> D
   subgraph D["Dimensions — parallel barrier · 🟢 Sonnet"]
     d1[docs-not-impl]
     d2[impl-not-docs]
@@ -152,7 +184,10 @@ flowchart LR
   end
   D --> allf{"▫️ every finder failed?"}
   allf -- "yes (infra)" --> err[▫️ error: nothing analysed,<br/>no synth call, re-run]
-  allf -- no --> s[🔵 synthesize prioritized order<br/>over the dimensions analysed]
+  allf -- no --> pf{"▫️ pre-synth floor:<br/>under 20k tokens left?"}
+  pf -- yes --> nsb[▫️ recommendedOrder null + missing:<br/>synthesis skipped: token budget floor]
+  nsb --> out
+  pf -- no --> s[🔵 synthesize prioritized order<br/>over the dimensions analysed]
   s --> out([recommendedOrder + byDimension<br/>+ failedDimensions + missing])
   D -.->|a finder threw or returned nothing| fd["▫️ failedDimensions, named by key<br/>left out of byDimension, never 'no gaps'"]
   fd --> out

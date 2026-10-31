@@ -28,7 +28,9 @@ Procedure:
 9. Record evidence in `docs/story-verification-log.md`. The status itself must not be
    self-adjudicated (maker ≠ checker): run the **scan-docs Workflow** for the in-scope
    stories (`scriptPath: .claude/workflows/scan-docs.js`, `args.stories` = those
-   stories) so a separate status verifier issues the verdicts, then apply them exactly as
+   stories, at most `maxStories` per call — default 30, two agents each; batch a longer
+   list, since a larger batch is refused with `error` before any agent starts) so a
+   separate status verifier issues the verdicts, then apply them exactly as
    `/scan-project-docs` step 9 does (an `error` → no status changes and no records: re-run
    it; accept → COMMIT, qualify → COMMIT_QUALIFIED at the lower status, revise/defer →
    status unchanged + HOLD; Lead-raised `Browser verified`/`Done` only with its own record

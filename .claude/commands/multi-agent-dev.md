@@ -9,10 +9,10 @@ User task:
 $ARGUMENTS
 
 You are the Lead Agent. The critic rounds run as a **deterministic multi-agent
-Workflow** (critics fan out as parallel subagents in their own contexts; each
-blocker/important finding is verified by a separate skeptic) — **not** one agent
-simulating critics. Invoking the Workflow tool here is expected (this command opts
-into multi-agent orchestration).
+Workflow** (critics fan out as parallel subagents in their own contexts; every blocker,
+and each important finding up to the round's verifier cap, is verified by a separate
+skeptic) — **not** one agent simulating critics. Invoking the Workflow tool here is
+expected (this command opts into multi-agent orchestration).
 
 Procedure:
 
@@ -28,12 +28,16 @@ Procedure:
    `pnpm build && pnpm check:bundle` yourself and pass their output as `args.priorEvidence`:
    the critics and skeptics never run E2E, and never build or test in the shared checkout
    (their SAFETY rules), so a result you did not supply is reported as missing evidence.
-   Print `error` first if present (every lens failed: no review happened), then
+   Print `error` first if present (every lens failed, or `budgetStopped`: the token
+   budget floor stopped the round before any reviewer started — no review happened), then
    `completion` (its claim next to `completion.verdict`, and its `missing`). Render the
    returned `confirmed` findings (verdict `accept`/`qualify`) as the critic matrix with
-   their verdicts; list `deferred` (with `missing`) and `revised` (with `repair`); record
-   `niceToHaves`; ignore `refuted`; if `error` is set or `failedReviewers` is non-empty,
-   say the round is incomplete and re-run it, and never CLEAR a record listed in
+   their verdicts; list `deferred` (with `missing`) and `revised` (with `repair`), the
+   cap-deferred findings among them too (`counts.capDeferred`, failedGates
+   `not-verified:verifier-cap`: important findings past `args.maxVerifiers`, default 30,
+   that no skeptic adjudicated); record `niceToHaves`; ignore `refuted`; if `error` is set
+   (`budgetStopped` included) or `failedReviewers` is non-empty, say the round is
+   incomplete and re-run it, and never CLEAR a record listed in
    `completion.notRechecked` (its lens was not reviewed). Record the verdicts exactly as
    the **consumer protocol** in `.claude/memory/topics/trace.md` says (save the result to
    a scratchpad file → `pnpm trace write <file>` → `pnpm trace act --from <file>`).
@@ -43,7 +47,8 @@ Procedure:
    handled per the consumer protocol: gather its `missing` evidence (run the check,
    reproduce in the browser) or restate it per its `repair`, then re-adjudicate it in the
    next critic round (pass the evidence as `priorEvidence`) — never fix blind and never
-   act on the defer itself.
+   act on the defer itself. A cap-deferred important finding was never adjudicated: the
+   next round verifies it (focus on it, or raise `args.maxVerifiers`) before you act on it.
 6. Implement only those. Keep the **maker/checker split**: implementation is your
    pass; the post-implementation workflow below is the independent checker.
 7. Run the smallest relevant automated checks first. For a bug fix, first add or adjust a
@@ -66,9 +71,9 @@ Procedure:
     round leaves the set of open blockers (by `claim_id`, confirmed + deferred + revised)
     and their verdicts unchanged, stop and report them **as they are** — never relabel a
     confirmed blocker as `defer` — and ask the user; the task stays incomplete. An
-    incomplete round (`error` set, or a failed lens) is never diminishing returns: re-run
-    it. For every finding the latest round no longer confirms *and* whose relevant check
-    passes, append
+    incomplete round (`error` set, `budgetStopped` included, or a failed lens) is never
+    diminishing returns: re-run it. For every finding the latest round no longer
+    confirms *and* whose relevant check passes, append
     `pnpm trace act <record> multi-agent-dev CLEAR --note "<what showed it fixed>"` on its
     latest licensing record (for a bug fix the note names the RED and the GREEN run) —
     never on a record listed in `completion.notRechecked`, which that round did not

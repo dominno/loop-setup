@@ -25,6 +25,25 @@ if (!stories.length) {
   return { error: 'No stories provided. Extract stories from docs first, then pass args.stories = [{id,title,source}].', records: [] }
 }
 
+// Cost bounds, checked before any agent starts. Each story costs two agents (evidence +
+// verifier), so a batch over args.maxStories (an integer > 0, default 30) is refused up front:
+// the caller passes the stories in batches. The start floor fires only when the turn has a
+// '+Nk' token target (budget.total), against the output tokens left in the shared pool.
+const maxStories = a && Number.isInteger(a.maxStories) && a.maxStories > 0 ? a.maxStories : 30
+if (a && a.maxStories !== undefined && a.maxStories !== maxStories) log(`ignored args.maxStories=${JSON.stringify(a.maxStories)} (expected an integer > 0) — using ${maxStories}`)
+if (stories.length > maxStories) {
+  const error = `${stories.length} stories > maxStories ${maxStories} (${2 * stories.length} agents) — pass them in batches of at most ${maxStories}`
+  log(`ERROR: ${error}`)
+  return { error, records: [], traceRecords: [] }
+}
+log(`planned: ${stories.length} stor${stories.length === 1 ? 'y' : 'ies'} → ${2 * stories.length} agents (an evidence agent and a status verifier each; maxStories ${maxStories})`)
+const START_FLOOR = 60_000
+if (budget.total && budget.remaining() < START_FLOOR) {
+  const error = `token budget floor reached (${Math.round(budget.remaining() / 1000)}k left < ${START_FLOOR / 1000}k) — no story was scanned; re-run with a larger budget`
+  log(`ERROR: ${error}`)
+  return { error, budgetStopped: true, count: 0, records: [], traceRecords: [] }
+}
+
 // This workflow only inspects the repo (code + tests). Statuses that require a
 // human/MCP browser pass — "Browser verified" and "Done" — are intentionally OUT of
 // scope: the caller raises a story to those after verifying it in a browser.

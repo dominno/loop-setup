@@ -84,6 +84,22 @@ const agentFailed = (label) => (e) => {
   return null
 }
 
+// Budget floors fire only when the turn has a '+Nk' token target (budget.total), against the
+// output tokens left in the shared pool. Under START_FLOOR no finder starts (an error: nothing was
+// analysed); under SYNTH_FLOOR after the finders, the gaps stand unordered and no synthesizer starts.
+const START_FLOOR = 40_000
+const SYNTH_FLOOR = 20_000
+const floorNote = (floor) => `token budget floor reached (${Math.round(budget.remaining() / 1000)}k left < ${floor / 1000}k)`
+if (budget.total && budget.remaining() < START_FLOOR) {
+  const error = `${floorNote(START_FLOOR)} — no dimension was analysed; re-run with a larger budget`
+  log(`ERROR: ${error}`)
+  return {
+    scope, error, budgetStopped: true, totalGaps: 0, byDimension: {},
+    failedDimensions: DIMENSIONS.map((d) => d.key), // none was analysed: never read as "no gaps"
+    recommendedOrder: null, missing: ['a synthesized order — skipped: no dimension was analysed (token budget floor)'],
+  }
+}
+
 phase('Dimensions')
 const results = await parallel(
   DIMENSIONS.map((d, i) => () =>
@@ -115,13 +131,18 @@ for (const r of results.filter((x) => x && !x.failed)) {
 log(`${total} gaps across ${DIMENSIONS.length - failedDimensions.length} of ${DIMENSIONS.length} dimensions`)
 
 phase('Synthesize')
-const synth = await agent(
+const synthStop = budget.total && budget.remaining() < SYNTH_FLOOR ? floorNote(SYNTH_FLOOR) : ''
+if (synthStop) log(`${synthStop} — no synthesizer started; the gaps stand unordered`)
+const synth = synthStop ? null : await agent(
   `Given these gaps grouped by dimension, propose the recommended NEXT-implementation order (highest-leverage first), each with a one-line "why". Be concrete.\n\n${JSON.stringify(byDimension)}\n\n${AGENT_SAFETY}`,
   { label: 'synthesize', phase: 'Synthesize', schema: ORDER_SCHEMA, model: JUDGE_MODEL },
 ).catch(agentFailed('synthesize'))
-// A dead synthesizer (threw, or returned nothing) does not sink the analysis: the gaps stand,
-// unordered, and the order is null with its missing named, never an empty "nothing to do".
+// A dead synthesizer (threw, or returned nothing), or one the pre-synth floor never started, does
+// not sink the analysis: the gaps stand, unordered, and the order is null with its missing named,
+// never an empty "nothing to do".
 const recommendedOrder = synth ? synth.order || [] : null
-const missing = synth ? [] : ['a synthesized order — the synthesizer failed (infra); the gaps are listed unordered in byDimension']
+const missing = synth ? [] : [synthStop
+  ? `a synthesized order — synthesis skipped: ${synthStop}; the gaps are listed unordered in byDimension`
+  : 'a synthesized order — the synthesizer failed (infra); the gaps are listed unordered in byDimension']
 
 return { scope, totalGaps: total, byDimension, failedDimensions, recommendedOrder, missing }
