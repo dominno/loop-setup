@@ -170,7 +170,8 @@ multi-agent opt-in:
   `defer`, never dropped (TRACE-Bench F1, one run).
 - `scan-docs.js` — per-story parallel evidence → separate status verifier
   (`/scan-project-docs`).
-- `gap-analysis.js` — per-dimension gaps → synthesized order (`/story-gap-analysis`).
+- `gap-analysis.js` — per-dimension gaps → a separate skeptic per dimension → a
+  synthesized order over the licensed gaps only (`/story-gap-analysis`).
 - `e2e-design.js` — per-category E2E case enumeration → dedup → a separate judge types
   each case; only licensed (accept/qualify) cases are returned for implementation
   (`/multi-agent-e2e`).

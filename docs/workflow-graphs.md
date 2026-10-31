@@ -172,34 +172,48 @@ flowchart LR
   allf -- "yes (infra)" --> err[▫️ error: no records written,<br/>every status unchanged, re-run]
 ```
 
-## `gap-analysis` — docs↔code↔tests gaps (`/story-gap-analysis`)
+## `gap-analysis` — docs↔code↔tests gaps + skeptic per dimension (`/story-gap-analysis`)
 
 ```mermaid
 flowchart LR
   scope([scope]) --> sf{"▫️ start floor:<br/>under 40k tokens left?"}
-  sf -- yes --> berr[▫️ error + budgetStopped:<br/>nothing analysed, no agent started]
-  sf -- no --> D
-  subgraph D["Dimensions — parallel barrier · 🟢 Sonnet"]
-    d1[docs-not-impl]
-    d2[impl-not-docs]
-    d3[impl-not-unit]
-    d4[impl-not-e2e]
-    d5[e2e-missing-edges]
-    d6[ux-design]
-    d7[ambiguous]
+  sf -- yes --> berr[▫️ error + budgetStopped:<br/>nothing analysed, no agent started<br/>every other key kept, empty]
+  sf -- no --> P
+  subgraph P["pipeline — per dimension, independent: docs-not-impl · impl-not-docs · impl-not-unit · impl-not-e2e · e2e-missing-edges · ux-design · ambiguous (+ other, opt-in)"]
+    f[🟢 finder: the gaps along one dimension] --> ne{"▫️ any gap?"}
+    ne -- "no: no skeptic" --> emp[▫️ an empty dimension]
+    ne -- yes --> vf{"▫️ skeptic floor:<br/>under 20k tokens left?"}
+    vf -- yes --> bd["▫️ defer the dimension's gaps, no agent:<br/>not-verified:budget"]
+    vf -- no --> k["🔵 skeptic: one typed verdict per numbered gap<br/>refutes by opening the cited files and searching<br/>an absence needs the search command + its empty result<br/>answers the dimension's critical questions"]
+    k --> gate["▫️ evidence gate per gap: the dimension's claim type<br/>(factual; ux-design predictive) and the skeptic's, stricter wins<br/>no verdict for a gap → defer verdict-missing<br/>disagreeing repeats → defer verdict-conflict"]
+    k -.->|the skeptic threw or returned nothing| af["▫️ defer the dimension's gaps:<br/>verdict-missing + agent-failed<br/>set only by workflow code, never by the skeptic"]
   end
-  D --> allf{"▫️ every finder failed?"}
-  allf -- "yes (infra)" --> err[▫️ error: nothing analysed,<br/>no synth call, re-run]
-  allf -- no --> pf{"▫️ pre-synth floor:<br/>under 20k tokens left?"}
+  P --> allf{"▫️ every finder failed?"}
+  allf -- "yes (infra)" --> err[▫️ error: nothing analysed,<br/>no skeptic, no synth call, re-run<br/>every other key kept, empty]
+  allf -- no --> lic{"▫️ any licensed gap<br/>(accept/qualify)?"}
+  lic -- no --> nl["▫️ no synth call · recommendedOrder null + missing<br/>while a gap is deferred or revised;<br/>empty when nothing was found or all were refuted"]
+  nl --> out
+  lic -- yes --> pf{"▫️ pre-synth floor:<br/>under 20k tokens left?"}
   pf -- yes --> nsb[▫️ recommendedOrder null + missing:<br/>synthesis skipped: token budget floor]
   nsb --> out
-  pf -- no --> s[🔵 synthesize prioritized order<br/>over the dimensions analysed]
-  s --> out([recommendedOrder + byDimension<br/>+ failedDimensions + missing])
-  D -.->|a finder threw or returned nothing| fd["▫️ failedDimensions, named by key<br/>left out of byDimension, never 'no gaps'"]
+  pf -- no --> s[🔵 synthesize prioritized order<br/>over the licensed gaps only, with their qualifiers]
+  s --> out(["recommendedOrder + byDimension (every gap, typed)<br/>+ licensedGaps + deferred + rejected + failedDimensions<br/>+ missing + verdictCounts · no traceRecords"])
+  P -.->|a finder threw or returned nothing| fd["▫️ failedDimensions, named by key<br/>left out of byDimension, never 'no gaps'"]
   fd --> out
-  s -.->|the synthesizer threw or returned nothing| ns[▫️ recommendedOrder null + missing<br/>gaps listed unordered]
+  s -.->|the synthesizer threw or returned nothing| ns[▫️ recommendedOrder null + missing<br/>licensed gaps listed unordered]
   ns --> out
 ```
+
+> A finder never licenses its own gaps: one separate skeptic per non-empty dimension tries to
+> refute them, and the canonical `<trace-evidence-gate>` block settles each verdict under the
+> stricter of the dimension's claim type and the skeptic's. A `factual` gap's `accept` or
+> `qualify` citing only `reading` becomes `defer`; a `ux-design` gap not observed in the browser
+> or by a human is at most `qualify`. Only `accept`/`qualify` gaps reach the synthesizer; every
+> gap stays in `byDimension` with its verdict, and `deferred`/`rejected` list those across
+> dimensions. The verdicts are advisory: `gap-analysis` writes no records and no durable state
+> changes on its output. The catch-all `other` dimension runs only with
+> `args.completeness: true`; its anti-scope is the seven dimensions above, and its gaps face the
+> same skeptic and gate. Each skeptic reuses the pre-synth floor value (20k).
 
 ## `e2e-design` — Playwright case enumeration + judge (`/multi-agent-e2e`)
 

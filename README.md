@@ -53,7 +53,7 @@ CLAUDE.md                         Project rules + multi-agent workflow + doc-sca
   workflows/                      Deterministic multi-agent orchestration scripts (Workflow tool)
     critic-panel.js               Fan-out critics → adversarial verify → severity matrix
     scan-docs.js                  Per-story parallel evidence-gathering → status verifier
-    gap-analysis.js               Per-dimension gap analysis → synthesized next-order
+    gap-analysis.js               Per-dimension gap analysis → skeptic per dimension (typed verdict per gap) → next-order over licensed gaps
     e2e-design.js                 Per-category E2E test-case enumeration → dedup → separate judge (typed verdict per case)
     loop-iteration.js             Maker/checker: worktree implementer → separate verifier (typed verdict)
     improve-skills.js             Meta-critic over the project's own prompts → proposed edits
@@ -155,7 +155,7 @@ maker-checker verification:
 |---|---|---|
 | `critic-panel.js` | `/critic-round`, `/multi-agent-dev`, `/qa-pass`, `/loop` | fan-out critics → adversarial verify → severity matrix |
 | `scan-docs.js` | `/scan-project-docs` | per-story parallel evidence → separate status verifier |
-| `gap-analysis.js` | `/story-gap-analysis` | per-dimension gap analysis → synthesized next-order |
+| `gap-analysis.js` | `/story-gap-analysis` | per-dimension gap analysis → a separate skeptic per dimension types each gap → a synthesized next-order over the licensed (accept/qualify) gaps only |
 | `e2e-design.js` | `/multi-agent-e2e` | per-category E2E case enumeration → dedup → a separate judge types each case; only licensed (accept/qualify) cases are returned |
 | `loop-iteration.js` | `/loop` (L2/L3) | worktree implementer → separate verifier per item |
 

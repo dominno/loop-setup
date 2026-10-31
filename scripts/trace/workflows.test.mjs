@@ -115,6 +115,34 @@ const caseVerdict = (index, over = {}) => ({
 const JUDGE = (c) => c.label.startsWith("e2e:judge");
 const NO_VERDICT = "a verdict from the checker (none, or an unknown value, was returned)";
 const NO_COUNTS = { accept: 0, qualify: 0, revise: 0, defer: 0, reject: 0 };
+// gap-analysis: a finder per dimension ('gap:<key>-<i>') proposes gaps, then ONE separate skeptic per
+// non-empty dimension ('gap-verify:<key>-<i>') types each of that dimension's gaps by its number
+// (1-based); only licensed (accept/qualify) gaps reach the synthesizer ('synthesize').
+const GAP_KEYS = ["docs-not-impl", "impl-not-docs", "impl-not-unit", "impl-not-e2e", "e2e-missing-edges", "ux-design", "ambiguous"];
+const gapItem = (item, detail = "src/a.ts:1") => ({ item, detail, priority: "high" });
+const gapVerdict = (index, over = {}) => ({
+  index,
+  verdict: "accept",
+  claimType: "factual",
+  evidenceChecked: [{ kind: "file_line", ref: "src/a.ts:1" }],
+  counterReasons: ["the cited line shows it"],
+  missing: [],
+  repair: "",
+  qualifier: "",
+  reason: "holds",
+  ...over,
+});
+// Finders reply from `found` (dimension key → gaps; an absent key is an empty dimension). A skeptic
+// replies `skeptic(key, prompt)`, by default accepting every gap of its dimension on file_line
+// evidence; the synthesizer replies `synth(prompt)`.
+const gapStub = (found, { skeptic, synth } = {}) => (label, prompt) => {
+  const m = /^(gap|gap-verify):([a-z0-9-]+)-\d+$/.exec(label);
+  if (m && m[1] === "gap") return { gaps: found[m[2]] || [] };
+  if (m) return skeptic ? skeptic(m[2], prompt) : { verdicts: (found[m[2]] || []).map((_, k) => gapVerdict(k + 1)) };
+  return synth ? synth(prompt) : { order: [{ next: "x", why: "y" }] };
+};
+const SKEPTIC = (c) => c.label.startsWith("gap-verify:");
+const SYNTH = (c) => c.label === "synthesize";
 
 describe("critic-panel (real body, stub agents)", () => {
   it("a missing skeptic verdict defers the finding — never confirmed, never refuted", async () => {
@@ -820,9 +848,21 @@ describe("round integrity: a whole-phase failure is an error, a partial one stay
       expect(result.error).toContain("failed (infra)");
       expect(result.failedDimensions).toEqual(DIMENSIONS);
       expect(calls.filter((c) => !c.label.startsWith("gap:"))).toEqual([]);
+      // No gap was found, so none is verified (no 'gap-verify:' call) or ordered; every key of a normal run is present.
+      expect(result).toEqual({
+        scope: "mvp", error: expect.stringContaining("failed (infra)"), totalGaps: 0, licensedGaps: 0, byDimension: {}, deferred: [], rejected: [],
+        failedDimensions: DIMENSIONS, recommendedOrder: null, missing: ["a synthesized order — skipped: no dimension was analysed"], verdictCounts: NO_COUNTS,
+      });
     }
+    // Each live dimension's skeptic accepts its one gap, so the six analysed gaps are licensed and synthesized.
     const { result, calls } = await runWorkflow("gap-analysis.js", { scope: "mvp" }, (label) =>
-      label.startsWith("gap:ux-design") ? null : label.startsWith("gap:") ? { gaps: [{ item: label, detail: "src/a.ts:1", priority: "high" }] } : { order: [{ next: "x", why: "y" }] },
+      label.startsWith("gap:ux-design")
+        ? null
+        : label.startsWith("gap:")
+          ? { gaps: [{ item: label, detail: "src/a.ts:1", priority: "high" }] }
+          : label.startsWith("gap-verify:")
+            ? { verdicts: [gapVerdict(1)] }
+            : { order: [{ next: "x", why: "y" }] },
     );
     expect(result.error).toBeUndefined();
     expect(result.failedDimensions).toEqual(["ux-design"]);
@@ -838,11 +878,16 @@ describe("round integrity: a whole-phase failure is an error, a partial one stay
       throw new Error("synthesizer died");
     };
     for (const synth of [dies, () => null]) {
-      const { result } = await runWorkflow("gap-analysis.js", { scope: "mvp" }, (label) => (label.startsWith("gap:") ? { gaps: [{ item: label, detail: "d", priority: "low" }] } : synth()));
+      // The skeptics accept every gap, so only the synthesizer is dead.
+      const { result } = await runWorkflow("gap-analysis.js", { scope: "mvp" }, (label) =>
+        label.startsWith("gap:") ? { gaps: [{ item: label, detail: "d", priority: "low" }] } : label.startsWith("gap-verify:") ? { verdicts: [gapVerdict(1)] } : synth(),
+      );
       expect(result.error).toBeUndefined();
       expect(result.totalGaps).toBe(7);
       expect(result.recommendedOrder).toBeNull();
       expect(result.missing).toEqual([expect.stringMatching(/^a synthesized order — the synthesizer failed \(infra\)/)]);
+      expect(result.missing[0]).toContain("the licensed gaps are listed unordered in byDimension");
+      expect(result.licensedGaps).toBe(7);
     }
   });
 
@@ -903,7 +948,8 @@ describe("agent SAFETY: every prompt of a read-only workflow carries the <agent-
     ["critic-panel.js (single-pass)", "critic-panel.js", { focus: "x", uiInScope: false }, (label) => (label.startsWith("critic:") ? { findings: [finding({ lens: "security" })] } : verdict()), ["critic:all-lenses-0", "verify:"]],
     ["improve-skills.js", "improve-skills.js", { targets: ["CLAUDE.md"] }, (label) => (label.startsWith("meta:safety") ? { findings: [metaBlocker] } : label.startsWith("meta:") ? { findings: [] } : null), ["meta:", "verify:"]],
     ["scan-docs.js", "scan-docs.js", { stories: [story] }, (label) => (label.startsWith("evidence:") ? storyEvidence : { finalStatus: "E2E tested", justification: "j", missing: [], evidenceChecked: [] }), ["evidence:", "verify:"]],
-    ["gap-analysis.js", "gap-analysis.js", { scope: "mvp" }, (label) => (label.startsWith("gap:") ? { gaps: [{ item: label, detail: "src/a.ts:1", priority: "high" }] } : { order: [] }), ["gap:", "synthesize"]],
+    ["gap-analysis.js", "gap-analysis.js", { scope: "mvp" }, (label) => (label.startsWith("gap:") ? { gaps: [{ item: label, detail: "src/a.ts:1", priority: "high" }] } : label.startsWith("gap-verify:") ? { verdicts: [gapVerdict(1)] } : { order: [] }), ["gap:", "gap-verify:", "synthesize"]],
+    ["gap-analysis.js (completeness)", "gap-analysis.js", { scope: "mvp", completeness: true }, gapStub({ other: [gapItem("an uncovered gap")] }), ["gap:other", "gap-verify:other", "synthesize"]],
     ["e2e-design.js", "e2e-design.js", { flow: "greeting" }, happyOnly([e2eCase("greets by name")], () => ({ verdicts: [caseVerdict(1)] })), ["e2e:happy", "e2e:judge"]],
   ])("%s: every agent prompt carries AGENT_SAFETY", async (_name, file, args, reply, reached) => {
     const { AGENT_SAFETY } = loadWorkflowBlock("critic-panel.js", "agent-safety", ["AGENT_SAFETY"]);
@@ -978,6 +1024,17 @@ const draining = (start, after) => {
     return reply(...rest);
   };
   return { budget, tap };
+};
+// remaining() by the number of agent calls started so far: `levels` is [[minCalls, left], …] with
+// ascending minCalls, and the last level reached applies (so a floor can fire at one stage only).
+const byCalls = (levels) => {
+  let n = 0;
+  const left = () => levels.filter(([min]) => n >= min).pop()[1];
+  const tap = (reply) => (...rest) => {
+    n += 1;
+    return reply(...rest);
+  };
+  return { budget: { total: 1_000_000, spent: () => 1_000_000 - left(), remaining: left }, tap };
 };
 const noAgent = () => {
   throw new Error("no agent may start below a budget floor");
@@ -1238,20 +1295,51 @@ describe("cost bounds: budget floors (only with a '+Nk' token target)", () => {
     expect((await runWorkflow("scan-docs.js", { stories: [story] }, noAgent, flat(59_000))).calls).toEqual([]);
     expect((await runWorkflow("scan-docs.js", { stories: [story] }, liveScan, flat(61_000))).calls).toHaveLength(2);
     expect((await runWorkflow("gap-analysis.js", { scope: "mvp" }, noAgent, flat(39_000))).calls).toEqual([]);
-    expect((await runWorkflow("gap-analysis.js", { scope: "mvp" }, liveGap, flat(41_000))).calls).toHaveLength(8);
+    // The 7 finders start. They find no gap, so no skeptic starts and nothing is synthesized: the
+    // synthesizer runs only over licensed gaps (it used to run over an empty set: 8 calls).
+    expect((await runWorkflow("gap-analysis.js", { scope: "mvp" }, liveGap, flat(41_000))).calls).toHaveLength(7);
   });
 
   it("gap-analysis pre-synth floor (20k): the gaps stand unordered, no synthesize call, a null order with its missing", async () => {
-    const reply = (label) => (label.startsWith("gap:") ? { gaps: [{ item: label, detail: "src/a.ts:1", priority: "high" }] } : { order: [{ next: "x", why: "y" }] });
-    const low = draining(100_000, 10_000);
+    const reply = (label) =>
+      label.startsWith("gap:") ? { gaps: [{ item: label, detail: "src/a.ts:1", priority: "high" }] } : label.startsWith("gap-verify:") ? { verdicts: [gapVerdict(1)] } : { order: [{ next: "x", why: "y" }] };
+    // Each skeptic checks the same 20k floor first, so the budget drops below it only once all 14
+    // agents before the synthesizer (7 finders, 7 skeptics) have started.
+    const low = byCalls([[0, 100_000], [14, 10_000]]);
     const { result, calls } = await runWorkflow("gap-analysis.js", { scope: "mvp" }, low.tap(reply), low.budget);
+    expect(calls.filter(SKEPTIC)).toHaveLength(7);
     expect(calls.filter((c) => c.label === "synthesize")).toEqual([]);
     expect(result.error).toBeUndefined();
     expect(result.totalGaps).toBe(7);
+    expect(result.licensedGaps).toBe(7);
     expect(result.recommendedOrder).toBeNull();
     expect(result.missing).toEqual([expect.stringContaining("synthesis skipped: token budget floor")]);
+    expect(result.missing[0]).toContain("(10k left < 20k); the licensed gaps are listed unordered in byDimension");
     const enough = draining(100_000, 30_000);
     expect((await runWorkflow("gap-analysis.js", { scope: "mvp" }, enough.tap(reply), enough.budget)).result.recommendedOrder).toEqual([{ next: "x", why: "y" }]);
+  });
+
+  it("gap-analysis skeptic floor (the same 20k, per dimension): below it no 'gap-verify:' call and that dimension's gaps defer not-verified:budget; above it the skeptics run", async () => {
+    const found = { "docs-not-impl": [gapItem("export to CSV")], "impl-not-unit": [gapItem("greeting formatter"), gapItem("name trimming")] };
+    const low = draining(100_000, 10_000);
+    const { result, calls } = await runWorkflow("gap-analysis.js", { scope: "mvp" }, low.tap(gapStub(found)), low.budget);
+    expect(calls.filter(SKEPTIC)).toEqual([]);
+    expect(calls).toHaveLength(7); // the finders ran above the 40k start floor; nothing was licensed, so no synthesizer
+    expect(result.error).toBeUndefined();
+    expect(result.failedDimensions).toEqual([]);
+    expect(result.deferred.map((g) => [g.id, g.verdict, g.failedGates])).toEqual([
+      ["docs-not-impl#1", "defer", ["not-verified:budget"]],
+      ["impl-not-unit#1", "defer", ["not-verified:budget"]],
+      ["impl-not-unit#2", "defer", ["not-verified:budget"]],
+    ]);
+    for (const g of result.deferred) expect(g.missing).toEqual([expect.stringContaining("token budget floor reached (10k left < 20k)")]);
+    expect(result.licensedGaps).toBe(0);
+    expect(result.recommendedOrder).toBeNull();
+    const enough = draining(100_000, 30_000);
+    const above = await runWorkflow("gap-analysis.js", { scope: "mvp" }, enough.tap(gapStub(found)), enough.budget);
+    expect(above.calls.filter(SKEPTIC).map((c) => c.label)).toEqual(["gap-verify:docs-not-impl-0", "gap-verify:impl-not-unit-2"]);
+    expect(above.result.licensedGaps).toBe(3);
+    expect(above.result.deferred).toEqual([]);
   });
 });
 
@@ -1261,7 +1349,9 @@ describe("cost bounds: budget floors (only with a '+Nk' token target)", () => {
 describe("cost bounds: with no token target no floor fires, even at remaining() 0", () => {
   const NO_TARGET = { total: null, spent: () => 0, remaining: () => 0 };
   const DIMENSION_KEYS = ["docs-not-impl", "impl-not-docs", "impl-not-unit", "impl-not-e2e", "e2e-missing-edges", "ux-design", "ambiguous"];
-  const gapReply = (label) => (label.startsWith("gap:") ? { gaps: [{ item: label, detail: "src/a.ts:1", priority: "high" }] } : { order: [{ next: "x", why: "y" }] });
+  // Each skeptic accepts its dimension's one gap, so the synthesizer has licensed gaps to order.
+  const gapReply = (label) =>
+    label.startsWith("gap:") ? { gaps: [{ item: label, detail: "src/a.ts:1", priority: "high" }] } : label.startsWith("gap-verify:") ? { verdicts: [gapVerdict(1)] } : { order: [{ next: "x", why: "y" }] };
 
   it("critic-panel verify floor: every fresh blocker and important finding still gets its skeptic", async () => {
     const reply = (label) => (label.startsWith("critic:") ? onlySecurity([finding({ title: "Token in URL" }), finding({ severity: "important", title: "Token logged" })])(label) : verdict());
@@ -1295,6 +1385,13 @@ describe("cost bounds: with no token target no floor fires, even at remaining() 
     expect(stopped.calls).toEqual([]);
     expect(stopped.result.budgetStopped).toBe(true);
     expect(stopped.result.failedDimensions).toEqual(DIMENSION_KEYS);
+  });
+
+  it("gap-analysis skeptic floor: every non-empty dimension's skeptic runs and settles its gaps", async () => {
+    const { result, calls } = await runWorkflow("gap-analysis.js", { scope: "mvp" }, gapReply, NO_TARGET);
+    expect(calls.filter(SKEPTIC).map((c) => c.label)).toEqual(DIMENSION_KEYS.map((k, i) => `gap-verify:${k}-${i}`));
+    expect(result.deferred).toEqual([]);
+    expect(result.licensedGaps).toBe(7);
   });
 
   it("gap-analysis pre-synth floor: the synthesizer runs and the gaps are ordered", async () => {
@@ -1380,6 +1477,14 @@ describe("only workflow code sets 'agent-failed': a live checker cannot forge th
     })));
     expect(result.judged).toBe(true);
     expect(result.deferred).toEqual([expect.objectContaining({ index: 1, verdict: "defer", failedGates: ["no-ac-found"], missing: ["an acceptance criterion for the greeting"] })]);
+  });
+
+  it("gap-analysis: a live skeptic's own 'agent-failed' gate is dropped from the gap; its other gates are kept", async () => {
+    const found = { "docs-not-impl": [gapItem("export to CSV")] };
+    const { result } = await runWorkflow("gap-analysis.js", { scope: "mvp" }, gapStub(found, {
+      skeptic: () => ({ verdicts: [gapVerdict(1, { verdict: "defer", evidenceChecked: [], missing: ["the PRD section on exports"], failedGates: ["agent-failed", "prd-unreadable"] })] }),
+    }));
+    expect(result.deferred).toEqual([expect.objectContaining({ id: "docs-not-impl#1", verdict: "defer", failedGates: ["prd-unreadable"], missing: ["the PRD section on exports"] })]);
   });
 
   it("loop-iteration: a live verifier's own 'agent-failed' gate is dropped from the outcome and its record; its other gates are kept", async () => {
@@ -1721,5 +1826,237 @@ describe("e2e-design: a separate judge types each case; only licensed cases are 
     const { result, calls } = await runWorkflow("e2e-design.js", { flow: "greeting" }, () => ({ cases: [] }));
     expect(calls.filter(JUDGE)).toEqual([]);
     expect(result).toEqual({ flow: "greeting", judged: false, count: 0, cases: [], covered: [], revised: [], deferred: [], rejected: [], failedCategories: [], verdictCounts: NO_COUNTS });
+  });
+});
+
+// gap-analysis's finders make a claim per gap ("this gap exists, backed by these references"). One
+// separate skeptic per non-empty dimension types each of its gaps, and the evidence gate settles each
+// under the stricter of the skeptic's and the dimension's claim type: only accept/qualify gaps reach the
+// synthesizer. The verdicts are advisory: no traceRecords, and no durable state changes on them.
+describe("gap-analysis: a separate skeptic per non-empty dimension; synthesis over licensed gaps only", () => {
+  it("one opus skeptic per non-empty dimension (gap-verify:<key>-<i>, phase Verify) gets that dimension's numbered gaps, its critical questions and the absence-evidence rule; an empty dimension gets none", async () => {
+    const found = {
+      "docs-not-impl": [gapItem("export to CSV", "docs/prd.md:40"), gapItem("dark mode", "docs/prd.md:52")],
+      "impl-not-e2e": [gapItem("greeting reset flow", "src/app/page.tsx:30")],
+    };
+    const { calls } = await runWorkflow("gap-analysis.js", { scope: "mvp" }, gapStub(found));
+    expect(calls.filter(SKEPTIC).map((c) => [c.label, c.opts.phase, c.opts.model])).toEqual([
+      ["gap-verify:docs-not-impl-0", "Verify", "opus"],
+      ["gap-verify:impl-not-e2e-3", "Verify", "opus"],
+    ]);
+    const docs = calls.find((c) => c.label === "gap-verify:docs-not-impl-0").prompt;
+    const e2e = calls.find((c) => c.label === "gap-verify:impl-not-e2e-3").prompt;
+    expect(docs).toContain('{"index":1,"item":"export to CSV","detail":"docs/prd.md:40","priority":"high"}');
+    expect(docs).toContain('{"index":2,"item":"dark mode","detail":"docs/prd.md:52","priority":"high"}');
+    expect(docs).not.toContain("greeting reset flow");
+    expect(docs).toContain("Which search for an implementation did you run, and what did it return?");
+    expect(e2e).toContain("Which e2e spec already asserts it?");
+    expect(e2e).not.toContain("Which search for an implementation did you run");
+    for (const p of [docs, e2e]) expect(p).toContain("its empty result as command evidence");
+  });
+
+  it("only licensed gaps reach the synthesizer, with their ids and qualifiers: a rejected, revised or deferred gap never appears in its prompt; every gap is typed in byDimension, and no record is drafted", async () => {
+    const found = {
+      "docs-not-impl": [gapItem("export to CSV"), gapItem("dark mode"), gapItem("offline sync")],
+      "impl-not-e2e": [gapItem("greeting reset flow"), gapItem("profile page")],
+    };
+    const skeptic = (key) =>
+      key === "docs-not-impl"
+        ? {
+            verdicts: [
+              gapVerdict(1),
+              gapVerdict(2, { verdict: "reject", evidenceChecked: [{ kind: "command", ref: "rg -n darkMode src/", result: "src/app/theme.ts:3" }], reason: "implemented in src/app/theme.ts:3" }),
+              gapVerdict(3, { verdict: "qualify", qualifier: "only the read path; writes already sync" }),
+            ],
+          }
+        : {
+            verdicts: [
+              gapVerdict(1, { verdict: "revise", repair: "the reset spec asserts no visible outcome" }),
+              gapVerdict(2, { verdict: "defer", evidenceChecked: [], missing: ["the route that renders the profile page"] }),
+            ],
+          };
+    const { result, calls } = await runWorkflow("gap-analysis.js", { scope: "mvp" }, gapStub(found, { skeptic }));
+    const synthPrompt = calls.find(SYNTH).prompt;
+    for (const licensed of ["export to CSV", "docs-not-impl#1", "offline sync", "docs-not-impl#3", "only the read path; writes already sync"]) expect(synthPrompt, licensed).toContain(licensed);
+    for (const unlicensed of ["dark mode", "greeting reset flow", "profile page", "impl-not-e2e"]) expect(synthPrompt, unlicensed).not.toContain(unlicensed);
+    expect(result.totalGaps).toBe(5);
+    expect(result.licensedGaps).toBe(2);
+    expect(result.byDimension["docs-not-impl"].map((g) => [g.id, g.item, g.verdict, g.qualifier])).toEqual([
+      ["docs-not-impl#1", "export to CSV", "accept", ""],
+      ["docs-not-impl#2", "dark mode", "reject", ""],
+      ["docs-not-impl#3", "offline sync", "qualify", "only the read path; writes already sync"],
+    ]);
+    expect(result.byDimension["impl-not-e2e"].map((g) => [g.id, g.verdict, g.repair, g.missing])).toEqual([
+      ["impl-not-e2e#1", "revise", "the reset spec asserts no visible outcome", []],
+      ["impl-not-e2e#2", "defer", "", ["the route that renders the profile page"]],
+    ]);
+    expect(result.byDimension["docs-not-impl"][0].evidenceChecked).toEqual([{ kind: "file_line", ref: "src/a.ts:1" }]);
+    expect(result.rejected.map((g) => [g.dimension, g.item, g.reason])).toEqual([["docs-not-impl", "dark mode", "implemented in src/app/theme.ts:3"]]);
+    expect(result.deferred.map((g) => [g.dimension, g.item, g.missing])).toEqual([["impl-not-e2e", "profile page", ["the route that renders the profile page"]]]);
+    expect(result.verdictCounts).toEqual({ accept: 1, qualify: 1, revise: 1, defer: 1, reject: 1 });
+    expect(result.recommendedOrder).toEqual([{ next: "x", why: "y" }]);
+    expect(result.missing).toEqual([]);
+    expect(result.traceRecords).toBeUndefined(); // advisory: nothing to write
+  });
+
+  it("an accept citing only 'reading' is deferred by the factual evidence gate and never synthesized", async () => {
+    const found = { "docs-not-impl": [gapItem("export to CSV"), gapItem("dark mode")] };
+    const { result, calls } = await runWorkflow("gap-analysis.js", { scope: "mvp" }, gapStub(found, {
+      skeptic: () => ({ verdicts: [gapVerdict(1), gapVerdict(2, { evidenceChecked: [{ kind: "reading", ref: "src/app/page.tsx" }] })] }),
+    }));
+    expect(calls.find(SYNTH).prompt).not.toContain("dark mode");
+    expect(result.licensedGaps).toBe(1);
+    expect(result.deferred).toEqual([
+      expect.objectContaining({
+        id: "docs-not-impl#2",
+        verdict: "defer",
+        preGateVerdict: "accept",
+        failedGates: ["evidence-gate:factual:accept-needs-file_line|command|browser|measurement|diff"],
+        missing: ["a file:line, diff, command output, or browser observation that reproduces it"],
+      }),
+    ]);
+  });
+
+  it("ux-design gaps are predictive: an accept on file_line evidence is licensed only at qualify (a prediction, not observed), also when re-typed factual; re-typed factual on reading alone, the stricter gate defers it", async () => {
+    const found = { "ux-design": [gapItem("the error text is easy to miss"), gapItem("the submit button reads as disabled"), gapItem("the page title is generic")] };
+    const { result, calls } = await runWorkflow("gap-analysis.js", { scope: "mvp" }, gapStub(found, {
+      skeptic: () => ({
+        verdicts: [
+          gapVerdict(1, { claimType: "predictive" }),
+          gapVerdict(2, { claimType: "factual", evidenceChecked: [{ kind: "reading", ref: "src/components/GreetingForm.tsx" }] }),
+          gapVerdict(3, { claimType: "factual" }), // re-typing cannot lift the predictive cap
+        ],
+      }),
+    }));
+    expect(result.byDimension["ux-design"].map((g) => [g.id, g.verdict, g.claimType, g.qualifier])).toEqual([
+      ["ux-design#1", "qualify", "predictive", "a prediction about users — not yet observed in the browser or by a human"],
+      ["ux-design#2", "defer", "factual", ""],
+      ["ux-design#3", "qualify", "predictive", "a prediction about users — not yet observed in the browser or by a human"],
+    ]);
+    expect(result.byDimension["ux-design"].map((g) => g.retypedFrom)).toEqual([undefined, "predictive", "predictive"]);
+    expect(calls.find(SYNTH).prompt).toContain("a prediction about users — not yet observed in the browser or by a human");
+    expect(calls.find(SYNTH).prompt).not.toContain("the submit button reads as disabled");
+  });
+
+  it("no gap in any dimension: no skeptic and no synthesizer start, and the order is empty (nothing found, nothing to order); every key is present", async () => {
+    const { result, calls } = await runWorkflow("gap-analysis.js", { scope: "mvp" }, gapStub({}));
+    expect(calls.map((c) => c.label)).toEqual(GAP_KEYS.map((k, i) => `gap:${k}-${i}`));
+    expect(result).toEqual({
+      scope: "mvp", totalGaps: 0, licensedGaps: 0, byDimension: Object.fromEntries(GAP_KEYS.map((k) => [k, []])), deferred: [], rejected: [],
+      failedDimensions: [], recommendedOrder: [], missing: [], verdictCounts: NO_COUNTS,
+    });
+  });
+
+  it("zero licensed gaps: no synthesize call. With a deferred or revised gap left, the order is null and its missing names them; with every gap refuted, the order is empty", async () => {
+    const found = { "docs-not-impl": [gapItem("export to CSV"), gapItem("dark mode")] };
+    const unsettled = await runWorkflow("gap-analysis.js", { scope: "mvp" }, gapStub(found, {
+      skeptic: () => ({ verdicts: [gapVerdict(1, { verdict: "defer", evidenceChecked: [], missing: ["the PRD section on exports"] }), gapVerdict(2, { verdict: "revise", repair: "dark mode exists but has no toggle" })] }),
+    }));
+    expect(unsettled.calls.filter(SYNTH)).toEqual([]);
+    expect(unsettled.result.licensedGaps).toBe(0);
+    expect(unsettled.result.recommendedOrder).toBeNull();
+    expect(unsettled.result.missing).toEqual([expect.stringMatching(/^a synthesized order — none was synthesized: no gap is licensed \(accept\/qualify\)/)]);
+    expect(unsettled.result.missing[0]).toContain("1 deferred");
+    expect(unsettled.result.missing[0]).toContain("1 revised");
+    const refuted = await runWorkflow("gap-analysis.js", { scope: "mvp" }, gapStub(found, {
+      skeptic: () => ({ verdicts: [1, 2].map((i) => gapVerdict(i, { verdict: "reject", reason: "already implemented" })) }),
+    }));
+    expect(refuted.calls.filter(SYNTH)).toEqual([]);
+    expect(refuted.result.rejected.map((g) => g.id)).toEqual(["docs-not-impl#1", "docs-not-impl#2"]);
+    expect(refuted.result.recommendedOrder).toEqual([]);
+    expect(refuted.result.missing).toEqual([]);
+  });
+
+  it("a skeptic that returns nothing or throws (also synchronously) defers every gap of its dimension (verdict-missing + agent-failed), never drops them; the other dimensions are unaffected and it is no error", async () => {
+    const found = { "docs-not-impl": [gapItem("export to CSV"), gapItem("dark mode")], "impl-not-unit": [gapItem("greeting formatter")] };
+    const cases = [
+      ["returns nothing", gapStub(found, { skeptic: (key) => (key === "docs-not-impl" ? null : { verdicts: [gapVerdict(1)] }) }), null],
+      ["throws", throwing("gap-verify:docs-not-impl", gapStub(found)), "agent failed: gap-verify:docs-not-impl-0: agent died: gap-verify:docs-not-impl-0"],
+      ["throws synchronously", throwingSync("gap-verify:docs-not-impl", gapStub(found)), "agent failed: gap-verify:docs-not-impl-0: agent died synchronously: gap-verify:docs-not-impl-0"],
+    ];
+    for (const [how, reply, failLog] of cases) {
+      const { result, calls, logs } = await runWorkflow("gap-analysis.js", { scope: "mvp" }, reply);
+      // A throw is caught by the file's agentFailed helper (logged), never left to crash the run or drop the dimension.
+      expect(logs.map((l) => l.text).filter((t) => t.startsWith("agent failed:")), how).toEqual(failLog ? [failLog] : []);
+      expect(calls.filter(SKEPTIC).map((c) => c.label), how).toEqual(["gap-verify:docs-not-impl-0", "gap-verify:impl-not-unit-2"]);
+      expect(result.error, how).toBeUndefined();
+      expect(result.failedDimensions, how).toEqual([]); // its finder ran: a dead skeptic is not a failed dimension
+      expect(result.byDimension["docs-not-impl"].map((g) => [g.id, g.verdict, g.failedGates, g.missing]), how).toEqual([
+        ["docs-not-impl#1", "defer", ["verdict-missing", "agent-failed"], [NO_VERDICT]],
+        ["docs-not-impl#2", "defer", ["verdict-missing", "agent-failed"], [NO_VERDICT]],
+      ]);
+      expect(result.deferred.map((g) => g.id), how).toEqual(["docs-not-impl#1", "docs-not-impl#2"]);
+      expect(result.licensedGaps, how).toBe(1);
+      expect(calls.find(SYNTH).prompt, how).toContain("greeting formatter");
+      expect(calls.find(SYNTH).prompt, how).not.toContain("export to CSV");
+    }
+  });
+
+  it("a live skeptic that skips a gap's index defers that gap with verdict-missing only (the skeptic did not fail); a verdict for no listed gap is ignored", async () => {
+    const found = { "docs-not-impl": [gapItem("export to CSV"), gapItem("dark mode")] };
+    const { result, logs } = await runWorkflow("gap-analysis.js", { scope: "mvp" }, gapStub(found, { skeptic: () => ({ verdicts: [gapVerdict(1), gapVerdict(3), gapVerdict(0)] }) }));
+    expect(result.byDimension["docs-not-impl"].map((g) => [g.id, g.verdict, g.preGateVerdict, g.failedGates, g.missing])).toEqual([
+      ["docs-not-impl#1", "accept", "accept", [], []],
+      ["docs-not-impl#2", "defer", null, ["verdict-missing"], [NO_VERDICT]],
+    ]);
+    expect(logs.map((l) => l.text)).toContain("ignored 2 docs-not-impl skeptic verdict(s) for no listed gap");
+  });
+
+  it("repeated verdicts for one gap that disagree defer it (verdict-conflict) instead of letting one win; agreeing repeats settle as one", async () => {
+    const found = { "docs-not-impl": [gapItem("export to CSV"), gapItem("dark mode")] };
+    const { result } = await runWorkflow("gap-analysis.js", { scope: "mvp" }, gapStub(found, {
+      skeptic: () => ({ verdicts: [gapVerdict(1), gapVerdict(1, { verdict: "reject", reason: "found it" }), gapVerdict(2), gapVerdict(2)] }),
+    }));
+    expect(result.byDimension["docs-not-impl"].map((g) => [g.id, g.verdict, g.failedGates])).toEqual([
+      ["docs-not-impl#1", "defer", ["verdict-conflict"]],
+      ["docs-not-impl#2", "accept", []],
+    ]);
+    expect(result.deferred[0].missing).toEqual([expect.stringContaining("docs-not-impl#1")]);
+  });
+
+  it("completeness: off (default, false, or a non-boolean) makes 7 'gap:' calls; true adds a catch-all 'other' finder (8) whose anti-scope is the 7 dimensions, facing the same skeptic and gate", async () => {
+    const finders = (calls) => calls.filter((c) => c.label.startsWith("gap:")).map((c) => c.label);
+    for (const args of [{ scope: "mvp" }, { scope: "mvp", completeness: false }, { scope: "mvp", completeness: "true" }]) {
+      const { result, calls } = await runWorkflow("gap-analysis.js", args, gapStub({ other: [gapItem("never asked for")] }));
+      expect(finders(calls), JSON.stringify(args)).toEqual(GAP_KEYS.map((k, i) => `gap:${k}-${i}`));
+      expect(Object.keys(result.byDimension), JSON.stringify(args)).toEqual(GAP_KEYS);
+    }
+    const found = { other: [gapItem("the README's dev port disagrees with package.json", "README.md:12"), gapItem("an unspecified mismatch", "somewhere in the docs")] };
+    const skeptic = () => ({
+      verdicts: [
+        gapVerdict(1, { evidenceChecked: [{ kind: "command", ref: "rg -n 'localhost:30' README.md package.json", result: "README.md:12 says 3001" }] }),
+        gapVerdict(2, { evidenceChecked: [{ kind: "reading", ref: "docs/prd.md" }] }),
+      ],
+    });
+    const { result, calls } = await runWorkflow("gap-analysis.js", { scope: "mvp", completeness: true }, gapStub(found, { skeptic }));
+    expect(finders(calls)).toEqual([...GAP_KEYS, "other"].map((k, i) => `gap:${k}-${i}`));
+    const otherFinder = calls.find((c) => c.label === "gap:other-7").prompt;
+    for (const k of GAP_KEYS) expect(otherFinder, k).toContain(`- ${k}: `);
+    expect(calls.filter(SKEPTIC).map((c) => c.label)).toEqual(["gap-verify:other-7"]);
+    expect(calls.find(SKEPTIC).prompt).toContain("Which dimension above already covers it?");
+    expect(result.byDimension.other.map((g) => [g.id, g.verdict])).toEqual([["other#1", "accept"], ["other#2", "defer"]]);
+    // An 'other' gap without file_line or command evidence (here: reading only) is deferred, never synthesized.
+    expect(result.deferred).toEqual([
+      expect.objectContaining({ id: "other#2", dimension: "other", preGateVerdict: "accept", failedGates: ["evidence-gate:factual:accept-needs-file_line|command|browser|measurement|diff"] }),
+    ]);
+    expect(calls.find(SYNTH).prompt).toContain("the README's dev port disagrees with package.json");
+    expect(calls.find(SYNTH).prompt).not.toContain("an unspecified mismatch");
+    // Every other path counts the catch-all too: all 8 finders dead, or the start floor, names all 8.
+    for (const reply of deadReplies("gap:")) {
+      const dead = await runWorkflow("gap-analysis.js", { scope: "mvp", completeness: true }, reply);
+      expect(dead.result.error).toBe("all 8 dimensions failed (infra) — no gaps were analysed; re-run");
+      expect(dead.result.failedDimensions).toEqual([...GAP_KEYS, "other"]);
+    }
+    const stopped = await runWorkflow("gap-analysis.js", { scope: "mvp", completeness: true }, noAgent, LOW);
+    expect(stopped.result.failedDimensions).toEqual([...GAP_KEYS, "other"]);
+  });
+
+  it("the start-floor stop keeps every key of a normal run, empty", async () => {
+    const { result, calls } = await runWorkflow("gap-analysis.js", { scope: "mvp" }, noAgent, LOW);
+    expect(calls).toEqual([]);
+    expect(result).toEqual({
+      scope: "mvp", error: expect.stringContaining("token budget floor reached (5k left < 40k)"), budgetStopped: true, totalGaps: 0, licensedGaps: 0, byDimension: {},
+      deferred: [], rejected: [], failedDimensions: GAP_KEYS, recommendedOrder: null, missing: ["a synthesized order — skipped: no dimension was analysed (token budget floor)"], verdictCounts: NO_COUNTS,
+    });
   });
 });
