@@ -37,12 +37,20 @@ async function runWorkflow(file, args, reply, budget = UNLIMITED) {
   const logs = [];
   const log = (m) => logs.push({ text: String(m), calls: calls.length });
   const parallel = (thunks) => Promise.all(thunks.map((t) => Promise.resolve().then(t).catch(() => null)));
+  // Mirrors the engine's pipeline() (Claude Code 2.1.314), which runs each item in its own slot as
+  //   let ze = await settle(item); for (const st of stages) { if (ze.v === null) break; ze = await settle(st(ze.v, item, index)) }
+  // and settles the slots with Promise.allSettled. So a stage that RESOLVES to null skips the item's
+  // remaining stages and its slot is null, and a stage that throws (synchronously or by rejecting)
+  // leaves a null slot too. Only null stops a slot: an undefined result still runs the next stage.
   const pipeline = (items, ...stages) =>
     Promise.all(
       items.map(async (item, i) => {
         try {
-          let r = item;
-          for (const stage of stages) r = await stage(r, item, i);
+          let r = await item;
+          for (const stage of stages) {
+            if (r === null) break;
+            r = await stage(r, item, i);
+          }
           return r;
         } catch {
           return null;
@@ -1683,6 +1691,158 @@ describe("pipeline labels carry the map index (a first stage takes it as its thi
     expect(calls.filter((c) => c.label.startsWith("verify:")).map((c) => c.label)).toEqual(["verify:LP-050-0", "verify:LP-051-1"]);
     const { logs } = await runWorkflow("loop-iteration.js", { items, level: "L2", headSha: HEAD_SHA }, throwing("impl:LP-051", reply));
     expect(logs.map((l) => l.text)).toContain("agent failed: impl:LP-051-1: agent died: impl:LP-051-1");
+  });
+});
+
+// The engine's pipeline() ends an item at the first stage that RESOLVES to null: its later stages never
+// run and its slot is null (runWorkflow's stub mirrors it). So loop-iteration and scan-docs wrap their
+// first stage's result, and a dead first-stage agent still reaches stage 2, which records it. A slot that
+// is still null (a stage threw past its .catch) is filled after the pipeline with the same 'agent-failed'
+// defer: every item yields exactly one outcome and one record draft, in item order, and the all-failed
+// error fires when every item died. gap-analysis reads a null slot as a failed dimension.
+describe("pipeline fidelity: a dead first-stage agent never vanishes (the stub mirrors the engine)", () => {
+  const diff = "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-a\n+b\n";
+  const loopItems = [{ id: "LP-060", description: "x" }, { id: "LP-061", description: "y" }, { id: "LP-062", description: "z" }];
+  const loopLive = (label) =>
+    label.startsWith("impl:") ? { baseSha: HEAD_SHA, changedFiles: ["src/a.ts"], diff, checksPassed: true, notes: "" } : verdict({ evidenceChecked: [{ kind: "diff", ref: "src/a.ts" }] });
+  const loop = (reply) => runWorkflow("loop-iteration.js", { items: loopItems, level: "L2", headSha: HEAD_SHA }, reply);
+  const loopRecords = (result) => result.traceRecords.map((r) => [r.writer_id, r.claim_id, r.final_status, r.failed_gates, r.missing]);
+  const DEAD_IMPL = "a diff from the implementer (the implementer agent failed — re-dispatch)";
+  const LOST_ITEM = "a diff from the implementer (the item's pipeline stage threw — re-dispatch)";
+  // LP-061's agent-failed defer, between two applied items: one outcome and one record per item.
+  const deadMiddle = (missing) => ({
+    applied: ["LP-060", "LP-062"],
+    deferred: [expect.objectContaining({ id: "LP-061", applied: false, status: "deferred", verdict: "defer", diff: "", failedGates: ["agent-failed"], missing: [missing] })],
+    records: [
+      ["loop-iteration/verify:LP-060-0", "loop:lp-060", "accept", [], []],
+      ["loop-iteration/verify:LP-061-1", "loop:lp-061", "defer", ["agent-failed"], [missing]],
+      ["loop-iteration/verify:LP-062-2", "loop:lp-062", "accept", [], []],
+    ],
+  });
+
+  it("loop-iteration: an implementer that returns nothing or throws, among live ones, gives its item exactly one 'agent-failed' defer and one writable record, in item order", async () => {
+    for (const [how, reply] of [
+      ["returns nothing", (label) => (label.startsWith("impl:LP-061") ? null : loopLive(label))],
+      ["throws", throwing("impl:LP-061", loopLive)],
+    ]) {
+      const { result, calls } = await loop(reply);
+      const want = deadMiddle(DEAD_IMPL);
+      expect(result.error, how).toBeUndefined();
+      expect(calls.filter((c) => c.label.startsWith("verify:")).map((c) => c.label), how).toEqual(["verify:LP-060-0", "verify:LP-062-2"]);
+      expect(result.applied.map((o) => o.id), how).toEqual(want.applied);
+      expect(result.deferred, how).toEqual(want.deferred);
+      expect(loopRecords(result), how).toEqual(want.records);
+      expectWritable(result.traceRecords);
+    }
+  });
+
+  it("loop-iteration: an implementer or verifier whose agent() throws synchronously (before its .catch attaches) leaves a null slot, filled after the pipeline as the same 'agent-failed' defer — never dropped, never applied", async () => {
+    for (const prefix of ["impl:LP-061", "verify:LP-061"]) {
+      const { result, logs } = await loop(throwingSync(prefix, loopLive));
+      const want = deadMiddle(LOST_ITEM);
+      expect(logs.some((l) => l.text.startsWith(`agent failed: ${prefix}`)), prefix).toBe(false); // the .catch never ran: the slot itself is null
+      expect(logs.map((l) => l.text), prefix).toContain("WARNING: pipeline slot 1 (LP-061) came back null: a stage threw, so no report survived — deferred as agent-failed (re-dispatch)");
+      expect(result.error, prefix).toBeUndefined();
+      expect(result.applied.map((o) => o.id), prefix).toEqual(want.applied);
+      expect(result.deferred, prefix).toEqual(want.deferred);
+      expect(loopRecords(result), prefix).toEqual(want.records);
+      expectWritable(result.traceRecords);
+    }
+  });
+
+  it("loop-iteration: every implementer dead (nothing, a throw, or a synchronous throw) is the whole-phase error with no records and no verifier call", async () => {
+    for (const reply of [...deadReplies("impl:"), throwingSync("impl:", loopLive)]) {
+      const { result, calls } = await loop(reply);
+      expect(result).toEqual({ error: "all 3 implementer(s) failed (infra) — nothing was implemented or verified; re-dispatch", level: "L2", applied: [], deferred: [], held: [], rejected: [], escalate: [], traceRecords: [] });
+      expect(calls.map((c) => c.label)).toEqual(["impl:LP-060-0", "impl:LP-061-1", "impl:LP-062-2"]);
+    }
+  });
+
+  const stories = [
+    { id: "US-010", title: "Greeting", source: "docs/prd.md" },
+    { id: "US-011", title: "Farewell", source: "docs/prd.md" },
+    { id: "US-012", title: "Reset", source: "docs/prd.md" },
+  ];
+  const scanLive = (label) =>
+    label.startsWith("evidence:")
+      ? { implementationFiles: ["src/lib/greeting.ts"], unitTests: "Present", e2eTests: "Present", proposedStatus: "E2E tested", notes: "" }
+      : { finalStatus: "E2E tested", justification: "a spec covers it", missing: [], evidenceChecked: [{ kind: "file_line", ref: "e2e/greeting.spec.ts:1" }] };
+  const scan = (reply) => runWorkflow("scan-docs.js", { stories }, reply);
+  const NO_EVIDENCE = "an evidence report for this story (the evidence agent returned nothing)";
+  const LOST_STORY = "an evidence report for this story (the story's pipeline stage threw)";
+  // US-011 keeps its status (finalStatus null) as an agent-failed defer, between two accepted stories.
+  const unscannedMiddle = (missing) => ({
+    records: [
+      ["US-010", "accept", "E2E tested", []],
+      ["US-011", "defer", null, ["no-evidence-report", "agent-failed"]],
+      ["US-012", "accept", "E2E tested", []],
+    ],
+    traceRecords: [
+      ["scan-docs/verify:US-010-0", "story:us-010:status", "accept", [], []],
+      ["scan-docs/verify:US-011-1", "story:us-011:status", "defer", ["no-evidence-report", "agent-failed"], [missing]],
+      ["scan-docs/verify:US-012-2", "story:us-012:status", "accept", [], []],
+    ],
+  });
+  const scanRecords = (result) => result.records.map((r) => [r.id, r.verdict, r.finalStatus, r.failedGates]);
+  const scanTraceRecords = (result) => result.traceRecords.map((r) => [r.writer_id, r.claim_id, r.final_status, r.failed_gates, r.missing]);
+
+  it("scan-docs: an evidence agent that returns nothing or throws, among live ones, gives its story exactly one 'agent-failed' defer record with its status unchanged, in story order", async () => {
+    for (const [how, reply] of [
+      ["returns nothing", (label) => (label.startsWith("evidence:US-011") ? null : scanLive(label))],
+      ["throws", throwing("evidence:US-011", scanLive)],
+    ]) {
+      const { result, calls } = await scan(reply);
+      const want = unscannedMiddle(NO_EVIDENCE);
+      expect(result.error, how).toBeUndefined();
+      expect(calls.filter((c) => c.label.startsWith("verify:")).map((c) => c.label), how).toEqual(["verify:US-010-0", "verify:US-012-2"]);
+      expect(result.count, how).toBe(3);
+      expect(scanRecords(result), how).toEqual(want.records);
+      expect(scanTraceRecords(result), how).toEqual(want.traceRecords);
+      expectWritable(result.traceRecords);
+    }
+  });
+
+  it("scan-docs: an evidence agent or status verifier whose agent() throws synchronously leaves a null slot, filled after the pipeline as the same 'agent-failed' defer with the status unchanged", async () => {
+    for (const prefix of ["evidence:US-011", "verify:US-011"]) {
+      const { result, logs } = await scan(throwingSync(prefix, scanLive));
+      const want = unscannedMiddle(LOST_STORY);
+      expect(logs.some((l) => l.text.startsWith(`agent failed: ${prefix}`)), prefix).toBe(false); // the .catch never ran: the slot itself is null
+      expect(logs.map((l) => l.text), prefix).toContain("WARNING: pipeline slot 1 (US-011) came back null: a stage threw, so no report survived — deferred as agent-failed (status unchanged)");
+      expect(result.error, prefix).toBeUndefined();
+      expect(result.count, prefix).toBe(3);
+      expect(scanRecords(result), prefix).toEqual(want.records);
+      expect(scanTraceRecords(result), prefix).toEqual(want.traceRecords);
+      expectWritable(result.traceRecords);
+    }
+  });
+
+  it("scan-docs: every evidence agent dead (nothing, a throw, or a synchronous throw) is the whole-phase error: no records, every status unchanged, no verifier call", async () => {
+    for (const reply of [...deadReplies("evidence:"), throwingSync("evidence:", scanLive)]) {
+      const { result, calls } = await scan(reply);
+      expect(result.error).toBe("all 3 evidence agent(s) failed (infra) — no story was scanned; re-run");
+      expect(result.traceRecords).toEqual([]);
+      expect(result.records.map((r) => [r.id, r.finalStatus])).toEqual([["US-010", null], ["US-011", null], ["US-012", null]]);
+      expect(calls.map((c) => c.label)).toEqual(["evidence:US-010-0", "evidence:US-011-1", "evidence:US-012-2"]);
+    }
+  });
+
+  it("gap-analysis: a dead finder (nothing, a throw, or a synchronous throw) never reaches a skeptic: its key is in failedDimensions, it has no 'gap-verify:' call, and the live dimensions are verified", async () => {
+    const found = Object.fromEntries(GAP_KEYS.map((k) => [k, [gapItem(`a ${k} gap`)]]));
+    const live = gapStub(found);
+    for (const [how, reply] of [
+      ["returns nothing", (label, prompt) => (label.startsWith("gap:impl-not-unit") ? null : live(label, prompt))],
+      ["throws", throwing("gap:impl-not-unit", live)],
+      ["throws synchronously", throwingSync("gap:impl-not-unit", live)],
+    ]) {
+      const { result, calls } = await runWorkflow("gap-analysis.js", { scope: "mvp" }, reply);
+      const liveKeys = GAP_KEYS.filter((k) => k !== "impl-not-unit");
+      expect(result.error, how).toBeUndefined();
+      expect(result.failedDimensions, how).toEqual(["impl-not-unit"]);
+      expect(calls.filter(SKEPTIC).map((c) => c.label), how).toEqual(liveKeys.map((k) => `gap-verify:${k}-${GAP_KEYS.indexOf(k)}`));
+      expect(Object.keys(result.byDimension), how).toEqual(liveKeys);
+      expect(result.totalGaps, how).toBe(6);
+      expect(result.licensedGaps, how).toBe(6);
+    }
   });
 });
 

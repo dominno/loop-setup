@@ -188,42 +188,51 @@ function conservativeStatus(proposed) {
 }
 
 // An agent() that throws (token budget spent, harness error) is a FAILED agent: log it and
-// hand the next stage the same null a dead agent returns, so that stage's fail-safe null path
-// runs. Uncaught, pipeline() drops the item to null and the story vanishes with no record.
+// resolve to the same null a dead agent returns, so the call site's fail-safe null path runs.
+// Uncaught, the stage rejects and the engine leaves the story's pipeline slot null.
 const agentFailed = (label) => (e) => {
   log(`agent failed: ${label}: ${String((e && e.message) || e).slice(0, 200)}`)
   return null
 }
 
 phase('Evidence')
-let evidenceFailed = 0 // stories whose evidence agent threw or returned nothing
+let evidenceFailed = 0 // stories with no evidence report: their evidence agent died, or no report survived
+// The one record of a story with no evidence report, counted here once toward the all-failed
+// error: its evidence agent threw or returned nothing (stage 2 gets no report), or a stage threw
+// past its .catch and the engine left the story's slot null (filled after the pipeline). Nothing
+// was adjudicated, so it keeps its current status (finalStatus null): an infra failure,
+// 'agent-failed' (re-run). `cause` names which in missing and justification.
+const deadStory = (story, cause) => {
+  evidenceFailed += 1
+  return {
+    id: story.id, title: story.title, source: story.source,
+    implementationFiles: [], unitTests: 'Missing', e2eTests: 'Missing',
+    finalStatus: null, justification: `${cause} — not adjudicated; keep the current status`,
+    notes: '', proposedStatus: null, verdict: 'defer',
+    missing: [`an evidence report for this story (the ${cause})`],
+    repair: '', qualifier: '', failedGates: ['no-evidence-report', 'agent-failed'], evidenceChecked: [],
+  }
+}
 // Pipeline: each story flows through evidence → verify independently (no barrier). Every stage
 // gets (prevResult, story, index), the first included (its prevResult is the story itself), so
-// the map index its labels carry is the third parameter.
+// the map index its labels carry is the third parameter. The engine ends a story at the first
+// stage that RESOLVES to null (its later stages never run and its slot is null), so the evidence
+// agent's result is wrapped as { evidence }: a dead evidence agent still reaches stage 2, which
+// records it.
 const records = await pipeline(
   stories,
   (story, _story, i) =>
     agent(
       `Gather IMPLEMENTATION and TEST evidence for this user story by searching the codebase and tests (do not write any files):\n${JSON.stringify(story)}\n\nReport which files implement it, whether unit and E2E tests cover it, and the most defensible status. "Not started" is correct when no implementation is found.\n\n${AGENT_SAFETY}`,
       { label: `evidence:${story.id || 'story'}-${i}`, phase: 'Evidence', schema: EVIDENCE_SCHEMA, model: FANOUT_MODEL },
-    ).catch(agentFailed(`evidence:${story.id || 'story'}-${i}`)),
-  (evidence, story, i) => {
-    // Guard the first-stage result like every sibling workflow does — a null/failed
-    // evidence agent must not throw and abort the pipeline. With no maker report there is
-    // nothing to verify: defer (status unchanged) instead of letting the checker "accept"
-    // an empty report as "Not started". A dead agent is an infra failure ('agent-failed').
+    ).catch(agentFailed(`evidence:${story.id || 'story'}-${i}`)).then((evidence) => ({ evidence })),
+  ({ evidence }, story, i) => {
+    // A dead evidence agent (threw, or returned nothing) arrives here as { evidence: null }. With
+    // no maker report there is nothing to verify: defer (status unchanged) instead of letting the
+    // checker "accept" an empty report as "Not started". A dead agent is an infra failure
+    // ('agent-failed').
     const ev = evidence || {}
-    if (!evidence) {
-      evidenceFailed += 1
-      return {
-        id: story.id, title: story.title, source: story.source,
-        implementationFiles: [], unitTests: 'Missing', e2eTests: 'Missing',
-        finalStatus: null, justification: 'evidence agent returned nothing — not adjudicated; keep the current status',
-        notes: '', proposedStatus: null, verdict: 'defer',
-        missing: ['an evidence report for this story (the evidence agent returned nothing)'],
-        repair: '', qualifier: '', failedGates: ['no-evidence-report', 'agent-failed'], evidenceChecked: [],
-      }
-    }
+    if (!evidence) return deadStory(story, 'evidence agent returned nothing')
     return agent(
       `You are a strict status verifier for story ${story.id} (${story.title}). Confirm a status that is justified by REPO evidence only (code + tests). From repo evidence you can confirm at most "E2E tested"; "Browser verified" and "Done" require a separate browser pass and are OUT of scope here — never assign them. Downgrade if the proposed status overclaims. In evidenceChecked cite what YOU opened or ran (kind "file_line" for an implementation/test file you read, "command" for a command you ran) — the evidence agent's file list is a claim, not evidence you checked.\n\n${AGENT_SAFETY}\n\nProposed: ${JSON.stringify(ev)}`,
       { label: `verify:${story.id || 'story'}-${i}`, phase: 'Verify', schema: VERDICT_SCHEMA, model: JUDGE_MODEL },
@@ -264,10 +273,18 @@ const records = await pipeline(
   },
 )
 
-const settled = records.filter(Boolean)
+// A slot that is still null lost its story: a stage threw past its .catch (an agent() that threw
+// before its .catch attached, or the stage's own code), and the engine keeps no partial result.
+// It takes the dead-story record, so every story yields one status record and one record draft.
+const settled = records.map((r, i) => {
+  if (r) return r
+  log(`WARNING: pipeline slot ${i} (${stories[i].id || 'story'}) came back null: a stage threw, so no report survived — deferred as agent-failed (status unchanged)`)
+  return deadStory(stories[i], "story's pipeline stage threw")
+})
 // Every evidence agent failed: nothing was gathered, so the scan is an error. An outage is
 // not N story verdicts: it writes no records, and every story keeps its current status
-// (finalStatus null). One dead agent among live ones stays a per-story defer record.
+// (finalStatus null). One dead agent among live ones stays a per-story defer record. Judged by
+// the stories deadStory counted (a dead evidence agent, or a slot no report survived).
 if (evidenceFailed === stories.length) {
   const error = `all ${stories.length} evidence agent(s) failed (infra) — no story was scanned; re-run`
   log(`ERROR: ${error}`)

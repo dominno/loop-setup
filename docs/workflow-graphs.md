@@ -16,6 +16,11 @@ inherits the session model instead of being downgraded. All tiers are overridabl
 > stage; pipelines (`pipeline`) flow each item through independently. Dotted edges are
 > agent-failure paths: an agent that throws or returns nothing is caught and recorded (a
 > failed reviewer, an `agent-failed` defer, or a `noVerdict` bench run), never dropped.
+> The engine ends a pipeline item at the first stage that resolves to `null`: its later
+> stages never run and its slot is `null`, as it is when a stage throws. So `scan-docs` and
+> `loop-iteration` wrap their first agent's result (a dead agent still reaches stage 2,
+> which defers it as `agent-failed`) and fill a slot still `null` after the pipeline with
+> the same defer; `gap-analysis` reads a `null` slot as a failed dimension.
 
 **Agent SAFETY.** Every agent that `critic-panel`, `improve-skills`, `scan-docs`,
 `gap-analysis` and `e2e-design` start gets the same `<agent-safety>` block in its prompt
@@ -161,13 +166,15 @@ flowchart LR
   sf -- yes --> berr[▫️ error + budgetStopped:<br/>no story scanned, no records]
   sf -- no --> P
   subgraph P["pipeline — per story, independent"]
-    e[🟢 gather code+test evidence] --> nr{▫️ report returned?}
+    e[🟢 gather code+test evidence] -- "result wrapped: a dead agent still reaches stage 2" --> nr{▫️ report returned?}
     nr -- "no: the agent threw or returned nothing" --> d0[defer: status unchanged<br/>no-evidence-report + agent-failed]
     nr -- yes --> v[🔵 strict status verifier<br/>cites evidenceChecked + missing]
     v -.->|the verifier threw or returned nothing| d1[defer: status capped<br/>verdict-missing + agent-failed]
   end
   P --> map["▫️ proposed vs verified status →<br/>verdict, then evidence gate (factual)"]
-  map --> allf{"▫️ every evidence agent failed?"}
+  P -.->|a slot still null, a stage threw past its .catch| lost[▫️ filled after the pipeline: the same defer<br/>status unchanged · no-evidence-report + agent-failed]
+  map --> allf{"▫️ every evidence agent failed?<br/>a dead agent or a null slot, per story"}
+  lost --> allf
   allf -- no --> out([per-story status records + traceRecords])
   allf -- "yes (infra)" --> err[▫️ error: no records written,<br/>every status unchanged, re-run]
 ```
@@ -262,7 +269,7 @@ flowchart LR
   budget -- "under floor" --> esc0[▫️ escalate all]
   budget -- ok --> P
   subgraph P["pipeline — per item, independent"]
-    impl[⚪ implementer<br/>fresh worktree: deps installed, base reported<br/>real git diff, new files included] --> dl{▫️ denylist gate<br/>.claude / CLAUDE.md / scripts/trace / auth / secrets…<br/>on repo-relative changedFiles + diff paths<br/>or unparsable diff paths}
+    impl[⚪ implementer<br/>fresh worktree: deps installed, base reported<br/>real git diff, new files included] -- "result wrapped: a dead implementer still reaches the gates" --> dl{▫️ denylist gate<br/>.claude / CLAUDE.md / scripts/trace / auth / secrets…<br/>on repo-relative changedFiles + diff paths<br/>or unparsable diff paths}
     dl -- hit --> escd[escalated-denylist<br/>defer: human approval]
     dl -- clear --> bm{"▫️ base check:<br/>reported baseSha = headSha?"}
     bm -- "no (a live report)" --> dbm[deferred: base-mismatch<br/>unverified, re-dispatch from HEAD]
@@ -273,7 +280,9 @@ flowchart LR
     ver --> eg[▫️ evidence gate<br/>practical: accept/qualify need the diff]
     ver -.->|the verifier threw or returned nothing| vaf[deferred: verdict-missing + agent-failed<br/>set only by workflow code, never by the verifier]
   end
-  P --> allf{"▫️ every implementer failed?<br/>a dead agent, never an empty diff"}
+  P -.->|a slot still null, a stage threw past its .catch| lost[▫️ filled after the pipeline: the same<br/>deferred: agent-failed, re-dispatch]
+  P --> allf{"▫️ every implementer failed?<br/>a dead implementer or a null slot,<br/>never an empty diff"}
+  lost --> allf
   allf -- no --> out([applied + deferred + held L3-qualify + rejected + escalate<br/>+ traceRecords])
   allf -- "yes (infra)" --> erri[▫️ error: no records,<br/>caller resets the nodes to ready<br/>and counts one attempt per node]
   esc0 --> out
@@ -283,10 +292,13 @@ flowchart LR
 > worktree started from (`baseSha`), and a live report based on another commit is deferred
 > `base-mismatch` before verification: set `worktree.baseRef` to `"head"` so loop worktrees
 > branch from local HEAD. The stage gates run in a fixed order: denylist, base check, then
-> `agent-failed` / `no-diff`, then the verifier. The denylist gate reads `changedFiles`
-> repo-relative (a path inside `.claude/worktrees/<name>/` is no `.claude/` hit; a path that
-> begins `.claude/` still is), while the verifier gets the report exactly as returned. An
-> argument error starts no agent and counts no attempt; the infra `error` counts one per node.
+> `agent-failed` / `no-diff`, then the verifier. A dead implementer reaches them through its
+> wrapped result and is deferred `agent-failed` there; a slot that still comes back `null` (a
+> stage threw past its `.catch`) gets the same defer after the pipeline, and both count toward
+> the infra `error`. The denylist gate reads `changedFiles` repo-relative (a path inside
+> `.claude/worktrees/<name>/` is no `.claude/` hit; a path that begins `.claude/` still is),
+> while the verifier gets the report exactly as returned. An argument error starts no agent
+> and counts no attempt; the infra `error` counts one per node.
 > Like `agent-failed`, `base-mismatch` is set only by workflow code: both let the Lead
 > re-dispatch a node without new evidence, so the verifier stage drops either one from a
 > live verifier's own `failedGates`.

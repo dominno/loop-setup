@@ -268,26 +268,43 @@ const parseDiffPaths = (diff) => diffPathScan(diff).paths
 const repoRelative = (f) => String(f).replace(/^.*?\/\.claude\/worktrees\/[^/]+\//, '')
 
 // An agent() that throws (token budget spent, harness error) is a FAILED agent: log it and
-// hand the next stage the same null a dead agent returns, so that stage's fail-safe null path
-// runs. Uncaught, pipeline() drops the item to null and it vanishes with no record.
+// resolve to the same null a dead agent returns, so the call site's fail-safe null path runs.
+// Uncaught, the stage rejects and the engine leaves the item's pipeline slot null.
 const agentFailed = (label) => (e) => {
   log(`agent failed: ${label}: ${String((e && e.message) || e).slice(0, 200)}`)
   return null
 }
 
 phase('Implement')
-let implFailed = 0 // items whose implementer threw or returned nothing (never counts an empty diff)
+let implFailed = 0 // items that died: no report survived (never counts an empty diff)
+// The one outcome of an item that died, counted here once toward the all-failed error: its
+// implementer threw or returned nothing (stage 2 gets no report), or a stage threw past its
+// .catch and the engine left the item's slot null (filled after the pipeline). Either way no
+// report survived: an infra failure, 'agent-failed' (re-dispatch), distinct from a live
+// implementer's empty diff ('no-diff'). `cause` names which in missing and reason.
+const deadItem = (item, cause) => {
+  implFailed += 1
+  return {
+    id: item.id, baseSha: '', changedFiles: [], diff: '', checksPassed: false, notes: '',
+    applied: false, status: 'deferred', verdict: 'defer', preGateVerdict: null,
+    failedGates: ['agent-failed'], missing: [`a diff from the implementer (the ${cause} — re-dispatch)`],
+    repair: '', qualifier: '', evidenceChecked: [], counterReasons: [],
+    reason: `${cause} — nothing to verify or apply`,
+  }
+}
 // Pipeline: each item flows implement → verify independently. Every stage gets (prevResult, item,
 // index), the first included (its prevResult is the item itself), so the map index its labels
-// carry is the third parameter.
+// carry is the third parameter. The engine ends an item at the first stage that RESOLVES to null
+// (its later stages never run and its slot is null), so the implementer's result is wrapped as
+// { impl }: a dead implementer still reaches stage 2, which records it.
 const outcomes = await pipeline(
   items,
   (item, _item, i) =>
     agent(
       `Implement the SMALLEST safe fix for this loop work item in your isolated worktree. Stay in scope; NEVER touch denylist paths (auth, payments, secrets/.env, infra, CI config, migrations, .claude/, CLAUDE.md).\n- Your worktree is a fresh checkout without dependencies. First record \`git rev-parse HEAD\` as \`baseSha\`. Then install with the lockfile: \`pnpm install --frozen-lockfile --prefer-offline\`; in the web env, use the pnpm invocation from .claude/memory/topics/remote-env.md (pnpm 10 vs 11).\n- Edit only inside your worktree, and run typecheck, lint and unit tests there.\n- Never run pnpm dev, pnpm build, pnpm test:e2e or pnpm verify: build rewrites tracked files into your diff, and port 3000 belongs to the user. The Lead runs those after applying.\n- Never commit, push, switch branches, stash or reset, and never stop or kill a process you did not start.\n- Before capturing the diff, run \`git add -N .\` so new files appear in it. Then capture the ACTUAL change with \`git diff --src-prefix=a/ --dst-prefix=b/\` (explicit prefixes: the gate parses only a/ and b/, whatever the git config says) and return it as \`diff\` (the real patch, not a summary). Report changedFiles repo-relative, as the a/ and b/ paths in the diff. In notes, give each check command with its exit code (no | tail) and your worktree root. Set checksPassed to whether those checks passed.\n\n${JSON.stringify(item)}`,
       { label: `impl:${item.id || 'item'}-${i}`, phase: 'Implement', schema: IMPL_SCHEMA, isolation: 'worktree' },
-    ).catch(agentFailed(`impl:${item.id || 'item'}-${i}`)),
-  (impl, item, i) => {
+    ).catch(agentFailed(`impl:${item.id || 'item'}-${i}`)).then((impl) => ({ impl })),
+  ({ impl }, item, i) => {
     const im = impl || {}
     // The reported base as `git rev-parse HEAD` prints it (trimmed, lower case). The outcome carries
     // it and the implementer's notes (its worktree root): the caller's worktree cleanup reads both.
@@ -330,15 +347,7 @@ const outcomes = await pipeline(
     // Nothing to verify or apply without the real patch — defer (resolvable by a re-run).
     // A dead implementer (threw, or returned nothing) is an infra failure, not an empty fix:
     // 'agent-failed' (re-dispatch), distinct from a live implementer's empty diff ('no-diff').
-    if (!impl) {
-      implFailed += 1
-      return {
-        ...base, applied: false, status: 'deferred', verdict: 'defer', preGateVerdict: null,
-        failedGates: ['agent-failed'], missing: ['a diff from the implementer (the implementer agent failed — re-dispatch)'],
-        repair: '', qualifier: '', evidenceChecked: [], counterReasons: [],
-        reason: 'implementer agent failed — nothing to verify or apply',
-      }
-    }
+    if (!impl) return deadItem(item, 'implementer agent failed')
     if (!String(im.diff || '').trim()) {
       return {
         ...base, applied: false, status: 'deferred', verdict: 'defer', preGateVerdict: null,
@@ -376,10 +385,18 @@ const outcomes = await pipeline(
   },
 )
 
-const settled = outcomes.filter(Boolean)
+// A slot that is still null lost its item: a stage threw past its .catch (an agent() that threw
+// before its .catch attached, or the stage's own code), and the engine keeps no partial result.
+// It takes the dead-item outcome, so every item yields one outcome and one record draft.
+const settled = outcomes.map((o, i) => {
+  if (o) return o
+  log(`WARNING: pipeline slot ${i} (${items[i].id || 'item'}) came back null: a stage threw, so no report survived — deferred as agent-failed (re-dispatch)`)
+  return deadItem(items[i], "item's pipeline stage threw")
+})
 // Every implementer failed: nothing was implemented, verified or applied, so the iteration is
-// an error with no records (the caller resets the nodes to ready). Judged by the dead
-// implementers counted above, never by an empty diff: a live implementer may change nothing.
+// an error with no records (the caller resets the nodes to ready). Judged by the dead items
+// deadItem counted (a dead implementer, or a slot no report survived), never by an empty diff:
+// a live implementer may change nothing.
 if (implFailed === items.length) {
   const error = `all ${items.length} implementer(s) failed (infra) — nothing was implemented or verified; re-dispatch`
   log(`ERROR: ${error}`)
