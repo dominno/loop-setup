@@ -10,9 +10,11 @@ repair; consumers act only on records. We adopt that **contract** for our own ma
 declared policy, **not** objective truth: gates verify field consistency, not field
 truth (paper §7.2).
 
-<!-- trace-policy-version: 2 -->
+<!-- trace-policy-version: 3 -->
 (machine-readable; `scripts/trace/lib.mjs` stamps it on every record and refuses records
-written under a newer policy — bump it whenever the tables below change.)
+written under a newer policy — bump it whenever a table below or a record rule changes.)
+v3 adds the memory write boundary for `wiki:` records (**Record guarantees**); records
+written under v1/v2 replay unchanged.
 
 - Schema: `.claude/trace/schema-v1.json` · Store: `.claude/memory/trace/records.jsonl`
   (append-only JSONL, archives `<YYYY>.jsonl`) · Writer/linter: `pnpm trace …`
@@ -146,6 +148,20 @@ implementation, gaps into the synthesized order), and no durable state changes o
 - **No secrets, no bench answers** — the writer refuses drafts that look like they carry a
   key/token/private key, or a bench fixture id/defect text. If a secret ever lands anyway:
   rotate it — removing it means rewriting git history, a human decision.
+- **Memory write boundary (policy v3)** — external content (a web page, a search result, a PR
+  or issue comment, an outside MCP result, another agent's or a report's text) never licenses
+  a wiki fact. For a `wiki:` claim the writer refuses an `accept` or `qualify` whose only
+  evidence is `reading` (the evidence gate alone would let a causal or predictive claim
+  qualify on it), a `file_line`, `command`, `browser`, `measurement` or `diff` item whose ref
+  holds a URL that does not parse or whose host is not `localhost`, `127.0.0.1`, `[::1]`,
+  `0.0.0.0` or `*.localhost`, and a `file_line` that is not repo-relative (`pnpm trace reaudit`
+  diffs repo paths only). `rule`, `human`, `record` and `reading` are exempt from the URL
+  check: a WCAG URL stays citable as a rule, and external content is cited as `reading`
+  (`external:<source>`) beside the local check that licenses the fact (`/dream` step 3b).
+  Partial: a page saved into the repo and cited as `file_line` still passes, a `rule` or
+  `human` item is trusted by its kind (a blog cited as a rule, or a PR comment as a human
+  decision, passes), and only a `scheme://` URL is recognized (a scheme-less `example.com/x`
+  or an `http:/…` form is not).
 - **Merges** — `.gitattributes` merges `records.jsonl` as a union (both branches' appends
   survive); `pnpm trace lint` (in `pnpm test`) is the post-merge check. Replay errors only
   on merge-invariant violations (schema, content-hash ids, unknown targets, verdict vs

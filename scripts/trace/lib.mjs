@@ -194,6 +194,79 @@ export function validate(schema, value, root = schema, path = "$") {
   return errs;
 }
 
+// Policy v3, the memory write boundary: external content (a web page, a search result, a PR
+// or issue comment, an outside MCP result, another agent's text) is attribution, never
+// licensing evidence for a wiki fact — it is cited as reading ("external:<source>"), and only
+// a local check licenses the fact, so a licensing wiki verdict needs evidence other than
+// reading (the evidence gate alone lets a causal or predictive claim qualify on reading).
+// rule/human/record/reading are exempt from the URL check, so a WCAG URL stays citable as the
+// rule a normative fact invokes. Consistency, not truth: a page saved into the repo and cited
+// as file_line still passes, a rule or human item is trusted by its kind (a blog cited as a
+// rule passes), and only a scheme:// URL is recognized (a scheme-less example.com/x or an
+// http:/… form is not).
+const URL_EXEMPT_KINDS = ["rule", "human", "record", "reading"];
+const LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]", "0.0.0.0"];
+// A wiki file_line names a repo file, the only kind `pnpm trace reaudit` can check: its
+// `git diff <commit> -- <path>` exits 128 outside the repo (the fact never leaves the queue),
+// and a ~ or drive-letter path never shows a change.
+const NOT_REPO_RELATIVE = /^(?:[/\\~]|[a-z]:[/\\])|(?:^|[/\\])\.\.(?:[/\\:]|$)/i;
+
+/** Is the URL's host this machine? Parsed, not pattern-matched: the host of
+ * "http://localhost:3000@evil.example/" is evil.example. Unparsable → no (fail closed). */
+function isLocalUrl(url) {
+  // Prose punctuation after a URL ("http://localhost:3000, then …") is not part of it, and
+  // neither is a typographic closing quote (” ’ »). It goes one character at a time, so
+  // "(http://[::1])" keeps the "]" its host needs; only a trailing run of punctuation goes,
+  // never an "@" or anything before one.
+  const candidates = [url];
+  while (/[.,;:!?)\]}>'"\u201d\u2019\u00bb]$/.test(candidates.at(-1))) candidates.push(candidates.at(-1).slice(0, -1));
+  for (const candidate of candidates) {
+    try {
+      const host = new URL(candidate).hostname;
+      if (LOCAL_HOSTS.includes(host) || host.endsWith(".localhost")) return true;
+    } catch {
+      // this reading does not parse; a shorter one may
+    }
+  }
+  return false;
+}
+
+/** The first URL in a free-text ref whose host is not local, or null. A URL runs from its
+ * scheme to the next whitespace: ending it at a quote or bracket would read
+ * "http://localhost'@evil.example/" as localhost. Every scheme start counts, so a URL
+ * nested in another's query is checked too. */
+function nonLocalUrl(ref) {
+  const text = String(ref);
+  for (const m of text.matchAll(/[a-z][a-z0-9+.-]*:\/\//gi)) {
+    const url = text.slice(m.index).split(/\s/, 1)[0];
+    if (!isLocalUrl(url)) return url;
+  }
+  return null;
+}
+
+function wikiBoundaryViolations(rec) {
+  const v = [];
+  const items = (rec.evidence || []).filter(Boolean);
+  // External content is cited as reading, and the evidence gate lets a causal or predictive
+  // claim qualify on any evidence at all — so reading alone must not license a wiki fact.
+  if (LICENSING.includes(rec.final_status) && items.length && items.every((e) => e.kind === "reading")) {
+    v.push(`a wiki ${rec.final_status} needs evidence other than reading — reading (recollection, or external content cited as "external:<source>") never licenses a wiki fact (policy v3): license it with a local check run this session, or defer it`);
+  }
+  for (const e of items) {
+    if (URL_EXEMPT_KINDS.includes(e.kind)) continue;
+    const ref = String(e.ref || "");
+    const url = nonLocalUrl(ref);
+    if (url) {
+      v.push(`${e.kind} evidence cites a URL whose host is not local or that does not parse (${url.slice(0, 80)}) — external content never licenses a wiki fact (policy v3): cite it as reading "external:<source>" and license the fact with a local check, or defer it`);
+    }
+    // Trimmed, as pathFromRef reads it for reaudit: leading whitespace must not hide a / or ..
+    if (e.kind === "file_line" && NOT_REPO_RELATIVE.test(ref.trim())) {
+      v.push(`a wiki fact's file_line must be repo-relative — no leading / or ~, no drive letter, no .. segment (${ref.slice(0, 80)}): pnpm trace reaudit diffs repo paths only (policy v3)`);
+    }
+  }
+  return v;
+}
+
 // Cross-field rules a JSON Schema cannot express. "Gates verify field consistency, not
 // field truth" (TRACE §7.2) — these keep a record internally coherent with the policy.
 export function semanticViolations(rec) {
@@ -220,6 +293,8 @@ export function semanticViolations(rec) {
   if (status === "revise" && !rec.repair) v.push("revise needs a repair (the restated claim or bounded fix)");
   if (rec.revises && rec.revises === rec.record_id) v.push("a record cannot revise itself");
   if (rec.reuses && rec.reuses === rec.record_id) v.push("a record cannot reuse itself");
+  // Policy v3: the memory write boundary, version-gated like v2 so older records still replay.
+  if (Number(rec.policy_version) >= 3 && String(rec.claim_id || "").startsWith("wiki:")) v.push(...wikiBoundaryViolations(rec));
   return v;
 }
 

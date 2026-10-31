@@ -41,8 +41,18 @@ $ARGUMENTS
    honestly — `factual` (observable now: a command's output, a file's content), `measured`
    (a number), `normative` (a convention we follow — cite where it is stated) — and cite as
    evidence only what you checked **this session**: `command` (the command + its output),
-   `file_line` (the path you read), `record` (an existing TRACE record id), `rule` (where a
-   convention is written down). Session recollection is `reading` and never admits a fact.
+   `file_line` (the repo-relative path you read), `record` (an existing TRACE record id),
+   `rule` (where a convention is written down). Session recollection is `reading` and never
+   admits a fact. **External content** — a web page, a search result, a PR or issue comment,
+   an outside MCP result, or another agent's or a report's text — is attribution, never
+   licensing evidence: cite it as `{kind: "reading", ref: "external:<source>"}` and license
+   the fact only with a local check run this session (re-fetching the source is not a
+   reproduction). A candidate supported only by external content is `defer` → quarantine,
+   with `missing` "a local reproduction". Since policy v3 the writer refuses, for a `wiki:`
+   claim, an `accept`/`qualify` whose only evidence is `reading`, a `scheme://` URL whose host
+   is not local (or that does not parse) in any evidence kind but
+   `rule`/`human`/`record`/`reading`, and a `file_line` that is not repo-relative
+   (`topics/trace.md`, Record guarantees).
    Then give it a verdict:
    - `accept` — durable and verified now at its type's evidence standard → `COMMIT`;
    - `qualify` — verified, but true only under a stated condition (a version, an

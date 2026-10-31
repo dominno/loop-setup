@@ -459,6 +459,147 @@ describe("checker-round hardening (policy v2)", () => {
   });
 });
 
+// Policy v3, the memory write boundary: external content is attribution, never licensing
+// evidence for a wiki fact. Only the deterministic part; evidence kinds stay the writer's word.
+describe("memory write boundary (policy v3)", () => {
+  const v3 = () => ({ ...ctx(), policyVersion: 3 });
+  const fact = (evidence, over = {}) =>
+    draft({ writer_id: "dream", claim_id: "wiki:testing:vitest-parallel", claim_text: "Vitest runs test files in parallel", evidence, provenance: { workflow: "dream" }, ...over });
+  const why = (res) => (res.validation === "pass" ? "" : res.validation.fail.join("\n"));
+  // A defer has no evidence floor, so only the boundary can fire on it.
+  const wikiDefer = (evidence) => ({ claim_id: "wiki:testing:x", policy_version: "3", final_status: "defer", missing: ["a local reproduction"], evidence });
+
+  it("the policy page declares v3 or later, so `pnpm trace write` stamps new records under the boundary", () => {
+    expect(POLICY).toBeGreaterThanOrEqual(3);
+  });
+
+  it("refuses a wiki record whose observation evidence is an external URL or a path outside the repo", () => {
+    const refused = [
+      [{ kind: "file_line", ref: "https://example.com/x" }, /URL/],
+      [{ kind: "browser", ref: "http://localhost:3000@evil.example/" }, /URL/], // userinfo: the host is evil.example
+      [{ kind: "file_line", ref: "/tmp/page.html:3" }, /repo-relative/],
+      [{ kind: "file_line", ref: "../x.md" }, /repo-relative/],
+    ];
+    for (const [i, [item, reason]] of refused.entries()) {
+      const [res] = writeRecords([fact([item], { claim_id: `wiki:testing:refused-${i}` })], v3());
+      expect(res.stored, item.ref).toBe(false);
+      expect(why(res), item.ref).toMatch(reason);
+    }
+    expect(existsSync(store)).toBe(false);
+  });
+
+  it("stores external content cited as reading, an external-only defer, localhost observations, a WCAG rule URL and non-wiki records", () => {
+    const external = { kind: "reading", ref: "external:https://example.com/blog/vitest-parallelism" };
+    const drafts = [
+      fact([external, { kind: "command", ref: "pnpm exec vitest --help | grep fileParallelism" }]),
+      fact([external], { claim_id: "wiki:testing:external-only", final_status: "defer", missing: ["a local reproduction"] }),
+      fact([{ kind: "browser", ref: "http://localhost:3000/settings renders the form" }], { claim_id: "wiki:testing:localhost" }),
+      fact([{ kind: "browser", ref: "http://0.0.0.0:3000" }], { claim_id: "wiki:testing:all-interfaces" }),
+      fact([{ kind: "browser", ref: "http://myapp.localhost:3000" }], { claim_id: "wiki:testing:dot-localhost" }),
+      fact([{ kind: "rule", ref: "https://www.w3.org/TR/WCAG22/#contrast-minimum" }], { claim_id: "wiki:quality-bar:contrast", claim_type: "normative" }),
+      draft({ evidence: [{ kind: "file_line", ref: "https://example.com/x" }] }), // a critic record: out of scope
+    ];
+    const res = writeRecords(drafts, v3());
+    expect(res.map(why)).toEqual(drafts.map(() => ""));
+    expect(res.every((r) => r.stored)).toBe(true);
+  });
+
+  it("is version-gated: a v2 record with a URL ref still replays clean", () => {
+    const [res] = writeRecords([fact([{ kind: "file_line", ref: "https://example.com/x" }])], { ...ctx(), policyVersion: 2 });
+    expect(res.stored).toBe(true);
+    expect(replay(loadEntries(store), schema, POLICY).errors).toEqual([]);
+    const rec = loadEntries(store)[0].value;
+    expect(semanticViolations(rec)).toEqual([]);
+    expect(semanticViolations({ ...rec, policy_version: "3" }).join()).toMatch(/URL/);
+  });
+
+  it("reading alone never licenses a wiki fact: a causal or predictive qualify on external content is refused, though the gate falls back to qualify for those types", () => {
+    const external = { kind: "reading", ref: "external:https://example.com/blog/vitest-parallelism" };
+    const qualified = (claim_type, evidence) =>
+      fact(evidence, { claim_id: `wiki:testing:${claim_type}-${evidence.length}`, claim_type, final_status: "qualify", qualifier: "reported by one blog post" });
+    for (const claimType of ["causal", "predictive"]) {
+      const [res] = writeRecords([qualified(claimType, [external])], v3());
+      expect(res.stored, claimType).toBe(false);
+      expect(why(res), claimType).toMatch(/needs evidence other than reading/);
+    }
+    expect(existsSync(store)).toBe(false);
+    // The same attribution beside a local check run this session is stored.
+    const [res] = writeRecords([qualified("causal", [external, { kind: "command", ref: "pnpm exec vitest run scripts/trace/lib.test.mjs" }])], v3());
+    expect(why(res)).toBe("");
+    expect(res.stored).toBe(true);
+  });
+
+  it("the reading rule binds licensing verdicts on wiki claims only, and older records replay unchanged", () => {
+    const external = { kind: "reading", ref: "external:https://example.com/blog/vitest-parallelism" };
+    const rec = { claim_id: "wiki:testing:x", policy_version: "3", claim_type: "causal", final_status: "qualify", qualifier: "weaker", evidence: [external], missing: [] };
+    expect(semanticViolations(rec).join()).toMatch(/needs evidence other than reading/);
+    expect(semanticViolations({ ...rec, final_status: "accept" }).join()).toMatch(/needs evidence other than reading/);
+    // A defer on reading alone is the quarantine path; revise and reject license nothing.
+    for (const withheld of [{ final_status: "defer", missing: ["a local reproduction"] }, { final_status: "revise", repair: "restate it" }, { final_status: "reject" }]) {
+      expect(semanticViolations({ ...rec, ...withheld }), withheld.final_status).toEqual([]);
+    }
+    // Out of scope: a critic record keeps the gate's "code reading only" qualify fallback.
+    expect(semanticViolations({ ...rec, claim_id: "critic:qa-e2e:x" })).toEqual([]);
+    const [old] = writeRecords([fact([external], { claim_id: "wiki:testing:v2-causal", claim_type: "causal", final_status: "qualify", qualifier: "weaker" })], { ...ctx(), policyVersion: 2 });
+    expect(old.stored).toBe(true);
+    expect(replay(loadEntries(store), schema, POLICY).errors).toEqual([]);
+  });
+
+  it("checks every evidence kind except rule, human, record and reading, whatever the verdict", () => {
+    const kinds = schema.$defs.evidenceItem.properties.kind.enum;
+    const refused = kinds.filter((kind) => semanticViolations(wikiDefer([{ kind, ref: "https://example.com/x" }])).length > 0);
+    expect(refused).toEqual(["file_line", "command", "browser", "measurement", "diff"]);
+  });
+
+  it("reads each URL as the URL parser does: to the next space, every URL in the ref, unparsable fails closed", () => {
+    const urlViolations = (ref, kind = "browser") => semanticViolations(wikiDefer([{ kind, ref }]));
+    for (const ref of [
+      "http://localhost'@evil.example/", // a quote or bracket does not end the URL: the parser reads it as userinfo
+      "http://localhost(@evil.example/",
+      "http://localhost:3000/login?next=https://evil.example/", // a URL inside a local one
+      "http://localhost:99999/", // unparsable
+      "file:///tmp/page.html", // a saved page, not a repo file
+      "http://localhost.evil.example/", // a host under evil.example, not under .localhost
+      "http://evillocalhost/", // *.localhost means a whole "localhost" label after a dot
+      "HTTPS://EVIL.EXAMPLE/x", // the scheme is case-insensitive
+      "(http://[::1]@evil.example)", // dropping trailing punctuation never drops the "@": the host stays evil.example
+    ]) {
+      expect(urlViolations(ref).join(), ref).toMatch(/URL/);
+    }
+    // Local: prose punctuation after the URL is not part of it (typographic closing quotes
+    // too), but a bare IPv6 host keeps its "]".
+    for (const ref of [
+      "http://localhost:3000, then /about",
+      "(http://localhost:3000)",
+      "http://[::1]:3000/",
+      "http://[::1]",
+      "(http://[::1])", // the ")" goes, the "]" the IPv6 host needs stays
+      "see http://127.0.0.1:3000/api/health.",
+      "open http://localhost.", // it parses as host "localhost." first; the shorter reading still counts
+      "axe on “http://localhost:3000”: 0 violations",
+      "‘http://localhost:3000’",
+      "«http://localhost:3000»",
+    ]) {
+      expect(urlViolations(ref), ref).toEqual([]);
+    }
+    expect(urlViolations("curl -s http://localhost:3000/api/health", "command")).toEqual([]);
+    expect(urlViolations("curl -s https://registry.npmjs.org/next", "command").join()).toMatch(/URL/); // re-fetching the source is not a reproduction
+  });
+
+  it("a wiki file_line must be a repo path: no leading / or ~, no drive letter, no .. segment", () => {
+    const pathViolations = (ref) => semanticViolations(wikiDefer([{ kind: "file_line", ref }]));
+    // Leading whitespace hides nothing: reaudit reads the path trimmed (pathFromRef), so the guard does too.
+    for (const ref of ["/tmp/page.html:3", "../x.md", "docs/../../x.md", "~/notes.md", "C:\\notes.md", " /tmp/page.html:3", "\t../x.md:3"]) {
+      expect(pathViolations(ref).join(), JSON.stringify(ref)).toMatch(/repo-relative/);
+    }
+    for (const ref of ["scripts/trace/lib.mjs:199-224", "./README.md", ".claude/memory/topics/trace.md", "docs/..notes.md"]) {
+      expect(pathViolations(ref), ref).toEqual([]);
+    }
+    // Only a file_line names repo evidence: a command may run a path anywhere.
+    expect(semanticViolations(wikiDefer([{ kind: "command", ref: "/usr/bin/node /tmp/sigdemo.mjs" }]))).toEqual([]);
+  });
+});
+
 describe("secrets never enter the store", () => {
   it("the writer refuses a draft that looks like it carries a secret", () => {
     const [res] = writeRecords([draft({ claim_text: "key is sk-ant-abcdefghijklmnopqrstuvwx" })], ctx());
