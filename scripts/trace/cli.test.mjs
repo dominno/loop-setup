@@ -277,6 +277,29 @@ describe("plan commands (CLI process)", () => {
     expect(trace(["plan-items", "--plan", p]).status).toBe(2);
   });
 
+  // LP-003 waits on two nodes: LP-001 is done, LP-002 is `second`.
+  const twoDeps = (second) =>
+    writePlan("| LP-001 | first | — | done | | | human | |", `| LP-002 | second | — | ${second} | | | human | |`, "| LP-003 | third | LP-001, LP-002 | blocked | | | human | |");
+
+  it("plan-ready omits a node with several after ids while one of them is open (one done is not enough), and prints it once every one is done", () => {
+    const half = trace(["plan-ready", "--plan", twoDeps("ready")]);
+    expect(half.status).toBe(0);
+    expect(JSON.parse(half.stdout)).toEqual(["LP-002"]);
+    const both = trace(["plan-ready", "--plan", twoDeps("done")]);
+    expect(both.status).toBe(0);
+    expect(JSON.parse(both.stdout)).toEqual(["LP-003"]);
+  });
+
+  it("plan-items refuses a node with several after ids while one of them is open, naming only the open one (waits on LP-002), and emits it once every one is done", () => {
+    const refused = trace(["plan-items", "LP-003", "--plan", twoDeps("ready")]);
+    expect(refused.status).toBe(1);
+    expect(refused.stdout).toBe(""); // no items
+    expect(refused.stderr).toMatch(/^error: LP-003: not ready: waits on LP-002$/m);
+    const items = trace(["plan-items", "LP-003", "--plan", twoDeps("done")]);
+    expect(items.status).toBe(0);
+    expect(JSON.parse(items.stdout)).toEqual([{ id: "LP-003", description: "third" }]);
+  });
+
   it("plan-items replays the store: priorRecordId is the node's own loop:<id> record only (never a critic record), and a store that does not replay exits 2 with no items", () => {
     expect(trace(["write", "-"], draft({ writer_id: "loop-iteration/verify:LP-003-0", claim_id: "loop:lp-003", claim_type: "practical", final_status: "defer", missing: ["a unit test run"], evidence: [] })).status).toBe(0);
     expect(trace(["write", "-"], draft({ writer_id: "critic-panel/verify:qa-e2e-0", claim_id: "critic:qa-e2e:untested", final_status: "defer", missing: ["an E2E run"], evidence: [] })).status).toBe(0);

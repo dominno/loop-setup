@@ -6,7 +6,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendActions, loadEntries, loadSchema, readPolicyVersion, replay, writeRecords } from "./lib.mjs";
-import { DEFAULT_PLAN, NOT_READY, dependents, parsePlan, planItems, planViolations, readyIds } from "./plan.mjs";
+import { DEFAULT_PLAN, NOT_READY, STATUSES, dependents, parsePlan, planItems, planViolations, readyIds } from "./plan.mjs";
 
 const HEADER = "| id | description | after | status | record | missing | origin | notes |\n|---|---|---|---|---|---|---|---|";
 const planText = (...rows) => `# Loop Plan\n\n## Plan\n_Some prose before the table._\n\n${HEADER}\n${rows.join("\n")}\n`;
@@ -131,6 +131,15 @@ describe("readyIds (loop-plan.md's ready-node rule, in table order)", () => {
   it("a blocked node whose deps are done is ready; a ready node with an open dep is not", () => {
     const p = plan(row("LP-001", { status: "done" }), row("LP-002", { after: "LP-001", status: "blocked" }), row("LP-003", { after: "LP-002" }));
     expect(readyIds(p.nodes)).toEqual(["LP-002"]);
+  });
+
+  it("a node with several after ids is ready only when every one is done: one done is not enough, whichever is still open (in any status but done)", () => {
+    // LP-003 waits on both LP-001 and LP-002. Ready once ANY of them is done (some for every) is the wrong rule.
+    const nodes = (first, second) => plan(row("LP-001", { status: first }), row("LP-002", { status: second }), row("LP-003", { after: "LP-001, LP-002", status: "blocked" })).nodes;
+    expect(readyIds(nodes("done", "ready"))).toEqual(["LP-002"]);
+    expect(readyIds(nodes("ready", "done"))).toEqual(["LP-001"]);
+    for (const status of STATUSES.filter((s) => s !== "done")) expect(readyIds(nodes("done", status)), status).not.toContain("LP-003");
+    expect(readyIds(nodes("done", "done"))).toEqual(["LP-003"]);
   });
 
   it("a dangling after id is never read as done (plan-lint names it; until then its node waits)", () => {
