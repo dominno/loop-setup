@@ -6,7 +6,7 @@
 // and a phrase split across a line break still counts as present.
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ESLint } from "eslint";
@@ -80,5 +80,32 @@ describe("adoption docs", () => {
     const checklist = /```txt\n([\s\S]*?)```/.exec(section(guide, "## Adoption checklist"))?.[1] ?? "";
     const missing = (text) => [...paths].filter((p) => !text.includes(p));
     expect({ quickstart: missing(quickstart), checklist: missing(checklist) }).toEqual({ quickstart: [], checklist: [] });
+  });
+
+  it("name every workflow's budget floors in the guide's budget-floor paragraph", () => {
+    // Each workflow's distinct floor values: `const <NAME>_FLOOR = <N>_000` gives N (thousands of tokens).
+    const names = readdirSync(join(ROOT, ".claude/workflows")).filter((f) => f.endsWith(".js")).map((f) => f.slice(0, -3));
+    const floors = new Map();
+    const drift = [];
+    for (const name of names) {
+      const src = read(`.claude/workflows/${name}.js`);
+      // A floor written another way would escape the check, so it fails instead.
+      for (const [, constant, value] of src.matchAll(/const (\w+_FLOOR) = ([^\s;]+)/g)) if (!/^\d+_000$/.test(value)) drift.push(`${name}: ${constant} = ${value} is not <N>_000`);
+      const values = new Set([...src.matchAll(/const \w+_FLOOR = (\d+)_000\b/g)].map((m) => m[1]));
+      if (values.size) floors.set(name, values);
+    }
+    expect(floors.size).toBeGreaterThan(0);
+    // The paragraph (or list item) that names the floors, whitespace collapsed; "" when it is missing,
+    // so every floor is reported.
+    const paragraph = read("docs/adoption-guide.md").split(/\n\s*\n|\n(?=\s*- )/).map((p) => p.replace(/\s+/g, " ")).find((p) => p.includes("budget floors")) ?? "";
+    // Each backticked workflow name opens a segment that runs to the next backticked workflow name.
+    const marks = [...paragraph.matchAll(new RegExp(`\`(${names.join("|")})\``, "g"))];
+    const segments = new Map();
+    marks.forEach((m, i) => segments.set(m[1], (segments.get(m[1]) ?? "") + paragraph.slice(m.index + m[0].length, marks[i + 1]?.index ?? paragraph.length)));
+    for (const [name, values] of floors) {
+      if (!segments.has(name)) drift.push(`${name}: not named in backticks`);
+      else for (const n of values) if (!new RegExp(`(?<![\\d.])${n}k\\b`).test(segments.get(name))) drift.push(`${name}: ${n}k`);
+    }
+    expect(drift).toEqual([]);
   });
 });

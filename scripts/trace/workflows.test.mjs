@@ -16,6 +16,29 @@ const HEAD_SHA = "0123456789abcdef0123456789abcdef01234567";
 // The budget of a turn with no '+Nk' token target: total is null, so no budget floor fires.
 const UNLIMITED = { total: null, spent: () => 0, remaining: () => Infinity };
 
+// Mirrors the engine's pipeline() (Claude Code 2.1.314), which runs each item in its own slot as
+//   let ze = await settle(item); for (const st of stages) { if (ze.v === null) break; ze = await settle(st(ze.v, item, index)) }
+// and settles the slots with Promise.allSettled. So a stage that RESOLVES to null skips the item's
+// remaining stages and its slot is null, and a stage that throws (synchronously or by rejecting)
+// leaves a null slot too. Only null stops a slot: an undefined result still runs the next stage.
+// runWorkflow passes it as pipeline(); "harness fidelity" below pins each of these rules.
+function enginePipeline(items, ...stages) {
+  return Promise.all(
+    items.map(async (item, i) => {
+      try {
+        let r = await item;
+        for (const stage of stages) {
+          if (r === null) break;
+          r = await stage(r, item, i);
+        }
+        return r;
+      } catch {
+        return null;
+      }
+    }),
+  );
+}
+
 async function runWorkflow(file, args, reply, budget = UNLIMITED) {
   const text = readFileSync(join(ROOT, ".claude/workflows", file), "utf8").replace(/^export const meta =/m, "const meta =");
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
@@ -37,27 +60,7 @@ async function runWorkflow(file, args, reply, budget = UNLIMITED) {
   const logs = [];
   const log = (m) => logs.push({ text: String(m), calls: calls.length });
   const parallel = (thunks) => Promise.all(thunks.map((t) => Promise.resolve().then(t).catch(() => null)));
-  // Mirrors the engine's pipeline() (Claude Code 2.1.314), which runs each item in its own slot as
-  //   let ze = await settle(item); for (const st of stages) { if (ze.v === null) break; ze = await settle(st(ze.v, item, index)) }
-  // and settles the slots with Promise.allSettled. So a stage that RESOLVES to null skips the item's
-  // remaining stages and its slot is null, and a stage that throws (synchronously or by rejecting)
-  // leaves a null slot too. Only null stops a slot: an undefined result still runs the next stage.
-  const pipeline = (items, ...stages) =>
-    Promise.all(
-      items.map(async (item, i) => {
-        try {
-          let r = await item;
-          for (const stage of stages) {
-            if (r === null) break;
-            r = await stage(r, item, i);
-          }
-          return r;
-        } catch {
-          return null;
-        }
-      }),
-    );
-  const result = await fn(args, agent, parallel, pipeline, () => {}, log, budget);
+  const result = await fn(args, agent, parallel, enginePipeline, () => {}, log, budget);
   return { result, calls, logs };
 }
 
@@ -1695,6 +1698,77 @@ describe("pipeline labels carry the map index (a first stage takes it as its thi
   });
 });
 
+// runWorkflow hands every workflow enginePipeline as its pipeline(), so the workflow tests exercise only
+// the paths the engine reaches while it mirrors the engine. A quiet revert of the stub would hide a
+// regression of exactly what Step 9b fixed, so its rules are pinned here directly. Stage calls are
+// compared sorted (as "<stage>@<index>"): the slots run concurrently, and no test relies on their order.
+describe("harness fidelity: enginePipeline mirrors the engine", () => {
+  // Each stage records the arguments it was called with, then returns f(prevResult).
+  const recorder = () => {
+    const seen = [];
+    const stage = (name, f) => (prev, item, i) => {
+      seen.push([name, prev, item, i]);
+      return f(prev);
+    };
+    const called = () => seen.map(([name, , , i]) => `${name}@${i}`).sort();
+    return { seen, stage, called };
+  };
+
+  it("a stage that resolves to null ends the slot as null and the item's later stages are never called (a null item reaches no stage)", async () => {
+    const { stage, called } = recorder();
+    const out = await enginePipeline(
+      ["drop", "keep", null],
+      stage("first", (x) => (x === "drop" ? null : x)),
+      stage("second", (x) => `${x}+2`),
+      stage("third", (x) => `${x}+3`),
+    );
+    expect(out).toEqual([null, "keep+2+3", null]);
+    expect(called()).toEqual(["first@0", "first@1", "second@1", "third@1"]);
+  });
+
+  it("a stage that resolves to undefined does not end the slot: the next stage runs and receives undefined", async () => {
+    const { seen, stage } = recorder();
+    const out = await enginePipeline(["a"], stage("first", () => undefined), stage("second", (x) => (x === undefined ? "got undefined" : "got a value")));
+    expect(out).toEqual(["got undefined"]);
+    expect(seen.map(([name, prev]) => [name, prev])).toEqual([["first", "a"], ["second", undefined]]);
+  });
+
+  it("a stage that throws synchronously, or rejects, leaves that slot null and runs none of its later stages; the other slots run to the end", async () => {
+    const { stage, called } = recorder();
+    const out = await enginePipeline(
+      ["ok", "throws", "rejects"],
+      stage("first", (x) => {
+        if (x === "throws") throw new Error("thrown synchronously");
+        return x;
+      }),
+      stage("second", (x) => (x === "rejects" ? Promise.reject(new Error("rejected")) : `${x}+2`)),
+      stage("third", (x) => `${x}+3`),
+    );
+    expect(out).toEqual(["ok+2+3", null, null]);
+    expect(called()).toEqual(["first@0", "first@1", "first@2", "second@0", "second@2", "third@0"]);
+  });
+
+  it("a promise item is awaited before stage 1 (and one that resolves to null reaches no stage)", async () => {
+    const { seen, stage } = recorder();
+    const out = await enginePipeline([Promise.resolve("resolved"), Promise.resolve(null)], stage("first", (x) => `${x}+1`));
+    expect(out).toEqual(["resolved+1", null]);
+    expect(seen.map(([name, prev, , i]) => [name, prev, i])).toEqual([["first", "resolved", 0]]);
+  });
+
+  it("every stage receives (prevResult, originalItem, index), the first stage included (its prevResult is the item itself)", async () => {
+    const { seen, stage } = recorder();
+    const items = [{ id: "A" }, { id: "B" }];
+    const out = await enginePipeline(items, stage("first", (x) => `${x.id}1`), stage("second", (x) => `${x}2`));
+    expect(out).toEqual(["A12", "B12"]);
+    expect([...seen].sort((x, y) => x[0].localeCompare(y[0]) || x[3] - y[3])).toEqual([
+      ["first", items[0], items[0], 0],
+      ["first", items[1], items[1], 1],
+      ["second", "A1", items[0], 0],
+      ["second", "B1", items[1], 1],
+    ]);
+  });
+});
+
 // The engine's pipeline() ends an item at the first stage that RESOLVES to null: its later stages never
 // run and its slot is null (runWorkflow's stub mirrors it). So loop-iteration and scan-docs wrap their
 // first stage's result, and a dead first-stage agent still reaches stage 2, which records it. A slot that
@@ -1844,6 +1918,15 @@ describe("pipeline fidelity: a dead first-stage agent never vanishes (the stub m
       expect(result.totalGaps, how).toBe(6);
       expect(result.licensedGaps, how).toBe(6);
     }
+  });
+
+  it("improve-skills: the workflow-dsl reviewer is asked to check this rule (a first stage that never resolves to null, no dropped null slot), not the pre-9b 'guarded first stage'", async () => {
+    const { calls } = await runWorkflow("improve-skills.js", { targets: [".claude/workflows/*.js"] }, (label) => (label.startsWith("meta:") ? { findings: [] } : null));
+    const dsl = calls.filter((c) => c.label.startsWith("meta:workflow-dsl"));
+    expect(dsl.map((c) => c.label)).toEqual(["meta:workflow-dsl-4"]);
+    expect(dsl[0].prompt).toContain("never resolves to null");
+    expect(dsl[0].prompt).toContain("never filtered away");
+    expect(dsl[0].prompt).not.toContain("guarded first pipeline stage");
   });
 });
 
@@ -2034,6 +2117,21 @@ describe("e2e-design: a separate judge types each case; only licensed cases are 
     expect(result.cases.map((c) => c.index)).toEqual([2]);
     expect(result.deferred).toEqual([expect.objectContaining({ index: 1, verdict: "defer", failedGates: ["verdict-conflict"] })]);
     expect(result.deferred[0].missing).toEqual([expect.stringContaining("#1")]);
+  });
+
+  it("agreeing repeats contradict themselves when ANY licensing entry names coveredBy or duplicateOf, in either order: deferred (verdict-conflict), never licensed", async () => {
+    const proposed = [e2eCase("greets by name"), e2eCase("greets again after reload")];
+    const covered = { coveredBy: "e2e/greeting.spec.ts:12" };
+    for (const [order, verdicts, said] of [
+      ["the covering entry second", [caseVerdict(1), caseVerdict(1, covered), caseVerdict(2)], "accept with coveredBy e2e/greeting.spec.ts:12"],
+      ["the covering entry first", [caseVerdict(1, covered), caseVerdict(1), caseVerdict(2)], "accept with coveredBy e2e/greeting.spec.ts:12"],
+      ["the twin-naming entry second", [caseVerdict(1), caseVerdict(1, { duplicateOf: 2 }), caseVerdict(2)], "accept with duplicateOf #2"],
+    ]) {
+      const { result } = await runWorkflow("e2e-design.js", { flow: "greeting" }, happyOnly(proposed, () => ({ verdicts })));
+      expect(result.cases.map((c) => c.index), order).toEqual([2]);
+      expect(result.deferred.map((c) => [c.index, c.verdict, c.failedGates]), order).toEqual([[1, "defer", ["verdict-conflict"]]]);
+      expect(result.deferred[0].missing, order).toEqual([expect.stringContaining(`case #1 (the judge returned ${said};`)]);
+    }
   });
 
   it("the judge floor (20k, only with a token target): below it no 'e2e:judge' call and every case is deferred not-verified:budget; above it the judge runs", async () => {
@@ -2375,6 +2473,8 @@ describe("critic-panel: the opt-in completeness critic (args.completeness, defau
     const cov = calls.find(COVERAGE);
     expect(cov.opts).toMatchObject({ phase: "Coverage", model: "sonnet" });
     expect(cov.prompt).toMatch(/MISSED/);
+    expect(cov.prompt).toContain("The IMPORTANT problem this critic round MISSED"); // the lens headline
+    expect(cov.prompt).toContain("never re-raise or rephrase a finding above");
     for (const k of ["frontend-arch", "qa-e2e", "performance", "regression"]) expect(cov.prompt, k).toContain(`- ${k} (`);
     expect(cov.prompt).not.toContain("- security (");
     expect(cov.prompt).toContain("Form state is duplicated");

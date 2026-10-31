@@ -256,14 +256,16 @@ const gated = designed.map((c, i) => {
     const said = entries.map((e) => e.verdict).join(', ')
     return unsettled(c, index, 'verdict-conflict', `one verdict for case #${index} (the judge returned ${said})`, `the judge returned disagreeing verdicts for this case: ${said}`)
   }
-  const v = entries[0]
   // A licensing verdict that also names a covering spec or a twin contradicts itself: it would return a
-  // case for implementation that it also calls covered or a duplicate. It settles nothing either.
-  const named = v && LICENSING.includes(v.verdict) ? [coveredByOf(v) && `coveredBy ${coveredByOf(v)}`, twinOf(v) !== null && `duplicateOf #${twinOf(v)}`].filter(Boolean) : []
-  if (named.length) {
-    const said = `${v.verdict} with ${named.join(' and ')}`
+  // case for implementation that it also calls covered or a duplicate. It settles nothing either. Every
+  // entry is checked, not only the first, so agreeing repeats settle the same in any order.
+  const bad = entries.find((e) => e && LICENSING.includes(e.verdict) && (coveredByOf(e) || twinOf(e) !== null))
+  if (bad) {
+    const named = [coveredByOf(bad) && `coveredBy ${coveredByOf(bad)}`, twinOf(bad) !== null && `duplicateOf #${twinOf(bad)}`].filter(Boolean)
+    const said = `${bad.verdict} with ${named.join(' and ')}`
     return unsettled(c, index, 'verdict-conflict', `one consistent verdict for case #${index} (the judge returned ${said}; only a reject names a covering spec or a twin)`, `the judge's verdict contradicts itself: ${said}`)
   }
+  const v = entries[0]
   // Fail safe: a dead judge (threw, or returned nothing) or an index it skipped is defer
   // ('verdict-missing'; never confirmed, never rejected). A dead judge is also 'agent-failed':
   // an infra failure to re-run. Only this code sets that gate, so a live judge's own

@@ -41,8 +41,10 @@ catalog so both you and Claude can route to the right command.
 > `e2e-design` (`/multi-agent-e2e`), `loop-iteration` (`/loop` L2/L3),
 > `improve-skills` (`/improve-skills` — meta-critic over our own prompts/workflows),
 > `trace-bench` (`/bench-checkers` — measures the checkers on seeded defects).
-> Verdict-producing workflows return typed TRACE verdicts plus `traceRecords` drafts that
-> the caller appends with `pnpm trace write` (no durable state change without a record).
+> The record-writing workflows (`critic-panel`, `scan-docs`, `loop-iteration`,
+> `improve-skills`) return typed TRACE verdicts plus `traceRecords` drafts that the caller
+> appends with `pnpm trace write` (no durable state change without a record); `e2e-design`
+> and `gap-analysis` return typed verdicts that are advisory and write no records.
 > Pass `args.models = { fanout, judge }` when invoking any of these to override the
 > default `sonnet`/`opus` model tiering (e.g. for cost control on a large fan-out).
 
