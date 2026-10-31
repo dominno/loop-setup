@@ -26,7 +26,9 @@ CLAUDE.md                     Project rules, critic roster, completion gates
 .claude/workflows/*           Multi-agent orchestration scripts (critic-panel, scan-docs, ...)
 .claude/loop.md  loop-checklist.md   Recurring watchdog loop + readiness rubric (used by /loop)
 .claude/memory/               Knowledge wiki (index.md + topics/ + log.md + loop-run-log.md + loop-plan.md)
-.claude/memory/trace/  quarantine.md   TRACE-lite record store (start it EMPTY) + /dream quarantine
+.claude/memory/trace/  quarantine.md   TRACE-lite record store (start it EMPTY) + /dream quarantine;
+                              with an empty store, strip the topic pages' <!-- rec:TR-… --> comments
+                              (pnpm trace wiki-check lists them) and keep those facts as legacy bullets
 .claude/trace/                TRACE-lite schema + bench fixtures (rewrite the fixtures for your app)
 scripts/trace/                `pnpm trace` CLI + its tests (add "trace": "node scripts/trace/cli.mjs"
                               to package.json and scripts/**/*.test.mjs to your unit-test globs)
@@ -570,6 +572,7 @@ issues; record nice-to-haves; avoid unrelated refactors.
 [ ] Copied .claude/commands/, .claude/workflows/, .claude/loop.md, loop-checklist.md,
     .claude/memory/, .claude/trace/, .claude/skills-index.md and scripts/trace/
 [ ] Started .claude/memory/trace/ and quarantine.md EMPTY (no template records, no quarantine rows)
+    and stripped the topic pages' <!-- rec:TR-… --> comments (pnpm trace wiki-check exits 0)
 [ ] package.json has "trace": "node scripts/trace/cli.mjs"; unit-test globs include scripts/**/*.test.mjs
 [ ] Copied docs/*.md and docs/stories/ story-map scaffolds (content cleared, formats kept)
 [ ] CLAUDE.md "Main commands" point at my real scripts

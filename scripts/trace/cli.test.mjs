@@ -474,13 +474,15 @@ describe("round-3 CLI fixes", () => {
   });
 
   it("reaudit --act twice on an unchanged queue appends the REAUDIT once", () => {
+    // deadbeef0000 is no commit of this repository: nothing can be diffed against it, so its note says so
+    // (it used to read "evidence changed: package.json", a change nobody had observed).
     trace(["write", "-"], draft({ evidence: [{ kind: "file_line", ref: "package.json:1" }], provenance: { workflow: "test", commit: "deadbeef0000" } }));
     const lines = () => readFileSync(store, "utf8").trim().split("\n").length;
     expect(trace(["reaudit", "--act"]).status).toBe(0);
     expect(lines()).toBe(2);
     expect(trace(["reaudit", "--act"]).status).toBe(0);
     expect(lines()).toBe(2);
-    expect(JSON.parse(readFileSync(store, "utf8").trim().split("\n")[1])).toMatchObject({ action: "REAUDIT", note: "evidence changed: package.json" });
+    expect(JSON.parse(readFileSync(store, "utf8").trim().split("\n")[1])).toMatchObject({ action: "REAUDIT", note: "provenance commit deadbeef0000 is unreachable — re-verify: package.json" });
   });
 
   it("act --from records BOTH actions and reuseActions when a result carries both", () => {
@@ -723,6 +725,62 @@ describe("CLI wiring, end to end in a throwaway repo", () => {
       writeFileSync(join(r.d, cited), "export const a = 2;\n");
       expect(r.cli(["reaudit", "--act"]).status).toBe(1);
       expect(readFileSync(join(r.d, "store.jsonl"), "utf8").trim().split("\n")).toHaveLength(1); // nothing appended
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  it("reaudit lists a record whose commit was squashed away as `unreachable`, apart from changed evidence, and --act notes it so", () => {
+    const r = tempRepo();
+    try {
+      mkdirSync(join(r.d, "src"), { recursive: true });
+      for (const f of ["a.ts", "b.ts"]) writeFileSync(join(r.d, "src", f), "export const a = 1;\n");
+      r.git("add", "-A");
+      r.git("commit", "-qm", "cited files");
+      const fact = (claim, ref) => JSON.stringify({ writer_id: "test", claim_id: claim, claim_text: claim, claim_type: "factual", evidence: [{ kind: "file_line", ref }], final_status: "accept", reason: "r", provenance: { workflow: "test" } });
+      expect(r.cli(["write", "-"], fact("cli:squashed", "src/a.ts:1")).status).toBe(0); // stamped with this commit
+      // Squash it away: rewrite the commit, then expire the reflog and prune, as gc after a squash-merge
+      // (or a fresh clone) leaves it. The tree is unchanged, so src/a.ts did not change either.
+      for (const step of [["commit", "-q", "--amend", "-m", "squashed"], ["reflog", "expire", "--expire=now", "--all"], ["gc", "-q", "--prune=now"]]) expect(r.git(...step).status).toBe(0);
+      expect(r.cli(["write", "-"], fact("cli:changed", "src/b.ts:1")).status).toBe(0); // stamped with the new HEAD
+      writeFileSync(join(r.d, "src", "b.ts"), "export const a = 2;\n");
+      const out = r.cli(["reaudit"]);
+      expect(out.status).toBe(0);
+      const byClaim = Object.fromEntries(JSON.parse(out.stdout).map((c) => [c.claim_id, c]));
+      expect(Object.keys(byClaim).sort()).toEqual(["cli:changed", "cli:squashed"]);
+      expect(byClaim["cli:squashed"]).toMatchObject({ unreachable: expect.stringMatching(/^[0-9a-f]{12}$/), paths: ["src/a.ts"] });
+      expect(byClaim["cli:squashed"].changed).toBeUndefined();
+      expect(byClaim["cli:changed"]).toMatchObject({ changed: ["src/b.ts"] });
+      expect(byClaim["cli:changed"].unreachable).toBeUndefined();
+      expect(r.cli(["reaudit", "--act"]).status).toBe(0);
+      const notes = readFileSync(join(r.d, "store.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l)).filter((e) => e.kind === "action").map((a) => a.note);
+      expect(notes.sort()).toEqual(["evidence changed: src/b.ts", `provenance commit ${byClaim["cli:squashed"].unreachable} is unreachable — re-verify: src/a.ts`]);
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  it("wiki-check: the template's rec comments over an empty store name no record (exit 1) until stripped (exit 0); a store that does not replay exits 2", () => {
+    const r = tempRepo(); // its memory holds only the policy page: no index.md or quarantine.md (tolerated)
+    try {
+      const policy = join(r.d, ".claude/memory/topics/trace.md");
+      const cited = [...readFileSync(policy, "utf8").matchAll(/<!--\s*rec:(TR-[0-9a-f]{12})\s*-->/g)].map((m) => m[1]);
+      expect(cited.length).toBeGreaterThan(0);
+      const out = r.cli(["wiki-check"]);
+      expect(out.status).toBe(1);
+      const res = JSON.parse(out.stdout);
+      expect(res.ok).toBe(false);
+      expect(res.errors).toHaveLength(cited.length);
+      expect(res.errors.every((e) => /names no record/.test(e) && /strip the comment/.test(e))).toBe(true);
+      // The adoption guide's fix for a store started empty: strip the comments, keep the facts as legacy bullets.
+      writeFileSync(policy, readFileSync(policy, "utf8").replace(/\s*<!--\s*rec:TR-[0-9a-f]{12}\s*-->/g, ""));
+      const clean = r.cli(["wiki-check"]);
+      expect(clean.status).toBe(0);
+      expect(JSON.parse(clean.stdout)).toMatchObject({ ok: true, errors: [], pages: 1 });
+      writeFileSync(join(r.d, "store.jsonl"), "{not json\n");
+      const broken = r.cli(["wiki-check"]);
+      expect(broken.status).toBe(2);
+      expect(JSON.parse(broken.stdout).ok).toBe(false);
     } finally {
       r.cleanup();
     }

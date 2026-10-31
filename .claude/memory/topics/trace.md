@@ -162,6 +162,17 @@ implementation, gaps into the synthesized order), and no durable state changes o
   `human` item is trusted by its kind (a blog cited as a rule, or a PR comment as a human
   decision, passes), and only a `scheme://` URL is recognized (a scheme-less `example.com/x`
   or an `http:/…` form is not).
+- **Wiki ↔ store agreement** — `pnpm trace wiki-check` (and a contracts test in `pnpm test`):
+  each `<!-- rec:TR-… -->` comment in a topic page names the latest record for its claim, a
+  licensing one, with a `COMMIT`/`COMMIT_QUALIFIED` whose `--ref` is that page; each latest
+  licensing `wiki:` record committed to a `topics/` page is still cited, since a fact leaves
+  the wiki only through a revising record (`/dream` lint 1e), never a silent delete (a ref
+  outside `topics/`, such as a bridged domain wiki, is not checked); `quarantine.md`'s rows
+  are exactly the latest `QUARANTINE`d records; `index.md` stays within 150 lines (a topic
+  page over 200 lines, or this page over 400, is a warning). Partial: a legacy bullet without
+  a rec comment is not checked, and whether a cited fact still holds is `pnpm trace
+  reaudit`'s queue (a record whose commit the repository no longer has is listed apart, as
+  `unreachable`).
 - **Merges** — `.gitattributes` merges `records.jsonl` as a union (both branches' appends
   survive); `pnpm trace lint` (in `pnpm test`) is the post-merge check. Replay errors only
   on merge-invariant violations (schema, content-hash ids, unknown targets, verdict vs

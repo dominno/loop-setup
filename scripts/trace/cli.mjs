@@ -26,6 +26,7 @@ import {
   DEFAULT_STORE,
   latestByClaim,
   loadEntries,
+  loadWiki,
   TREE_ID_EXCLUDES,
   treeFingerprint,
   loadSchema,
@@ -37,6 +38,7 @@ import {
   rotateStore,
   scoreBench,
   storeMetrics,
+  wikiViolations,
   writeRecords,
 } from "./lib.mjs";
 import { DEFAULT_PLAN, parsePlan, planItems, planViolations, readyIds } from "./plan.mjs";
@@ -76,7 +78,11 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
                                        coverage map) against itself and the store (consistency, not truth): one status
                                        per story everywhere, plus the log row, coverage and licensing Record: line its
                                        level needs — exit 1 on an error; an absent story map passes
-  pnpm trace reaudit [--act]           licensing records whose file evidence changed since their commit
+  pnpm trace wiki-check                the memory wiki (.claude/memory) against the store (consistency, not truth): rec:
+                                       comments, committed facts, quarantine rows, page sizes — JSON {ok, errors,
+                                       warnings}; exit 1 on an error, 2 when the store does not replay
+  pnpm trace reaudit [--act]           licensing records whose file evidence changed since their commit; one whose
+                                       commit the repo no longer has (squashed away) is listed apart, as unreachable
   pnpm trace metrics                   store-level consumer-value metrics
   pnpm trace rotate [--max 500] [--keep 200]   lossless move of old lines into <YYYY>.jsonl archives
   pnpm trace bench-args [--arms verifier,single-pass,panel] [--repeat N] [--critics a,b] [--only B01-x,G01-y]
@@ -140,7 +146,7 @@ function codeText() {
 }
 
 function changedSince(commit, path) {
-  // Compare the record's commit to the working tree; an unknown commit counts as
+  // Compare the record's commit to the working tree; a diff that fails counts as
   // changed (fail closed: re-audit rather than trust stale evidence).
   try {
     execFileSync("git", ["diff", "--quiet", commit, "--", path], { cwd: ROOT, stdio: "ignore" });
@@ -148,6 +154,12 @@ function changedSince(commit, path) {
   } catch {
     return true;
   }
+}
+
+// Does the repository still have the commit? One squashed away and pruned (or absent from a shallow
+// clone) cannot be diffed against: reaudit lists its record apart instead of as "evidence changed".
+function reachable(commit) {
+  return git(["cat-file", "-e", `${commit}^{commit}`]) !== null;
 }
 
 function out(obj, asJson) {
@@ -407,6 +419,19 @@ async function main() {
     return errors.length ? 1 : 0;
   }
 
+  if (cmd === "wiki-check") {
+    // Every cited fact must be on record and every committed fact still cited; a store that does not
+    // replay can vouch for neither (its broken lines would read as "names no record").
+    if (state.errors.length) {
+      out({ ok: false, errors: [`the record store does not replay (${state.errors.length} error(s)) — the wiki cannot be checked against it; run pnpm trace lint`], warnings: [], store: storePath }, true);
+      return 2;
+    }
+    const wiki = loadWiki();
+    const { errors, warnings } = wikiViolations({ ...wiki, state });
+    out({ ok: errors.length === 0, errors, warnings, pages: wiki.pages.length, store: storePath }, true);
+    return errors.length ? 1 : 0;
+  }
+
   if (cmd === "show") {
     const id = pos[0];
     const rec = state.records.get(id);
@@ -445,10 +470,11 @@ async function main() {
   }
 
   if (cmd === "reaudit") {
-    const cands = reauditCandidates(state.records, state.superseded, changedSince);
+    const cands = reauditCandidates(state.records, state.superseded, changedSince, reachable);
     if (flags.act && cands.length) {
+      const note = (c) => (c.unreachable ? `provenance commit ${c.unreachable} is unreachable — re-verify: ${c.paths.join(", ")}` : `evidence changed: ${c.changed.join(", ")}`);
       const res = appendActions(
-        cands.map((c) => ({ record_id: c.record_id, consumer: "dream", action: "REAUDIT", note: `evidence changed: ${c.changed.join(", ")}` })),
+        cands.map((c) => ({ record_id: c.record_id, consumer: "dream", action: "REAUDIT", note: note(c) })),
         { storePath, now, policyVersion, schema, forbidden: benchForbidden() },
       );
       out(res, true);

@@ -17,7 +17,7 @@ import {
   renameSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -573,8 +573,12 @@ export function pathFromRef(ref) {
 /**
  * Re-audit (Mnemosyne reconsolidation): latest licensing records whose file evidence
  * changed since the record's commit. `changedSince(commit, path) → boolean` is injected.
+ * So is `reachable(commit) → boolean`: a record whose commit the repository no longer has
+ * (squashed away and pruned, or a shallow clone) cannot be diffed at all, so it is listed
+ * apart — `unreachable` plus every cited path, each needing a re-check — never as
+ * "evidence changed".
  */
-export function reauditCandidates(records, superseded, changedSince) {
+export function reauditCandidates(records, superseded, changedSince, reachable = () => true) {
   const out = [];
   for (const r of latestByClaim(records, superseded).values()) {
     if (!LICENSING.includes(r.final_status)) continue;
@@ -590,10 +594,138 @@ export function reauditCandidates(records, superseded, changedSince) {
         }
       }
     }
+    if (!paths.size) continue;
+    if (!reachable(r.provenance.commit)) {
+      out.push({ record_id: r.record_id, claim_id: r.claim_id, claim_text: r.claim_text, unreachable: r.provenance.commit, paths: [...paths] });
+      continue;
+    }
     const changed = [...paths].filter((p) => changedSince(r.provenance.commit, p));
     if (changed.length) out.push({ record_id: r.record_id, claim_id: r.claim_id, claim_text: r.claim_text, changed });
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Wiki ↔ store agreement (`pnpm trace wiki-check`): the memory-admission contract of /dream
+// (topics/trace.md) checked mechanically. Consistency, not truth: whether a cited fact still
+// holds is `pnpm trace reaudit`'s queue, and a legacy bullet (one without a rec comment, older
+// than TRACE) is not checked at all.
+
+/** The memory wiki's directory. Pages are named relative to it ("topics/<page>.md"), as action refs are. */
+export const MEMORY_DIR = join(ROOT, ".claude/memory");
+/** The page directory wiki-check scans: every <WIKI_TOPICS>/*.md page in MEMORY_DIR. */
+export const WIKI_TOPICS = "topics";
+/**
+ * Size limits. index.md is imported into every session, so passing its limit is an error; a
+ * topic page is read on demand, so passing its limit is a warning (propose a split). The policy
+ * page (POLICY_PATH) carries the whole TRACE policy and is parsed by tests, so its limit is higher.
+ */
+export const WIKI_LIMITS = {
+  indexMaxLines: 150,
+  pageMaxLines: 200,
+  policyPage: relative(MEMORY_DIR, POLICY_PATH).split(sep).join("/"),
+  policyPageMaxLines: 400,
+};
+// Only the provenance-comment form cites a record (ingest writes `<!-- rec:TR-… -->`); an id in prose does not.
+const REC_COMMENT = /<!--\s*rec:(TR-[0-9a-f]{12})\s*-->/g;
+const QUARANTINE_ROW = /^\|\s*(TR-[0-9a-f]{12})\s*\|/gm;
+const COMMIT_ACTIONS = ["COMMIT", "COMMIT_QUALIFIED"];
+/** Lines as `wc -l` counts them, plus a last line that has no newline. */
+const lineCount = (text) => (text === "" ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0));
+const lineOf = (text, index) => text.slice(0, index).split("\n").length;
+/** An action ref as a page path: refs are relative to .claude/memory, written with or without that prefix. */
+const pageRef = (ref) => String(ref || "").replace(/^\.claude\/memory\//, "");
+/** A ref to a page in the scanned directory, whether or not that page still exists (a deleted page's facts stay checked). */
+const inWikiPages = (ref) => new RegExp(`^${WIKI_TOPICS}/[^/]+\\.md$`).test(ref);
+
+/**
+ * Where the wiki and the store disagree. pages = [{ path: "topics/<page>.md", text }];
+ * quarantine and index = that file's text, or null when it is missing; state = replay(…).
+ * Errors: a rec comment that names no record, a superseded, outdated or non-licensing one, or
+ * one with no COMMIT/COMMIT_QUALIFIED whose ref is the citing page; a latest licensing wiki:
+ * record committed to a topics/ page that no page cites (a ref outside topics/, such as a
+ * bridged domain wiki, is not checked); quarantine.md rows and the latest QUARANTINEd records
+ * differing either way; index.md over its limit. Warnings: a page over its limit.
+ */
+export function wikiViolations({ pages = [], quarantine = null, index = null, state, limits = WIKI_LIMITS }) {
+  const errors = [];
+  const warnings = [];
+  const { records, actions, superseded } = state;
+  const latest = latestByClaim(records, superseded);
+  const actionsOf = (id) => actions.get(id) || [];
+  const committedTo = (id) => [...new Set(actionsOf(id).filter((a) => COMMIT_ACTIONS.includes(a.action)).map((a) => pageRef(a.ref)))];
+  const revisedBy = new Map([...records.values()].filter((r) => r.revises).map((r) => [r.revises, r.record_id]));
+  const cited = new Set();
+
+  for (const { path, text } of pages) {
+    const t = String(text ?? "");
+    const n = lineCount(t);
+    const max = path === limits.policyPage ? limits.policyPageMaxLines : limits.pageMaxLines;
+    if (n > max) warnings.push(`${path}: ${n} lines (> ${max}) — propose a split; moving a fact is a COMMIT with the new --ref (/dream lint 1e)`);
+    for (const m of t.matchAll(REC_COMMENT)) {
+      const id = m[1];
+      const at = `${path}:${lineOf(t, m.index)}: rec:${id}`;
+      cited.add(id);
+      const r = records.get(id);
+      if (!r) {
+        errors.push(`${at} names no record in the store — admit the fact through /dream (its record, then COMMIT --ref ${path}); if you started the store empty (an adopter), strip the comment and keep the fact as a legacy bullet`);
+        continue;
+      }
+      if (superseded.has(id)) {
+        errors.push(`${at} is superseded: ${revisedBy.get(id)} revises it — remove the bullet (a retired fact) or cite the claim's latest licensing record (a rewritten fact); /dream lint 1e`);
+        continue;
+      }
+      const cur = latest.get(r.claim_id);
+      if (cur.record_id !== id) {
+        errors.push(`${at} is not the latest record for ${r.claim_id}: ${cur.record_id} is newer — cite the latest licensing record, or retire the bullet; /dream lint 1e`);
+        continue;
+      }
+      if (!LICENSING.includes(r.final_status)) {
+        errors.push(`${at} is a "${r.final_status}" record — only an accept/qualify record licenses a wiki fact (a deferred candidate is a quarantine.md row)`);
+        continue;
+      }
+      const refs = committedTo(id);
+      if (!refs.includes(path)) {
+        const verb = r.final_status === "qualify" ? "COMMIT_QUALIFIED" : "COMMIT";
+        errors.push(
+          `${at} has no COMMIT/COMMIT_QUALIFIED action with --ref ${path}` +
+            (refs.length ? ` (it is committed to ${refs.join(", ")}: moving a fact is a ${verb} with the new --ref)` : ` — once the bullet is written: pnpm trace act ${id} dream ${verb} --ref ${path}`),
+        );
+      }
+    }
+  }
+
+  for (const r of latest.values()) {
+    if (!String(r.claim_id).startsWith("wiki:") || !LICENSING.includes(r.final_status) || cited.has(r.record_id)) continue;
+    const refs = committedTo(r.record_id).filter(inWikiPages);
+    if (refs.length) {
+      errors.push(`${r.record_id} (${r.claim_id}) is committed to ${refs.join(", ")} but no topic page cites it — a fact leaves the wiki only through a revising record (/dream lint 1e), never a silent delete: restore its bullet ending in <!-- rec:${r.record_id} -->, or retire it`);
+    }
+  }
+
+  const quarantined = (id) => actionsOf(id).some((a) => a.action === "QUARANTINE");
+  const q = String(quarantine ?? "");
+  const rows = new Set();
+  for (const m of q.matchAll(QUARANTINE_ROW)) {
+    const id = m[1];
+    const at = `quarantine.md:${lineOf(q, m.index)}: ${id}`;
+    rows.add(id);
+    const r = records.get(id);
+    if (!r) errors.push(`${at} names no record in the store — a row lists a candidate /dream deferred (its record, then QUARANTINE --ref quarantine.md)`);
+    else if (superseded.has(id) || latest.get(r.claim_id).record_id !== id) errors.push(`${at} was re-adjudicated: ${revisedBy.get(id) || latest.get(r.claim_id).record_id} is newer — remove its row (/dream lint 1d)`);
+    else if (!quarantined(id)) errors.push(`${at} has no QUARANTINE action — only a candidate /dream quarantined has a row`);
+  }
+  for (const r of latest.values()) {
+    if (quarantined(r.record_id) && !rows.has(r.record_id)) {
+      errors.push(`${r.record_id} (${r.claim_id}) is QUARANTINEd but quarantine.md has no row for it — add its row (record | candidate fact | missing | since)`);
+    }
+  }
+
+  if (index != null) {
+    const n = lineCount(String(index));
+    if (n > limits.indexMaxLines) errors.push(`index.md: ${n} lines (> ${limits.indexMaxLines}) — it is imported into every session: keep it to summaries and links (facts belong in topic pages)`);
+  }
+  return { errors, warnings };
 }
 
 // ---------------------------------------------------------------------------
@@ -873,6 +1005,29 @@ export function storeFiles(storePath) {
 
 export function loadEntries(storePath) {
   return storeFiles(storePath).flatMap((f) => parseLines(readFileSync(f, "utf8"), f));
+}
+
+/**
+ * The memory wiki as wikiViolations reads it: every <WIKI_TOPICS>/*.md page (sorted, its path
+ * relative to memoryDir), quarantine.md and index.md. A missing file is null; a missing topics/
+ * directory means no pages.
+ */
+export function loadWiki(memoryDir = MEMORY_DIR) {
+  const read = (p) => {
+    try {
+      return readFileSync(p, "utf8");
+    } catch {
+      return null; // missing, or not a regular file
+    }
+  };
+  let names = [];
+  try {
+    names = readdirSync(join(memoryDir, WIKI_TOPICS)).filter((f) => f.endsWith(".md")).sort();
+  } catch {
+    // no topics/ directory: no pages
+  }
+  const pages = names.map((f) => ({ path: `${WIKI_TOPICS}/${f}`, text: read(join(memoryDir, WIKI_TOPICS, f)) })).filter((p) => p.text !== null);
+  return { pages, quarantine: read(join(memoryDir, "quarantine.md")), index: read(join(memoryDir, "index.md")) };
 }
 
 /**

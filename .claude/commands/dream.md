@@ -1,7 +1,7 @@
 ---
 description: Self-learning pass — ingest durable learnings into the project knowledge wiki and lint it
 argument-hint: [ingest | query <question> | lint] (default: ingest this session)
-allowed-tools: Read, Grep, Glob, Edit(.claude/memory/**), Write(.claude/memory/**), Edit(.claude/skills-index.md), Bash(git diff:*), Bash(git log:*), Bash(pnpm trace write:*), Bash(pnpm trace act:*), Bash(pnpm trace lint), Bash(pnpm trace reaudit:*), Bash(pnpm trace rotate), Bash(pnpm trace show:*), Bash(pnpm trace query:*), Bash(pnpm -s trace query:*)
+allowed-tools: Read, Grep, Glob, Edit(.claude/memory/**), Write(.claude/memory/**), Edit(.claude/skills-index.md), Bash(git diff:*), Bash(git log:*), Bash(pnpm trace write:*), Bash(pnpm trace act:*), Bash(pnpm trace lint), Bash(pnpm trace wiki-check), Bash(pnpm trace reaudit:*), Bash(pnpm trace rotate), Bash(pnpm trace show:*), Bash(pnpm trace query:*), Bash(pnpm -s trace query:*)
 ---
 
 Run a **self-learning ("dream") pass** over the project knowledge wiki at
@@ -19,6 +19,13 @@ $ARGUMENTS
 - `.claude/memory/index.md` — small catalog, imported every session. Summaries +
   links only, no facts. **Keep it small.**
 - `.claude/memory/topics/*.md` — one page per subject; the actual facts live here.
+  **Grammar:** one verifiable fact per bullet, ending in the provenance comment of the
+  record that admitted it, `<!-- rec:TR-… -->` (ingest step 4). Legacy bullets without
+  one predate TRACE: `pnpm trace wiki-check` does not check them, and rewriting one is
+  lint 1e (iii).
+- **Limits** (`pnpm trace wiki-check` checks them; they are written here, not in the
+  always-loaded index): `index.md` at most 150 lines (an error), a topic page at most 200
+  lines (a warning: propose a split), the policy page `topics/trace.md` at most 400.
 - `.claude/memory/log.md` — append-only operation history.
 - `.claude/memory/quarantine.md` — candidate facts held back by the admission gate
   (TRACE `defer`), each with the `missing` evidence that would admit it. Not imported.
@@ -53,6 +60,10 @@ $ARGUMENTS
    is not local (or that does not parse) in any evidence kind but
    `rule`/`human`/`record`/`reading`, and a `file_line` that is not repo-relative
    (`topics/trace.md`, Record guarantees).
+   **Freshness (optional):** a fact that holds only for a tool version also cites the line
+   that pins the version (e.g. `package.json:<line>`) as `file_line`, so `pnpm trace
+   reaudit` re-queues it when that file changes — path-level (any change to the file
+   re-queues it) and report-only.
    Then give it a verdict:
    - `accept` — durable and verified now at its type's evidence standard → `COMMIT`;
    - `qualify` — verified, but true only under a stated condition (a version, an
@@ -74,7 +85,8 @@ $ARGUMENTS
    `index.md`. **Only after** the bullet/row is written, append the consumer action
    (`pnpm trace act <id> dream COMMIT --ref topics/<page>.md`, `COMMIT_QUALIFIED`,
    `QUARANTINE --ref quarantine.md`, or `REJECT`) — the record of a decision must never
-   precede the change it records.
+   precede the change it records. Then run `pnpm trace wiki-check`: it must report no
+   errors.
 5. If a learning is really a session-governing rule (a do/don't policy or a
    completion gate), it belongs in `CLAUDE.md`. Show the proposed `CLAUDE.md` edit and
    apply it **only after explicit confirmation** — `CLAUDE.md` is a core governing
@@ -103,20 +115,46 @@ $ARGUMENTS
    their own page, missing cross-references, and an `index.md` that drifted from
    the topic pages.
 1b. **Record store integrity:** run `pnpm trace lint` and report any error (never
-   hand-edit the store — a fix is a new record via `pnpm trace write`). Also check store ↔
-   wiki agreement: every `rec:` comment in a topic page names a record with a
-   `COMMIT`/`COMMIT_QUALIFIED` action, and every quarantine row names a `QUARANTINE`d
-   record — report mismatches.
+   hand-edit the store — a fix is a new record via `pnpm trace write`). Then run
+   `pnpm trace wiki-check` — store ↔ wiki agreement (`topics/trace.md`, Record
+   guarantees) — and report every error and warning. Each error names its fix: a
+   forgotten consumer action or quarantine row is clerical (ingest step 4, 1d); a fact
+   whose bullet vanished without a record is restored, or retired through 1e; a stale
+   citation is rewritten or retired through 1e. A size warning is a split proposal.
 1c. **Re-audit (reconsolidation):** run `pnpm trace reaudit` — it lists committed facts
-   whose cited evidence file changed since the record's commit. For each, find the
-   bullets citing `rec:<id>`, re-verify them, and **report** the stale ones (rewriting or
-   removing a fact still needs confirmation). `pnpm trace reaudit --act` appends a
-   `REAUDIT` action so the queue is itself on record.
+   whose cited evidence file changed since the record's commit (`changed`) and, apart
+   from them, facts whose record's commit the repository no longer has (`unreachable`:
+   squashed away and pruned, or a shallow clone), where nothing can be diffed, so every
+   cited path needs a re-check. For each, find the bullets citing `rec:<id>`, re-verify
+   them, and **report** the stale ones (rewriting or removing a fact still needs
+   confirmation, then 1e). `pnpm trace reaudit --act` appends a `REAUDIT` action so the
+   queue is itself on record.
 1d. **Quarantine review:** for each row in `.claude/memory/quarantine.md`, check whether
    its `missing` evidence is now available. If so, re-adjudicate with a new record that
    `revises` the quarantined one — promote it (`COMMIT` + file it per ingest step 4) or
    `REJECT` it — and then remove its quarantine row (clerical: quarantine rows are not
    facts, and the record keeps the history). Otherwise leave it.
+1e. **Retire, rewrite or move a fact — only after the user confirms.** Keep ingest step
+   4's order: the record first, then the page edit, then the consumer action (the record
+   of a decision never precedes the change it records). In (i) and (ii) the new record
+   keeps the cited record's `claim_id`; `pnpm trace wiki-check` is clean when a flow ends.
+   - (i) **Retire a recorded fact:** write a `reject` record that `revises` the cited one,
+     with the check that refuted it as evidence → remove the bullet →
+     `pnpm trace act <new> dream REJECT`.
+   - (ii) **Rewrite a recorded fact:** write a new `accept`/`qualify` record that
+     `revises` the cited one, licensed by a local check run this session (3b) → rewrite
+     the bullet to cite the new id → `pnpm trace act <new> dream COMMIT --ref
+     topics/<page>.md` (`COMMIT_QUALIFIED` for a `qualify`). Never a `revise` record:
+     `COMMIT` is allowed only on `accept` (`COMMIT_QUALIFIED` on `accept`/`qualify`), so a
+     revise is never committed.
+   - (iii) **Rewrite a legacy bullet** (no rec comment): write a new `accept`/`qualify`
+     record with no `revises` (claim_id `wiki:<topic>:<slug>`) → edit the bullet and end
+     it with its `<!-- rec:TR-… -->` → `pnpm trace act <new> dream COMMIT --ref
+     topics/<page>.md` (or `COMMIT_QUALIFIED`). A legacy bullet has no record to revise,
+     so removing one is the confirmed edit alone.
+   - **Move a fact** to another page (a split): move the bullet unchanged →
+     `pnpm trace act <id> dream COMMIT --ref topics/<new-page>.md` (or `COMMIT_QUALIFIED`);
+     its record stays the same.
 2. Health-check the **skills index** (`.claude/skills-index.md`): every command in
    `.claude/commands/*.md` has a `description` and a row in the index; **flag**
    (report, don't auto-remove) any index rows for commands that no longer exist and

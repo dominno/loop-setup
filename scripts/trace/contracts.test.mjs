@@ -11,8 +11,11 @@ import {
   EVIDENCE_POLICY,
   POLICY_PATH,
   ROOT,
+  WIKI_LIMITS,
   loadEntries,
   loadSchema,
+  loadWiki,
+  wikiViolations,
   benchArgs,
   briefRecords,
   contaminatedRuns,
@@ -163,6 +166,22 @@ describe("committed record store", () => {
   it("replays cleanly — every record and action satisfies the contract", () => {
     const state = replay(loadEntries(DEFAULT_STORE), schema, readPolicyVersion());
     expect(state.errors).toEqual([]);
+  });
+
+  // `pnpm trace wiki-check` over the real wiki: every rec: comment, every committed fact and every
+  // quarantine row agrees with the store. (Mid-ingest, between a bullet and its COMMIT, this is red.)
+  it("the wiki agrees with the store", () => {
+    const state = replay(loadEntries(DEFAULT_STORE), schema, readPolicyVersion());
+    expect(wikiViolations({ ...loadWiki(), state }).errors).toEqual([]);
+  });
+
+  // The policy page is parsed by tests and grows with the policy, so its own size limit is measured on
+  // the real page, not only on a synthetic one: past it, split the page rather than raise the limit.
+  it("the real policy page is scanned and within its own size limit", () => {
+    const wiki = loadWiki();
+    expect(wiki.pages.map((p) => p.path)).toContain(WIKI_LIMITS.policyPage);
+    const state = replay(loadEntries(DEFAULT_STORE), schema, readPolicyVersion());
+    expect(wikiViolations({ ...wiki, state }).warnings.filter((w) => w.startsWith(`${WIKI_LIMITS.policyPage}:`))).toEqual([]);
   });
 });
 

@@ -72,7 +72,7 @@ CLAUDE.md                         Project rules + multi-agent workflow + doc-sca
     story-gap-analysis.md         Gap analysis: docs vs code vs E2E
     improve-skills.md             Self-improvement pass over the prompts/workflows (confirmation-gated)
     bench-checkers.md             TRACE-Bench-lite: measure the checkers, report falsification flags
-scripts/trace/                    `pnpm trace …` — record writer, linter, re-audit, metrics, bench scoring, loop-plan DAG checks, story-map lint
+scripts/trace/                    `pnpm trace …` — record writer, linter, re-audit, metrics, bench scoring, loop-plan DAG checks, story-map lint, wiki check
 docs/
   adoption-guide.md               How to adopt this template in a real project
   loop-integration-guide.md       How to add hardened recurring /loop automations to a project
@@ -266,12 +266,13 @@ status, a fact headed for the wiki — gets a typed verdict and an append-only r
 pnpm trace query --latest          # what has been adjudicated, and what is still deferred
 pnpm trace show TR-…               # one record + its consumer actions + revision chain
 pnpm trace lint                    # replay the store against the contract (also in pnpm test)
-pnpm trace reaudit                 # wiki facts whose evidence changed since they were committed
+pnpm trace reaudit                 # wiki facts whose evidence changed since they were committed (or whose commit is gone)
 pnpm trace metrics                 # consumer coverage, defer quality, repeated-error rate
 pnpm trace plan-ready              # the loop plan's ready nodes, computed (table order; --max N)
 pnpm trace plan-lint               # the loop plan vs its contract and the records (consistency, not truth)
 pnpm trace plan-items LP-002 …     # loop-iteration args.items for ready nodes (refuses a non-ready id)
 pnpm trace story-lint              # the story map vs itself and the records (consistency, not truth)
+pnpm trace wiki-check              # the memory wiki vs the records: rec: comments, quarantine rows, page sizes
 ```
 
 Policy, verdict semantics and what was deliberately *not* adopted:
