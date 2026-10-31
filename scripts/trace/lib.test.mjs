@@ -598,6 +598,18 @@ describe("memory write boundary (policy v3)", () => {
     // Only a file_line names repo evidence: a command may run a path anywhere.
     expect(semanticViolations(wikiDefer([{ kind: "command", ref: "/usr/bin/node /tmp/sigdemo.mjs" }]))).toEqual([]);
   });
+
+  it("a wiki diff ref names repo paths too: each comma-separated part, trimmed, as reaudit reads it", () => {
+    for (const [i, ref] of ["/tmp/fix.patch", "src/a.ts, ../x.patch", " /tmp/fix.patch"].entries()) {
+      const [res] = writeRecords([fact([{ kind: "diff", ref }], { claim_id: `wiki:testing:diff-refused-${i}` })], v3());
+      expect(res.stored, JSON.stringify(ref)).toBe(false);
+      expect(why(res), JSON.stringify(ref)).toMatch(/repo-relative/);
+    }
+    expect(existsSync(store)).toBe(false);
+    const [res] = writeRecords([fact([{ kind: "diff", ref: "src/a.ts, src/b.ts" }], { claim_id: "wiki:testing:diff-stored" })], v3());
+    expect(why(res)).toBe("");
+    expect(res.stored).toBe(true);
+  });
 });
 
 describe("secrets never enter the store", () => {

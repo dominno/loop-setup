@@ -787,7 +787,7 @@ describe("CLI wiring, end to end in a throwaway repo", () => {
     }
   });
 
-  it("wiki-check: the template's rec comments over an empty store name no record (exit 1) until stripped (exit 0); a store that does not replay exits 2", () => {
+  it("wiki-check: the template's rec comments over an empty store name no record (exit 1) until stripped (exit 0, and a size warning alone still exits 0); a store that does not replay exits 2", () => {
     const r = tempRepo(); // its memory holds only the policy page: no index.md or quarantine.md (tolerated)
     try {
       const policy = join(r.d, ".claude/memory/topics/trace.md");
@@ -804,6 +804,14 @@ describe("CLI wiring, end to end in a throwaway repo", () => {
       const clean = r.cli(["wiki-check"]);
       expect(clean.status).toBe(0);
       expect(JSON.parse(clean.stdout)).toMatchObject({ ok: true, errors: [], pages: 1 });
+      // A warning alone never fails the run: a topic page over 200 lines is a split proposal, not an error.
+      writeFileSync(join(r.d, ".claude/memory/topics/big.md"), Array.from({ length: 201 }, (_, i) => `line ${i + 1}`).join("\n") + "\n");
+      const warned = r.cli(["wiki-check"]);
+      expect(warned.status).toBe(0);
+      const sized = JSON.parse(warned.stdout);
+      expect(sized).toMatchObject({ ok: true, errors: [], pages: 2 });
+      expect(sized.warnings).toHaveLength(1);
+      expect(sized.warnings[0].startsWith("topics/big.md: 201 lines (> 200)")).toBe(true);
       writeFileSync(join(r.d, "store.jsonl"), "{not json\n");
       const broken = r.cli(["wiki-check"]);
       expect(broken.status).toBe(2);

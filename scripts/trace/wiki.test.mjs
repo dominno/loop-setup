@@ -63,6 +63,8 @@ const lines = (n) => Array.from({ length: n }, (_, i) => `line ${i + 1}`).join("
 const check = (wiki = {}) => wikiViolations({ pages: [], quarantine: null, index: null, ...wiki, state: replay(loadEntries(store), schema, POLICY) });
 const quarantineTable = (...ids) =>
   ["# Memory quarantine", "", "| record | candidate fact | missing (what would admit it) | since |", "|---|---|---|---|", ...ids.map((id) => `| ${id} | a candidate | a reproduction | 2026-10-30 |`), ""].join("\n");
+/** A candidate /dream deferred: a defer naming what would admit it (the quarantine path). */
+const candidate = (over = {}) => ({ claim_id: "wiki:workflow:scratch", claim_text: "subagents can remove each other's scratch worktrees", final_status: "defer", missing: ["a reproduction"], evidence: [], ...over });
 
 describe("wikiViolations: the wiki and the record store agree", () => {
   it("an empty wiki with an empty store is clean", () => {
@@ -82,6 +84,29 @@ describe("wikiViolations: the wiki and the record store agree", () => {
     const { errors } = check({ pages: [page(PAGE, cite("TR-000000000000"), "- tight <!--rec:TR-222222222222-->", "- prose naming rec:TR-111111111111 cites nothing")] });
     expect(errors.map((e) => e.split(" names no record")[0])).toEqual(["topics/testing.md:3: rec:TR-000000000000", "topics/testing.md:4: rec:TR-222222222222"]);
     expect(errors.every((e) => /strip the comment and keep the fact as a legacy bullet/.test(e))).toBe(true);
+  });
+
+  it("a malformed rec comment is an error naming the form, never a legacy bullet; a well-formed one, a rec: in prose, another comment and the form shown as code are not", () => {
+    const id = write();
+    expect(act(id, "COMMIT", PAGE)).toBe(true);
+    const malformed = ["<!-- rec:TR-ABCDEF123456 -->", "<!-- rec:TR-abcdef12345 -->", "<!-- rec:TR-abcdef1234567 -->", "<!-- rec:abcdef123456 -->", "<!-- rec:TR-123 -->", "<!--rec: TR-abcdef123456-->"];
+    // A well-formed citation further down the page excuses none of them.
+    const { errors } = check({ pages: [page(PAGE, ...malformed.map((c) => `- a fact ${c}`), cite(id))] });
+    expect(errors.map((e) => e.split(": the form is ")[0])).toEqual(malformed.map((c, i) => `topics/testing.md:${i + 3}: malformed rec comment ${c}`));
+    expect(errors.every((e) => e.includes(": the form is <!-- rec:TR-<12 lowercase hex> -->"))).toBe(true);
+    const clean = page(
+      PAGE,
+      cite(id),
+      "- prose naming rec:TR-ABCDEF123456 or rec:TR-123 cites nothing <!-- trace-policy-version: 3 -->",
+      "- the form, shown as code: `<!-- rec:TR-… -->`",
+      "```md",
+      "- a fact <!-- rec:TR-<12 hex> -->",
+      "```",
+      "~~~",
+      "- a fact <!-- rec:TR-ABCDEF123456 -->",
+      "~~~",
+    );
+    expect(check({ pages: [clean] })).toEqual({ errors: [], warnings: [] });
   });
 
   it("a COMMIT ref to another page gives an error that names where the record is committed", () => {
@@ -116,19 +141,35 @@ describe("wikiViolations: the wiki and the record store agree", () => {
     expect(errors[0].startsWith(`topics/testing.md:3: rec:${d} is a "defer" record`)).toBe(true);
   });
 
-  it("a committed fact that no page cites is an error when its ref is a topics/ page (even one since deleted); a ref outside topics/, such as a bridged domain wiki, is ignored", () => {
+  it("a committed fact that no page cites is an error when its ref is a topics/ page (even one since deleted); a ref outside topics/, such as a bridged domain wiki, is ignored, and so is a record whose claim is not a wiki: fact", () => {
     const kept = write();
     const gone = write({ claim_id: "wiki:old:x", claim_text: "a fact on a page that was deleted" });
     const bridged = write({ claim_id: "wiki:domain:billing", claim_text: "a domain fact filed into the bridged wiki" });
+    const critic = write({ writer_id: "critic-panel", claim_id: "critic:a11y:x", claim_text: "the input has no label", provenance: { workflow: "critic-panel" } });
     expect(act(kept, "COMMIT", PAGE)).toBe(true);
     expect(act(gone, "COMMIT", "topics/old.md")).toBe(true);
     expect(act(bridged, "COMMIT", "docs/wiki/billing.md")).toBe(true);
+    expect(act(critic, "COMMIT", PAGE)).toBe(true); // licensing and committed to a topics/ page, but not a wiki: claim
     const { errors } = check({ pages: [page(PAGE)] });
     expect(errors.map((e) => e.split(" but no topic page cites it")[0])).toEqual([
       `${kept} (wiki:testing:file-parallelism) is committed to topics/testing.md`,
       `${gone} (wiki:old:x) is committed to topics/old.md`,
     ]);
     expect(errors.every((e) => /never a silent delete/.test(e))).toBe(true);
+    expect(errors.join("\n")).not.toContain(critic);
+  });
+
+  it("an action ref may start with ./ (with or without .claude/memory/ after it): uncited it is the reverse-rule error, cited it is clean", () => {
+    const id = write();
+    const q = write({ claim_id: "wiki:testing:announcer", claim_text: "Next injects a route announcer with role=alert", final_status: "qualify", qualifier: "observed on Next 16" });
+    expect(act(id, "COMMIT", `./${PAGE}`)).toBe(true);
+    expect(act(q, "COMMIT_QUALIFIED", `./.claude/memory/${PAGE}`)).toBe(true);
+    const { errors } = check({ pages: [page(PAGE)] });
+    expect(errors.map((e) => e.split(" but no topic page cites it")[0])).toEqual([
+      `${id} (wiki:testing:file-parallelism) is committed to topics/testing.md`,
+      `${q} (wiki:testing:announcer) is committed to topics/testing.md`,
+    ]);
+    expect(check({ pages: [page(PAGE, cite(id), cite(q))] })).toEqual({ errors: [], warnings: [] });
   });
 
   it("quarantine.md rows and the latest QUARANTINEd records agree, in both directions", () => {
@@ -151,6 +192,52 @@ describe("wikiViolations: the wiki and the record store agree", () => {
     expect(readjudicated).toHaveLength(1);
     expect(readjudicated[0].startsWith(`quarantine.md:5: ${d} was re-adjudicated: ${promoted} is newer`)).toBe(true);
     expect(check({ quarantine: quarantineTable() }).errors).toEqual([]);
+  });
+
+  // The quarantine follows /dream's LAST decision on the record — COMMIT, COMMIT_QUALIFIED, QUARANTINE or REJECT
+  // (a HOLD or REAUDIT decides nothing) — so a candidate rejected or filed directly, without a revising record, leaves it.
+  it("a quarantined defer REJECTed directly is no longer quarantined: clean once its row is gone, and a remaining row is the error naming that decision", () => {
+    const d = write(candidate());
+    expect(act(d, "QUARANTINE", "quarantine.md")).toBe(true);
+    expect(act(d, "REJECT")).toBe(true);
+    expect(check({ quarantine: quarantineTable() })).toEqual({ errors: [], warnings: [] });
+    expect(check({ quarantine: quarantineTable(d) }).errors).toEqual([`quarantine.md:5: ${d} is no longer quarantined (its last decision is REJECT) — remove its row (/dream lint 1d)`]);
+  });
+
+  it("a quarantined qualify later COMMIT_QUALIFIED and cited from its page is clean without a row, and a remaining row is the error", () => {
+    const q = write({ claim_id: "wiki:testing:announcer", claim_text: "Next injects a route announcer with role=alert", final_status: "qualify", qualifier: "observed on Next 16" });
+    expect(act(q, "QUARANTINE", "quarantine.md")).toBe(true);
+    expect(act(q, "COMMIT_QUALIFIED", PAGE)).toBe(true);
+    const pages = [page(PAGE, cite(q))];
+    expect(check({ pages, quarantine: quarantineTable() })).toEqual({ errors: [], warnings: [] });
+    expect(check({ pages, quarantine: quarantineTable(q) }).errors).toEqual([`quarantine.md:5: ${q} is no longer quarantined (its last decision is COMMIT_QUALIFIED) — remove its row (/dream lint 1d)`]);
+  });
+
+  it("a record whose last decision is QUARANTINE still needs its row: a HOLD or REAUDIT after it decides nothing, and a QUARANTINE after a REJECT counts", () => {
+    const held = write(candidate());
+    expect(act(held, "QUARANTINE", "quarantine.md")).toBe(true);
+    expect(act(held, "HOLD")).toBe(true);
+    expect(appendActions([{ record_id: held, consumer: "dream", action: "REAUDIT", note: "evidence changed: vitest.config.ts" }], ctx())[0].stored).toBe(true);
+    const back = write(candidate({ claim_id: "wiki:workflow:worktree-base", claim_text: "loop worktrees branch from the default base" }));
+    expect(act(back, "REJECT")).toBe(true);
+    expect(act(back, "QUARANTINE", "quarantine.md")).toBe(true);
+    const { errors } = check({ quarantine: quarantineTable() });
+    expect(errors.map((e) => e.split(" but quarantine.md has no row")[0])).toEqual([`${held} (wiki:workflow:scratch) is QUARANTINEd`, `${back} (wiki:workflow:worktree-base) is QUARANTINEd`]);
+    expect(check({ quarantine: quarantineTable(held, back) })).toEqual({ errors: [], warnings: [] });
+  });
+
+  it("the last decision is the newest by created_at, as latestByClaim orders records (a later line wins a tie): a later REJECT whose line a union merge put first still ends the quarantine", () => {
+    const d = write(candidate());
+    const at = (now) => ({ ...ctx(), now });
+    expect(appendActions([{ record_id: d, consumer: "dream", action: "REJECT" }], at("2026-10-30T13:00:20.000Z"))[0].stored).toBe(true); // merged in from another branch
+    expect(appendActions([{ record_id: d, consumer: "dream", action: "QUARANTINE", ref: "quarantine.md" }], at("2026-10-30T13:00:10.000Z"))[0].stored).toBe(true);
+    expect(check({ quarantine: quarantineTable() })).toEqual({ errors: [], warnings: [] });
+    expect(check({ quarantine: quarantineTable(d) }).errors).toEqual([`quarantine.md:5: ${d} is no longer quarantined (its last decision is REJECT) — remove its row (/dream lint 1d)`]);
+    // One batch stamps one created_at on every action, so its later line is the later decision.
+    const tie = write(candidate({ claim_id: "wiki:workflow:tie", claim_text: "a candidate decided twice in one batch" }));
+    const batch = appendActions([{ record_id: tie, consumer: "dream", action: "QUARANTINE", ref: "quarantine.md" }, { record_id: tie, consumer: "dream", action: "REJECT" }], ctx());
+    expect(batch.every((r) => r.stored)).toBe(true);
+    expect(check({ quarantine: quarantineTable() })).toEqual({ errors: [], warnings: [] });
   });
 
   it("index.md over 150 lines is an error; a topic page over 200 lines is a warning, and the policy page's limit is 400", () => {

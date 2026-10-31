@@ -200,15 +200,18 @@ export function validate(schema, value, root = schema, path = "$") {
 // a local check licenses the fact, so a licensing wiki verdict needs evidence other than
 // reading (the evidence gate alone lets a causal or predictive claim qualify on reading).
 // rule/human/record/reading are exempt from the URL check, so a WCAG URL stays citable as the
-// rule a normative fact invokes. Consistency, not truth: a page saved into the repo and cited
-// as file_line still passes, a rule or human item is trusted by its kind (a blog cited as a
-// rule passes), and only a scheme:// URL is recognized (a scheme-less example.com/x or an
-// http:/… form is not).
+// rule a normative fact invokes; a file_line, and each part of a diff ref, must be a repo path
+// (below). Consistency, not truth: a page saved into the repo and cited as file_line still
+// passes, a rule, human or record item is trusted by its kind (a blog cited as a rule, a PR
+// comment as a human decision, or any id cited as a record passes — a record ref is not
+// checked to name an existing record), and only a scheme:// URL is recognized (a scheme-less
+// example.com/x or an http:/… form is not).
 const URL_EXEMPT_KINDS = ["rule", "human", "record", "reading"];
 const LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]", "0.0.0.0"];
-// A wiki file_line names a repo file, the only kind `pnpm trace reaudit` can check: its
-// `git diff <commit> -- <path>` exits 128 outside the repo (the fact never leaves the queue),
-// and a ~ or drive-letter path never shows a change.
+// A wiki file_line, and each comma-separated part of a wiki diff ref, names a repo file — the
+// paths `pnpm trace reaudit` reads (refPathParts) and diffs: its `git diff <commit> -- <path>`
+// exits 128 outside the repo (the fact never leaves the queue), and a ~ or drive-letter path
+// never shows a change.
 const NOT_REPO_RELATIVE = /^(?:[/\\~]|[a-z]:[/\\])|(?:^|[/\\])\.\.(?:[/\\:]|$)/i;
 
 /** Is the URL's host this machine? Parsed, not pattern-matched: the host of
@@ -259,9 +262,11 @@ function wikiBoundaryViolations(rec) {
     if (url) {
       v.push(`${e.kind} evidence cites a URL whose host is not local or that does not parse (${url.slice(0, 80)}) — external content never licenses a wiki fact (policy v3): cite it as reading "external:<source>" and license the fact with a local check, or defer it`);
     }
-    // Trimmed, as pathFromRef reads it for reaudit: leading whitespace must not hide a / or ..
-    if (e.kind === "file_line" && NOT_REPO_RELATIVE.test(ref.trim())) {
-      v.push(`a wiki fact's file_line must be repo-relative — no leading / or ~, no drive letter, no .. segment (${ref.slice(0, 80)}): pnpm trace reaudit diffs repo paths only (policy v3)`);
+    // Every part reaudit reads as a path, trimmed as pathFromRef reads it: leading whitespace must not hide a / or ..
+    for (const part of refPathParts(e)) {
+      if (!NOT_REPO_RELATIVE.test(part.trim())) continue;
+      const what = e.kind === "diff" ? "diff ref must name repo-relative paths" : "file_line must be repo-relative";
+      v.push(`a wiki fact's ${what} — no leading / or ~, no drive letter, no .. segment (${part.slice(0, 80)}): pnpm trace reaudit diffs repo paths only (policy v3)`);
     }
   }
   return v;
@@ -570,6 +575,13 @@ export function pathFromRef(ref) {
   return m ? m[1] : null;
 }
 
+/** The parts of an evidence item that reaudit reads as paths (each through pathFromRef): a file_line's whole ref, each comma-separated part of a diff ref. */
+function refPathParts(e) {
+  if (e.kind === "file_line") return [String(e.ref || "")];
+  if (e.kind === "diff") return String(e.ref || "").split(/,\s*/);
+  return [];
+}
+
 /**
  * Re-audit (Mnemosyne reconsolidation): latest licensing records whose file evidence
  * changed since the record's commit. `changedSince(commit, path) → boolean` is injected.
@@ -584,14 +596,9 @@ export function reauditCandidates(records, superseded, changedSince, reachable =
     if (!LICENSING.includes(r.final_status)) continue;
     const paths = new Set();
     for (const e of r.evidence) {
-      if (e.kind === "file_line") {
-        const p = pathFromRef(e.ref);
+      for (const part of refPathParts(e)) {
+        const p = pathFromRef(part);
         if (p) paths.add(p);
-      } else if (e.kind === "diff") {
-        for (const part of String(e.ref).split(/,\s*/)) {
-          const p = pathFromRef(part);
-          if (p) paths.add(p);
-        }
       }
     }
     if (!paths.size) continue;
@@ -628,13 +635,37 @@ export const WIKI_LIMITS = {
 };
 // Only the provenance-comment form cites a record (ingest writes `<!-- rec:TR-… -->`); an id in prose does not.
 const REC_COMMENT = /<!--\s*rec:(TR-[0-9a-f]{12})\s*-->/g;
+// A comment that opens like one (`<!--`, optional whitespace, `rec:`) but is not exactly that form is a typo
+// and an error, never a legacy bullet: read as one, it would switch the check off for its fact. Outside code
+// only — the form shown as code (inline or fenced, as the policy page documents it) is not a comment.
+const REC_COMMENT_OPEN = /<!--\s*rec:/g;
+const REC_COMMENT_AT = new RegExp(`^${REC_COMMENT.source}`);
 const QUARANTINE_ROW = /^\|\s*(TR-[0-9a-f]{12})\s*\|/gm;
 const COMMIT_ACTIONS = ["COMMIT", "COMMIT_QUALIFIED"];
+// /dream's decisions on a candidate fact (the discipline table: COMMIT / COMMIT_QUALIFIED / QUARANTINE / REJECT).
+// A HOLD or REAUDIT decides nothing about where a fact lives, so it neither starts nor ends a quarantine.
+const WIKI_DECISIONS = [...COMMIT_ACTIONS, "QUARANTINE", "REJECT"];
 /** Lines as `wc -l` counts them, plus a last line that has no newline. */
 const lineCount = (text) => (text === "" ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0));
 const lineOf = (text, index) => text.slice(0, index).split("\n").length;
-/** An action ref as a page path: refs are relative to .claude/memory, written with or without that prefix. */
-const pageRef = (ref) => String(ref || "").replace(/^\.claude\/memory\//, "");
+/** An action ref as a page path: refs are relative to .claude/memory, written with or without that prefix (and a leading ./). */
+const pageRef = (ref) => String(ref || "").replace(/^(?:\.\/)?(?:\.claude\/memory\/)?/, "");
+/**
+ * The text with every inline `code` span and ``` / ~~~ fenced line overwritten by "_" (so offsets and line
+ * numbers hold, and code reads as neither a comment nor whitespace). Fences toggle as story-map.mjs reads them.
+ */
+function maskCode(text) {
+  const mask = (s) => "_".repeat(s.length);
+  let fenced = false;
+  return text
+    .split("\n")
+    .map((line) => {
+      if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
+      else if (!fenced) return line.replace(/(`+).*?\1/g, mask);
+      return mask(line);
+    })
+    .join("\n");
+}
 /** A ref to a page in the scanned directory, whether or not that page still exists (a deleted page's facts stay checked). */
 const inWikiPages = (ref) => new RegExp(`^${WIKI_TOPICS}/[^/]+\\.md$`).test(ref);
 
@@ -642,10 +673,11 @@ const inWikiPages = (ref) => new RegExp(`^${WIKI_TOPICS}/[^/]+\\.md$`).test(ref)
  * Where the wiki and the store disagree. pages = [{ path: "topics/<page>.md", text }];
  * quarantine and index = that file's text, or null when it is missing; state = replay(…).
  * Errors: a rec comment that names no record, a superseded, outdated or non-licensing one, or
- * one with no COMMIT/COMMIT_QUALIFIED whose ref is the citing page; a latest licensing wiki:
- * record committed to a topics/ page that no page cites (a ref outside topics/, such as a
- * bridged domain wiki, is not checked); quarantine.md rows and the latest QUARANTINEd records
- * differing either way; index.md over its limit. Warnings: a page over its limit.
+ * one with no COMMIT/COMMIT_QUALIFIED whose ref is the citing page; a malformed rec comment; a
+ * latest licensing wiki: record committed to a topics/ page that no page cites (a ref outside
+ * topics/, such as a bridged domain wiki, is not checked); quarantine.md rows and the latest
+ * records whose last decision is QUARANTINE differing either way; index.md over its limit.
+ * Warnings: a page over its limit.
  */
 export function wikiViolations({ pages = [], quarantine = null, index = null, state, limits = WIKI_LIMITS }) {
   const errors = [];
@@ -693,6 +725,11 @@ export function wikiViolations({ pages = [], quarantine = null, index = null, st
         );
       }
     }
+    for (const m of maskCode(t).matchAll(REC_COMMENT_OPEN)) {
+      if (REC_COMMENT_AT.test(t.slice(m.index))) continue;
+      const shown = /^<!--[^\n]*?(?:-->|$)/m.exec(t.slice(m.index))[0].slice(0, 80);
+      errors.push(`${path}:${lineOf(t, m.index)}: malformed rec comment ${shown}: the form is <!-- rec:TR-<12 lowercase hex> --> — correct it to cite the fact's record (a typo is never read as a legacy bullet)`);
+    }
   }
 
   for (const r of latest.values()) {
@@ -703,7 +740,14 @@ export function wikiViolations({ pages = [], quarantine = null, index = null, st
     }
   }
 
-  const quarantined = (id) => actionsOf(id).some((a) => a.action === "QUARANTINE");
+  // Quarantined while its LAST decision is QUARANTINE: a candidate later rejected or filed directly (REJECT and
+  // COMMIT_QUALIFIED need no revising record) has left it. Last = newest by created_at, as latestByClaim orders
+  // records (a later line wins a tie), so the line order a union merge leaves cannot flip it.
+  const lastDecision = (id) =>
+    actionsOf(id)
+      .filter((a) => WIKI_DECISIONS.includes(a.action))
+      .reduce((last, a) => (!last || a.created_at >= last.created_at ? a : last), null)?.action;
+  const quarantined = (id) => lastDecision(id) === "QUARANTINE";
   const q = String(quarantine ?? "");
   const rows = new Set();
   for (const m of q.matchAll(QUARANTINE_ROW)) {
@@ -713,7 +757,8 @@ export function wikiViolations({ pages = [], quarantine = null, index = null, st
     const r = records.get(id);
     if (!r) errors.push(`${at} names no record in the store — a row lists a candidate /dream deferred (its record, then QUARANTINE --ref quarantine.md)`);
     else if (superseded.has(id) || latest.get(r.claim_id).record_id !== id) errors.push(`${at} was re-adjudicated: ${revisedBy.get(id) || latest.get(r.claim_id).record_id} is newer — remove its row (/dream lint 1d)`);
-    else if (!quarantined(id)) errors.push(`${at} has no QUARANTINE action — only a candidate /dream quarantined has a row`);
+    else if (!actionsOf(id).some((a) => a.action === "QUARANTINE")) errors.push(`${at} has no QUARANTINE action — only a candidate /dream quarantined has a row`);
+    else if (!quarantined(id)) errors.push(`${at} is no longer quarantined (its last decision is ${lastDecision(id)}) — remove its row (/dream lint 1d)`);
   }
   for (const r of latest.values()) {
     if (quarantined(r.record_id) && !rows.has(r.record_id)) {

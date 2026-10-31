@@ -22,7 +22,9 @@ layer on top.
 .claude/loop-checklist.md          Readiness rubric to promote a loop's trust level (L0→L3)
 .claude/memory/loop-run-log.md     Durable, append-only loop run state
 .claude/memory/loop-plan.md        The plan/DAG every L2/L3 action traces to (incl. the `deferred` status)
-.claude/memory/trace/records.jsonl TRACE-lite record store — start it empty; written only via `pnpm trace`
+.claude/memory/trace/records.jsonl TRACE-lite record store — start it empty and strip topics/trace.md's
+                                   <!-- rec:TR-… --> comments (pnpm trace wiki-check exits 0); written
+                                   only via `pnpm trace`
 .claude/memory/topics/trace.md     The record policy: typed verdicts, evidence gate, consumer actions
 scripts/trace/  .claude/trace/     The `pnpm trace` CLI/tests + schema (and bench fixtures for /bench-checkers)
 ```
