@@ -107,6 +107,17 @@ const throwingSync = (prefix, reply) => (label, ...rest) => {
   if (label.startsWith(prefix)) throw Object.assign(new Error(`agent died synchronously: ${label}`), { sync: true });
   return reply(label, ...rest);
 };
+// A reply whose every field throws when read (only the thenable check passes): agent() resolves, so the
+// call site's .catch never runs, and the stage's OWN code then throws inside its .then(), so parallel()
+// or pipeline() leaves the slot null. Once every agent() starts inside a then(), this is the one way
+// left to lose a slot, so each slot-filling path is tested with it.
+const poisoned = () =>
+  new Proxy({}, {
+    get(_target, key) {
+      if (key === "then") return undefined;
+      throw new Error(`poisoned reply: ${String(key)} read`);
+    },
+  });
 // e2e-design: the category agents propose cases, then ONE separate judge ('e2e:judge-0') types each
 // deduped case by its number (1-based). Only the happy category proposes here, so case #n is the n-th
 // proposed case; `judge` gets the judge's prompt and returns its reply.
@@ -1050,6 +1061,42 @@ describe("critic-panel: the skeptic also receives the Lead's priorEvidence", () 
   });
 });
 
+// The roster lenses ride in the same prompt as <agent-safety>, whose rule (3) forbids pnpm dev, pnpm
+// test:e2e and pnpm verify anywhere. The Accessibility lens used to tell its critic to confirm against
+// `pnpm test:e2e e2e/a11y.spec.ts`; it now confirms against the Lead's axe result in priorEvidence and
+// reports a missing one as missing evidence. Both roster copies are checked (trace-bench measures its
+// copy). The Performance lens's `pnpm build` is no rule-(3) command: SAFETY (2) allows a build in a
+// scratch copy, so that lens is unchanged.
+describe("critic roster vs SAFETY: no lens tells a critic to run a command SAFETY rule (3) forbids", () => {
+  const A11Y_CONFIRM =
+    "Confirm pass/fail against the Lead's axe result in priorEvidence (`pnpm test:e2e e2e/a11y.spec.ts`, run by the Lead — never run it yourself); if none was supplied, report it as missing evidence; never assert a11y status from memory.";
+
+  it.each(["critic-panel.js", "trace-bench.js"])("%s: the Accessibility lens confirms against the Lead's axe result and never instructs running pnpm test:e2e", (file) => {
+    const { ALL_CRITICS } = loadWorkflowBlock(file, "critic-roster", ["ALL_CRITICS"]);
+    const a11y = ALL_CRITICS.find((c) => c.key === "accessibility").lens;
+    expect(a11y).toContain(A11Y_CONFIRM);
+    expect(a11y).not.toContain("an ACTUAL axe run (`pnpm test:e2e");
+    // Any lens that names a rule-(3) command says, in the same parenthesis, that the Lead runs it.
+    const unguarded = ALL_CRITICS.flatMap((c) =>
+      [...c.lens.matchAll(/pnpm (?:dev|test:e2e|verify)\b/g)]
+        .filter((m) => !c.lens.slice(m.index, c.lens.indexOf(")", m.index) + 1).includes("run by the Lead — never run it yourself"))
+        .map((m) => `${c.key}: ${m[0]}`),
+    );
+    expect(unguarded).toEqual([]);
+  });
+
+  it("the critic's prompt carries the new instruction after the SAFETY block, and its skeptic's critical questions are unchanged", async () => {
+    const { calls } = await runWorkflow("critic-panel.js", { focus: "x" }, (label) =>
+      label.startsWith("critic:accessibility") ? { findings: [finding({ claimType: "measured" })] } : label.startsWith("critic:") ? { findings: [] } : verdict(),
+    );
+    const critic = calls.find((c) => c.label.startsWith("critic:accessibility")).prompt;
+    // Pin the SAFETY sentence first: if it were reworded, indexOf would be -1 and the ordering check vacuous.
+    expect(critic).toContain("(3) Never run pnpm dev, pnpm test:e2e or pnpm verify anywhere");
+    expect(critic.indexOf(A11Y_CONFIRM)).toBeGreaterThan(critic.indexOf("(3) Never run pnpm dev, pnpm test:e2e or pnpm verify anywhere"));
+    expect(calls.find((c) => c.label.startsWith("verify:accessibility")).prompt).toContain("- Is there an axe result or keyboard run that shows it, or only code reading?");
+  });
+});
+
 // Cost bounds: an up-front story-batch cap (scan-docs), a per-round verifier cap whose overflow is
 // recorded as explicit defers, never dropped (critic-panel; opt-in in improve-skills), and budget
 // floors that fire only when the turn has a '+Nk' token target (budget.total set).
@@ -1385,6 +1432,75 @@ describe("cost bounds: budget floors (only with a '+Nk' token target)", () => {
     expect(above.result.licensedGaps).toBe(3);
     expect(above.result.deferred).toEqual([]);
   });
+
+  const loopDiff = "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-a\n+b\n";
+  const loopItems = [{ id: "LP-070", description: "x" }, { id: "LP-071", description: "y" }];
+  const loopLive = (label) =>
+    label.startsWith("impl:") ? { baseSha: HEAD_SHA, changedFiles: ["src/a.ts"], diff: loopDiff, checksPassed: true, notes: "" } : verdict({ evidenceChecked: [{ kind: "diff", ref: "src/a.ts" }] });
+
+  it("loop-iteration start floor (80k): zero agent calls and budgetStopped, every item escalated with no records (loop.md resets the nodes); 79k stops it, 81k starts it", async () => {
+    for (const [budget, left] of [[LOW, 5], [flat(79_000), 79]]) {
+      const { result, calls } = await runWorkflow("loop-iteration.js", { items: loopItems, level: "L2", headSha: HEAD_SHA }, noAgent, budget);
+      expect(calls, `${left}k`).toEqual([]);
+      expect(result, `${left}k`).toEqual({
+        level: "L2", applied: [], deferred: [], rejected: [], escalate: ["LP-070", "LP-071"], traceRecords: [], budgetStopped: true,
+        note: `budget floor reached (${left}k left < 80k) — no items processed; all 2 escalated for a later run`,
+      });
+    }
+    const above = await runWorkflow("loop-iteration.js", { items: loopItems, level: "L2", headSha: HEAD_SHA }, loopLive, flat(81_000));
+    expect(above.result.budgetStopped).toBeUndefined();
+    expect(above.calls.map((c) => c.label).sort()).toEqual(["impl:LP-070-0", "impl:LP-071-1", "verify:LP-070-0", "verify:LP-071-1"]);
+    expect(above.result.applied.map((o) => o.id)).toEqual(["LP-070", "LP-071"]);
+  });
+
+  const metaOf = (severity, title) => ({ severity, file: "CLAUDE.md", title, evidence: "CLAUDE.md:1", proposedEdit: "tighten it" });
+  const safeSkeptic = { real: true, editSafe: true, saferEdit: "", missing: [], evidenceChecked: [{ kind: "rule", ref: "CLAUDE.md: never weaken a gate" }, { kind: "file_line", ref: "CLAUDE.md:1" }], reason: "ok" };
+  const metaReply = (label) =>
+    label.startsWith("meta:safety")
+      ? { findings: [metaOf("blocker", "Gate weakened"), metaOf("important", "Confirmation missing"), metaOf("nice-to-have", "Typo")] }
+      : label.startsWith("meta:")
+        ? { findings: [] }
+        : safeSkeptic;
+
+  it("improve-skills verify floor (60k): the lenses review, then no skeptic starts — budgetStop, every blocker and important finding a recorded unverified defer, nothing apply-ready; 59k stops it, 61k starts it", async () => {
+    const SKIPPED = "adversarial verification (skipped: token budget floor reached before the verify phase)";
+    for (const [budget, left] of [[LOW, 5], [flat(59_000), 59]]) {
+      const { result, calls, logs } = await runWorkflow("improve-skills.js", { targets: ["CLAUDE.md"] }, metaReply, budget);
+      expect(calls.filter(VERIFY), `${left}k`).toEqual([]);
+      expect(calls, `${left}k`).toHaveLength(6); // the six lenses still review: the floor guards Verify only
+      expect(result.budgetStop, `${left}k`).toBe(true);
+      expect(result.error, `${left}k`).toBeUndefined();
+      expect([result.applyReady, result.needsDesign, result.refuted], `${left}k`).toEqual([[], [], []]);
+      expect(result.deferred.map((f) => [f.severity, f.title, f.verdict, f.editSafe, f.failedGates, f.missing]), `${left}k`).toEqual([
+        ["blocker", "Gate weakened", "defer", false, ["not-verified"], [SKIPPED]],
+        ["important", "Confirmation missing", "defer", false, ["not-verified"], [SKIPPED]],
+      ]);
+      expect(result.niceToHaves.map((f) => f.title), `${left}k`).toEqual(["Typo"]);
+      expect(result.traceRecords.map((r) => [r.final_status, r.failed_gates]), `${left}k`).toEqual([["defer", ["not-verified"]], ["defer", ["not-verified"]]]);
+      expectWritable(result.traceRecords);
+      expect(logs.map((l) => l.text).filter((t) => t.startsWith(`budget floor reached (${left}k left) — skipping adversarial verify; 2 findings deferred`)), `${left}k`).toHaveLength(1);
+    }
+    const above = await runWorkflow("improve-skills.js", { targets: ["CLAUDE.md"] }, metaReply, flat(61_000));
+    expect(above.result.budgetStop).toBe(false);
+    expect(above.calls.filter(VERIFY)).toHaveLength(2);
+    expect(above.result.applyReady.map((f) => f.title)).toEqual(["Gate weakened", "Confirmation missing"]);
+    expect(above.result.deferred).toEqual([]);
+  });
+
+  it("trace-bench floor (60k): its documented stop — an error, no runs, budgetStopped, zero agent calls; 59k stops it, 61k runs it", async () => {
+    const fixtures = [{ id: "fx-00000001", item: "x", patch: loopDiff }];
+    const args = { fixtures, arms: ["verifier", "single-pass"], repeat: 1 };
+    for (const [budget, left] of [[LOW, 5], [flat(59_000), 59]]) {
+      const { result, calls } = await runWorkflow("trace-bench.js", args, noAgent, budget);
+      expect(calls, `${left}k`).toEqual([]);
+      expect(result, `${left}k`).toEqual({ error: `budget floor reached (${left}k left) — bench not run`, runs: [], budgetStopped: true });
+    }
+    const above = await runWorkflow("trace-bench.js", args, (label) => (label.startsWith("bench-verify:") ? verdict({ evidenceChecked: [{ kind: "diff", ref: "src/a.ts" }] }) : { block: false, findings: [], reason: "ok" }), flat(61_000));
+    expect(above.result.budgetStopped).toBeUndefined();
+    expect(above.result.error).toBeUndefined();
+    expect(above.calls).toHaveLength(2);
+    expect(above.result.runs.map((r) => [r.arm, r.noVerdict])).toEqual([["verifier", false], ["single-pass", false]]);
+  });
 });
 
 // A floor fires only with a '+Nk' token target. Without one, budget.total is null and remaining()
@@ -1452,6 +1568,41 @@ describe("cost bounds: with no token target no floor fires, even at remaining() 
     expect(result.cases.map((c) => c.index)).toEqual([1]);
     expect(result.deferred).toEqual([]);
   });
+
+  const diff = "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-a\n+b\n";
+  it("loop-iteration start floor: every implementer and verifier runs and the item is applied", async () => {
+    const { result, calls } = await runWorkflow("loop-iteration.js", { items: [{ id: "LP-072", description: "x" }], level: "L2", headSha: HEAD_SHA }, (label) =>
+      label.startsWith("impl:") ? { baseSha: HEAD_SHA, changedFiles: ["src/a.ts"], diff, checksPassed: true, notes: "" } : verdict({ evidenceChecked: [{ kind: "diff", ref: "src/a.ts" }] }),
+    NO_TARGET);
+    expect(calls.map((c) => c.label)).toEqual(["impl:LP-072-0", "verify:LP-072-0"]);
+    expect(result.budgetStopped).toBeUndefined();
+    expect(result.applied.map((o) => o.id)).toEqual(["LP-072"]);
+  });
+
+  it("improve-skills verify floor: every blocker and important finding gets its skeptic (budgetStop false)", async () => {
+    const meta = { severity: "blocker", file: "CLAUDE.md", title: "Gate weakened", evidence: "CLAUDE.md:1", proposedEdit: "restore it" };
+    const { result, calls } = await runWorkflow("improve-skills.js", { targets: ["CLAUDE.md"] }, (label) =>
+      label.startsWith("meta:safety")
+        ? { findings: [meta] }
+        : label.startsWith("meta:")
+          ? { findings: [] }
+          : { real: true, editSafe: true, saferEdit: "", missing: [], evidenceChecked: [{ kind: "rule", ref: "CLAUDE.md rule" }, { kind: "file_line", ref: "CLAUDE.md:1" }], reason: "ok" },
+    NO_TARGET);
+    expect(calls.filter((c) => c.label.startsWith("verify:")).map((c) => c.label)).toEqual(["verify:safety-gating:0"]);
+    expect(result.budgetStop).toBe(false);
+    expect(result.applyReady.map((f) => f.title)).toEqual(["Gate weakened"]);
+    expect(result.deferred).toEqual([]);
+  });
+
+  it("trace-bench floor: the bench runs every agent", async () => {
+    const { result, calls } = await runWorkflow("trace-bench.js", { fixtures: [{ id: "fx-00000001", item: "x", patch: diff }], arms: ["verifier", "single-pass"], repeat: 1 }, (label) =>
+      label.startsWith("bench-verify:") ? verdict({ evidenceChecked: [{ kind: "diff", ref: "src/a.ts" }] }) : { block: false, findings: [], reason: "ok" },
+    NO_TARGET);
+    expect(calls).toHaveLength(2);
+    expect(result.error).toBeUndefined();
+    expect(result.budgetStopped).toBeUndefined();
+    expect(result.runs).toHaveLength(2);
+  });
 });
 
 // Cases the round-integrity tests did not pin (each kills a named mutation of critic-panel.js).
@@ -1474,8 +1625,8 @@ describe("critic-panel completion and failedReviewers: qualified blockers, impor
     }
   });
 
-  it("panel: a critic whose agent() throws synchronously (a null parallel() slot, past its .catch) is named by its lens key and the round completes", async () => {
-    const { result, logs } = await runWorkflow("critic-panel.js", code, throwingSync("critic:qa-e2e", () => ({ findings: [] })));
+  it("panel: a critic whose stage code throws (a null parallel() slot, past its .catch) is named by its lens key and the round completes", async () => {
+    const { result, logs } = await runWorkflow("critic-panel.js", code, (label) => (label.startsWith("critic:qa-e2e") ? poisoned() : { findings: [] }));
     expect(logs.some((l) => l.text.startsWith("agent failed: critic:qa-e2e"))).toBe(false); // the .catch never ran: the slot itself is null
     expect(result.failedReviewers).toEqual(["qa-e2e"]);
     expect(result.error).toBeUndefined();
@@ -1699,6 +1850,47 @@ describe("loop dispatch hygiene: base-checked worktree implementers, maxItems, r
   });
 });
 
+// The loop's DENYLIST covers the gate runner too, not only the gate code under scripts/trace: a one-line
+// patch to vitest.config.ts's include (or to package.json's "test" script) used to pass denylist-check
+// and turn `pnpm test` into a green run that skips every scripts/** gate. So the root package.json, the
+// test/lint/type/E2E runner configs and every path under the root scripts/ directory are protected.
+// e2e/ and src/ stay open (the loop's real work), and so does a scripts/ directory that is not the
+// root one.
+describe("loop denylist: the gate runner (root package.json, runner configs, root scripts/) is protected too", () => {
+  const HIT = [
+    "vitest.config.ts", "package.json", "eslint.config.mjs", "tsconfig.json", "playwright.config.ts",
+    "scripts/hooks/stop-gate.test.mjs", "scripts/template-docs.test.mjs", "scripts/check-bundle-size.mjs", "scripts/trace/lib.mjs",
+  ];
+  const CLEAR = ["src/app/page.tsx", "e2e/smoke.spec.ts", "src/scripts/x.ts"];
+
+  it.each(["loop-iteration.js", "trace-bench.js"])("%s: the production hitsDenylist hits every gate-runner path and leaves src/ and e2e/ open", (file) => {
+    const { hitsDenylist } = loadWorkflowBlock(file, "loop-denylist", ["hitsDenylist"]);
+    expect(HIT.filter((p) => !hitsDenylist([p]))).toEqual([]);
+    expect(CLEAR.filter((p) => hitsDenylist([p]))).toEqual([]);
+  });
+
+  it("the loop gate escalates an implementer diff that touches one of them before any verifier runs; a src/ or e2e/ diff goes on to the verifier", async () => {
+    const patch = (p) => `diff --git a/${p} b/${p}\n--- a/${p}\n+++ b/${p}\n@@ -1 +1 @@\n-a\n+b\n`;
+    const run = (p) =>
+      runWorkflow("loop-iteration.js", { items: [{ id: "LP-080", description: "x" }], level: "L2", headSha: HEAD_SHA }, (label) =>
+        label.startsWith("impl:") ? { baseSha: HEAD_SHA, changedFiles: [p], diff: patch(p), checksPassed: true, notes: "" } : verdict({ evidenceChecked: [{ kind: "diff", ref: p }] }),
+      );
+    for (const p of HIT) {
+      const { result, calls } = await run(p);
+      expect(calls.filter(VERIFY), p).toEqual([]);
+      expect(result.rejected.map((o) => o.status), p).toEqual(["escalated-denylist"]);
+      expect(result.rejected[0].failedGates, p).toEqual([expect.stringMatching(new RegExp(`^denylist:${p.replace(/[.]/g, "\\.")}(,|$)`))]);
+      expect(result.escalate, p).toEqual(["LP-080"]);
+      expectWritable(result.traceRecords);
+    }
+    for (const p of CLEAR) {
+      const { result, calls } = await run(p);
+      expect(calls.filter(VERIFY).map((c) => c.label), p).toEqual(["verify:LP-080-0"]);
+      expect(result.applied.map((o) => o.id), p).toEqual(["LP-080"]);
+    }
+  });
+});
+
 // pipeline() calls EVERY stage as (prevResult, originalItem, index), the first stage included (its
 // prevResult is the item itself). A first stage declared (story, i) reads the item as its index and
 // labels 'evidence:US-001-[object Object]'. Labels always include the map index
@@ -1847,9 +2039,9 @@ describe("pipeline fidelity: a dead first-stage agent never vanishes (the stub m
     }
   });
 
-  it("loop-iteration: an implementer or verifier whose agent() throws synchronously (before its .catch attaches) leaves a null slot, filled after the pipeline as the same 'agent-failed' defer — never dropped, never applied", async () => {
+  it("loop-iteration: an implementer or verifier stage whose own code throws (past its .catch) leaves a null slot, filled after the pipeline as the same 'agent-failed' defer — never dropped, never applied", async () => {
     for (const prefix of ["impl:LP-061", "verify:LP-061"]) {
-      const { result, logs } = await loop(throwingSync(prefix, loopLive));
+      const { result, logs } = await loop((label, ...rest) => (label.startsWith(prefix) ? poisoned() : loopLive(label, ...rest)));
       const want = deadMiddle(LOST_ITEM);
       expect(logs.some((l) => l.text.startsWith(`agent failed: ${prefix}`)), prefix).toBe(false); // the .catch never ran: the slot itself is null
       expect(logs.map((l) => l.text), prefix).toContain("WARNING: pipeline slot 1 (LP-061) came back null: a stage threw, so no report survived — deferred as agent-failed (re-dispatch)");
@@ -1963,6 +2155,207 @@ describe("pipeline fidelity: a dead first-stage agent never vanishes (the stub m
     expect(dsl[0].prompt).toContain("never resolves to null");
     expect(dsl[0].prompt).toContain("never filtered away");
     expect(dsl[0].prompt).not.toContain("guarded first pipeline stage");
+  });
+});
+
+// Every agent() these workflows start begins inside a then() (`Promise.resolve().then(() => agent(…))
+// .catch(agentFailed(label))`), so an agent() that throws synchronously, before it returns a promise,
+// takes its call site's .catch exactly as a rejection does: agentFailed logs it and the stage's null path
+// records it. Before, such a throw skipped the .catch, so a skeptic's finding was filtered out of a round
+// that then read clean, and a top-level judge or synthesizer crashed the whole script.
+describe("every agent() starts inside a then(): a synchronous throw takes its call site's .catch", () => {
+  const diff = "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-a\n+b\n";
+  const died = (label) => `agent failed: ${label}: agent died synchronously: ${label}`;
+  const texts = (logs) => logs.map((l) => l.text);
+  const code = { focus: "x", uiInScope: false, reviewMode: "panel" };
+  const metaFinding = { severity: "important", file: "CLAUDE.md", title: "Gate weakened", evidence: "CLAUDE.md:1", proposedEdit: "restore it" };
+  const NO_SKEPTIC_VERDICT = "a verdict from the verifier (none was returned)";
+
+  it("critic-panel single-pass: a reviewer that throws synchronously is a failed reviewer for every lens and the round an error, never a crashed script", async () => {
+    const { result, logs } = await runWorkflow("critic-panel.js", { focus: "x", uiInScope: false }, throwingSync("critic:all-lenses", () => verdict()));
+    expect(texts(logs)).toContain(died("critic:all-lenses-0"));
+    expect(result.reviewMode).toBe("single-pass");
+    expect(result.failedReviewers).toEqual(CODE_LENSES);
+    expect(result.error).toBe("all 5 lens(es) failed (infra) — no review happened; re-run");
+    expect(result.completion.verdict).toBe("defer");
+    expect(result.counts.reviewAgents).toBe(1);
+  });
+
+  it("critic-panel panel: a critic that throws synchronously is logged and named by its lens key; every critic throwing so is the whole-round error", async () => {
+    const { result, logs } = await runWorkflow("critic-panel.js", code, throwingSync("critic:qa-e2e", () => ({ findings: [] })));
+    expect(texts(logs)).toContain(died("critic:qa-e2e-1"));
+    expect(result.failedReviewers).toEqual(["qa-e2e"]);
+    expect(result.error).toBeUndefined();
+    expect(result.completion).toMatchObject({ verdict: "defer", missing: ["a review through the qa-e2e lens — its reviewer failed (infra)"] });
+    const all = await runWorkflow("critic-panel.js", code, throwingSync("critic:", () => ({ findings: [] })));
+    expect(all.result.failedReviewers).toEqual(CODE_LENSES);
+    expect(all.result.error).toBe("all 5 lens(es) failed (infra) — no review happened; re-run");
+    expect(all.calls.filter(VERIFY)).toEqual([]);
+  });
+
+  it("critic-panel: a skeptic that throws synchronously defers its blocker or important finding (verdict-missing + agent-failed) and holds completion at defer — in both review modes, never a clean round", async () => {
+    const two = [finding(), finding({ severity: "important", title: "Token logged" })];
+    for (const [reviewMode, reply] of [
+      ["panel", onlySecurity(two)],
+      ["single-pass", () => ({ findings: two.map((f) => ({ ...f, lens: "security" })) })],
+    ]) {
+      const { result, logs } = await runWorkflow("critic-panel.js", { ...code, reviewMode }, throwingSync("verify:", reply));
+      expect(texts(logs), reviewMode).toEqual(expect.arrayContaining([died("verify:security:0"), died("verify:security:1")]));
+      expect(result.counts.deferred, reviewMode).toBe(2);
+      expect(result.deferred.map((f) => [f.severity, f.title, f.failedGates, f.missing]), reviewMode).toEqual([
+        ["blocker", "Input has no accessible name", ["verdict-missing", "agent-failed"], [NO_VERDICT]],
+        ["important", "Token logged", ["verdict-missing", "agent-failed"], [NO_VERDICT]],
+      ]);
+      expect(result.confirmed, reviewMode).toEqual([]);
+      expect(result.completion.verdict, reviewMode).toBe("defer");
+      expect(result.completion.missing.join("\n"), reviewMode).toContain('blocker "Input has no accessible name" (security) is deferred');
+      expect(result.traceRecords.map((r) => [r.final_status, r.failed_gates]), reviewMode).toEqual([
+        ["defer", ["verdict-missing", "agent-failed"]],
+        ["defer", ["verdict-missing", "agent-failed"]],
+      ]);
+      expectWritable(result.traceRecords);
+    }
+  });
+
+  it("improve-skills: a lens that throws synchronously is logged and named by its key (every lens so is the error, with no Verify); a skeptic that throws so defers its finding as agent-failed", async () => {
+    const lens = await runWorkflow("improve-skills.js", { targets: ["CLAUDE.md"] }, throwingSync("meta:safety-gating", () => ({ findings: [] })));
+    expect(texts(lens.logs)).toContain(died("meta:safety-gating-2"));
+    expect(lens.result.failedReviewers).toEqual(["safety-gating"]);
+    expect(lens.result.error).toBeUndefined();
+    const all = await runWorkflow("improve-skills.js", { targets: ["CLAUDE.md"] }, throwingSync("meta:", () => ({ findings: [] })));
+    expect(all.result.error).toBe("all 6 lens(es) failed (infra) — no review happened; re-run");
+    expect(all.calls.filter(VERIFY)).toEqual([]);
+    const { result, logs } = await runWorkflow("improve-skills.js", { targets: ["CLAUDE.md"] }, throwingSync("verify:", (label) => (label.startsWith("meta:safety") ? { findings: [metaFinding] } : { findings: [] })));
+    expect(texts(logs)).toContain(died("verify:safety-gating:0"));
+    expect(result.counts.deferred).toBe(1);
+    expect(result.refuted).toEqual([]);
+    expect(result.deferred.map((f) => [f.title, f.verdict, f.editSafe, f.failedGates, f.missing])).toEqual([["Gate weakened", "defer", false, ["verdict-missing", "agent-failed"], [NO_SKEPTIC_VERDICT]]]);
+    expect(result.traceRecords).toEqual([expect.objectContaining({ final_status: "defer", failed_gates: ["verdict-missing", "agent-failed"] })]);
+    expectWritable(result.traceRecords);
+  });
+
+  it("e2e-design: a category that throws synchronously is logged and named (every category so is the error); a judge that throws so defers every case, never a crashed script", async () => {
+    const live = (label) =>
+      label.startsWith("e2e:judge") ? { verdicts: [1, 2, 3, 4].map((i) => caseVerdict(i)) } : { cases: [{ title: `case for ${label}`, steps: "s", expected: "a visible greeting" }] };
+    const edge = await runWorkflow("e2e-design.js", { flow: "greeting" }, throwingSync("e2e:edge", live));
+    expect(texts(edge.logs)).toContain(died("e2e:edge-2"));
+    expect(edge.result.error).toBeUndefined();
+    expect(edge.result.failedCategories).toEqual(["edge"]);
+    expect(edge.result.count).toBe(4);
+    const all = await runWorkflow("e2e-design.js", { flow: "greeting" }, throwingSync("e2e:", live));
+    expect(all.result.error).toBe("all 5 path categories failed (infra) — no cases were designed; re-run");
+    expect(all.calls.filter(JUDGE)).toEqual([]);
+    const proposed = [e2eCase("greets by name"), e2eCase("greets again after reload")];
+    const { result, calls, logs } = await runWorkflow("e2e-design.js", { flow: "greeting" }, throwingSync("e2e:judge", happyOnly(proposed, () => null)));
+    expect(texts(logs)).toContain(died("e2e:judge-0"));
+    expect(calls.filter(JUDGE)).toHaveLength(1);
+    expect(result.error).toBeUndefined();
+    expect(result.judged).toBe(false);
+    expect(result.cases).toEqual([]);
+    expect(result.deferred.map((c) => [c.index, c.verdict, c.failedGates, c.missing])).toEqual(proposed.map((_c, i) => [i + 1, "defer", ["verdict-missing", "agent-failed"], [NO_VERDICT]]));
+  });
+
+  it("gap-analysis: a finder that throws synchronously is logged and its dimension failed; a synthesizer that throws so leaves the licensed gaps unordered with a named missing, never a crashed script", async () => {
+    const found = Object.fromEntries(GAP_KEYS.map((k) => [k, [gapItem(`a ${k} gap`)]]));
+    const finder = await runWorkflow("gap-analysis.js", { scope: "mvp" }, throwingSync("gap:impl-not-unit", gapStub(found)));
+    expect(texts(finder.logs)).toContain(died("gap:impl-not-unit-2"));
+    expect(finder.result.error).toBeUndefined();
+    expect(finder.result.failedDimensions).toEqual(["impl-not-unit"]);
+    const { result, calls, logs } = await runWorkflow("gap-analysis.js", { scope: "mvp" }, throwingSync("synthesize", gapStub(found)));
+    expect(texts(logs)).toContain(died("synthesize"));
+    expect(calls.filter(SYNTH)).toHaveLength(1);
+    expect(result.error).toBeUndefined();
+    expect(result.licensedGaps).toBe(7);
+    expect(result.recommendedOrder).toBeNull();
+    expect(result.missing).toEqual(["a synthesized order — the synthesizer failed (infra); the licensed gaps are listed unordered in byDimension"]);
+  });
+
+  it("loop-iteration: an implementer that throws synchronously is the dead-implementer defer (re-dispatch); a verifier that throws so defers its item verdict-missing + agent-failed with the diff kept — neither is a lost slot", async () => {
+    const items = [{ id: "LP-060", description: "x" }, { id: "LP-061", description: "y" }, { id: "LP-062", description: "z" }];
+    const live = (label) => (label.startsWith("impl:") ? { baseSha: HEAD_SHA, changedFiles: ["src/a.ts"], diff, checksPassed: true, notes: "" } : verdict({ evidenceChecked: [{ kind: "diff", ref: "src/a.ts" }] }));
+    const records = (result) => result.traceRecords.map((r) => [r.writer_id, r.final_status, r.failed_gates, r.missing]);
+    const accepted = (id, i) => [`loop-iteration/verify:${id}-${i}`, "accept", [], []];
+    const lost = (logs) => texts(logs).filter((t) => t.startsWith("WARNING: pipeline slot"));
+
+    const impl = await runWorkflow("loop-iteration.js", { items, level: "L2", headSha: HEAD_SHA }, throwingSync("impl:LP-061", live));
+    expect(texts(impl.logs)).toContain(died("impl:LP-061-1"));
+    expect(lost(impl.logs)).toEqual([]);
+    expect(impl.result.error).toBeUndefined();
+    expect(impl.calls.filter(VERIFY).map((c) => c.label)).toEqual(["verify:LP-060-0", "verify:LP-062-2"]);
+    expect(impl.result.applied.map((o) => o.id)).toEqual(["LP-060", "LP-062"]);
+    const deadImpl = "a diff from the implementer (the implementer agent failed — re-dispatch)";
+    expect(impl.result.deferred).toEqual([expect.objectContaining({ id: "LP-061", status: "deferred", diff: "", failedGates: ["agent-failed"], missing: [deadImpl] })]);
+    expect(records(impl.result)).toEqual([accepted("LP-060", 0), ["loop-iteration/verify:LP-061-1", "defer", ["agent-failed"], [deadImpl]], accepted("LP-062", 2)]);
+    expectWritable(impl.result.traceRecords);
+
+    const ver = await runWorkflow("loop-iteration.js", { items, level: "L2", headSha: HEAD_SHA }, throwingSync("verify:LP-061", live));
+    expect(texts(ver.logs)).toContain(died("verify:LP-061-1"));
+    expect(lost(ver.logs)).toEqual([]);
+    expect(ver.result.error).toBeUndefined();
+    expect(ver.result.applied.map((o) => o.id)).toEqual(["LP-060", "LP-062"]);
+    expect(ver.result.deferred).toEqual([expect.objectContaining({ id: "LP-061", status: "deferred", diff, failedGates: ["verdict-missing", "agent-failed"], missing: [NO_VERDICT] })]);
+    expect(records(ver.result)).toEqual([accepted("LP-060", 0), ["loop-iteration/verify:LP-061-1", "defer", ["verdict-missing", "agent-failed"], [NO_VERDICT]], accepted("LP-062", 2)]);
+    expectWritable(ver.result.traceRecords);
+    // A lone item whose verifier throws so is a verifier failure, never the all-implementers-failed error.
+    const lone = await runWorkflow("loop-iteration.js", { items: [items[1]], level: "L2", headSha: HEAD_SHA }, throwingSync("verify:", live));
+    expect(lone.result.error).toBeUndefined();
+    expect(lone.result.deferred.map((o) => o.failedGates)).toEqual([["verdict-missing", "agent-failed"]]);
+  });
+
+  it("trace-bench: a bench agent that throws synchronously is one logged noVerdict run, never a vanished one (every arm)", async () => {
+    const fixtures = [{ id: "fx-00000001", item: "x", patch: diff }, { id: "fx-00000002", item: "y", patch: diff }];
+    const ok = (label) => (label.startsWith("bench-verify:") ? verdict({ evidenceChecked: [{ kind: "diff", ref: "src/a.ts" }] }) : { block: false, findings: [], reason: "ok" });
+    for (const [arm, prefix] of [["verifier", "bench-verify:fx-00000001"], ["single-pass", "bench-single:fx-00000001"], ["panel", "bench-panel:fx-00000001:security"]]) {
+      const { result, logs } = await runWorkflow("trace-bench.js", { fixtures, arms: [arm], repeat: 1, critics: ["security", "regression"] }, throwingSync(prefix, ok));
+      expect(texts(logs).filter((t) => t.startsWith(`agent failed: ${prefix}`)), arm).toHaveLength(1);
+      expect(result.runs, arm).toHaveLength(result.agents);
+      expect(result.runs.filter((r) => r.noVerdict), arm).toEqual([expect.objectContaining({ arm, fixtureId: "fx-00000001", noVerdict: true })]);
+    }
+  });
+});
+
+// A parallel() or pipeline() slot can still come back null when a stage's OWN code throws (here: a
+// poisoned reply, past the agent's .catch). A stage that collected its results with filter(Boolean) lost
+// that finding or run without a trace; it is now filled with the same agent-failed defer (or noVerdict
+// run) a dead agent gets, as loop-iteration fills its pipeline slots.
+describe("a slot still null after parallel() is filled with the agent-failed outcome, never filtered away", () => {
+  const texts = (logs) => logs.map((l) => l.text);
+
+  it("critic-panel Verify: the finding is deferred verdict-missing + agent-failed, recorded, and holds completion at defer", async () => {
+    const { result, logs } = await runWorkflow("critic-panel.js", { focus: "x", uiInScope: false, reviewMode: "panel" }, (label) => (label.startsWith("critic:") ? onlySecurity([finding()])(label) : poisoned()));
+    expect(texts(logs)).toContain('WARNING: Verify slot 0 (security: "Input has no accessible name") came back null: its code threw, so no verdict survived — deferred as agent-failed (re-run)');
+    expect(texts(logs).filter((t) => t.startsWith("agent failed:"))).toEqual([]); // agent() resolved: the .catch never ran
+    expect(result.deferred).toEqual([expect.objectContaining({ title: "Input has no accessible name", verdict: "defer", failedGates: ["verdict-missing", "agent-failed"], missing: [NO_VERDICT] })]);
+    expect(result.counts.deferred).toBe(1);
+    expect(result.completion.verdict).toBe("defer");
+    expect(result.traceRecords).toEqual([expect.objectContaining({ claim_id: "critic:security:input-has-no-accessible-name", final_status: "defer", failed_gates: ["verdict-missing", "agent-failed"] })]);
+    expectWritable(result.traceRecords);
+  });
+
+  it("improve-skills Verify: the finding is deferred verdict-missing + agent-failed and recorded, never apply-ready", async () => {
+    const metaFinding = { severity: "blocker", file: "CLAUDE.md", title: "Gate weakened", evidence: "CLAUDE.md:1", proposedEdit: "restore it" };
+    const { result, logs } = await runWorkflow("improve-skills.js", { targets: ["CLAUDE.md"] }, (label) =>
+      label.startsWith("meta:safety") ? { findings: [metaFinding] } : label.startsWith("meta:") ? { findings: [] } : poisoned(),
+    );
+    expect(texts(logs)).toContain('WARNING: Verify slot 0 (safety-gating: "Gate weakened") came back null: its code threw, so no verdict survived — deferred as agent-failed (re-run)');
+    expect(result.applyReady).toEqual([]);
+    expect(result.deferred.map((f) => [f.title, f.verdict, f.editSafe, f.failedGates, f.missing])).toEqual([
+      ["Gate weakened", "defer", false, ["verdict-missing", "agent-failed"], ["a verdict from the verifier (none was returned)"]],
+    ]);
+    expect(result.traceRecords).toEqual([expect.objectContaining({ final_status: "defer", failed_gates: ["verdict-missing", "agent-failed"] })]);
+    expectWritable(result.traceRecords);
+  });
+
+  it("trace-bench: the lost run is counted as its arm's noVerdict run, so runs.length always equals agents (every arm)", async () => {
+    const diff = "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-a\n+b\n";
+    const fixtures = [{ id: "fx-00000001", item: "x", patch: diff }, { id: "fx-00000002", item: "y", patch: diff }];
+    const ok = (label) => (label.startsWith("bench-verify:") ? verdict({ evidenceChecked: [{ kind: "diff", ref: "src/a.ts" }] }) : { block: false, findings: [], reason: "ok" });
+    for (const [arm, prefix] of [["verifier", "bench-verify:fx-00000001"], ["single-pass", "bench-single:fx-00000001"], ["panel", "bench-panel:fx-00000001:security"]]) {
+      const { result, logs } = await runWorkflow("trace-bench.js", { fixtures, arms: [arm], repeat: 1, critics: ["security", "regression"] }, (label) => (label.startsWith(prefix) ? poisoned() : ok(label)));
+      expect(texts(logs).filter((t) => t.startsWith("WARNING: bench task 0 (") && t.includes(prefix)), arm).toHaveLength(1);
+      expect(result.runs, arm).toHaveLength(result.agents);
+      expect(result.runs.filter((r) => r.noVerdict), arm).toEqual([expect.objectContaining({ arm, fixtureId: "fx-00000001", noVerdict: true })]);
+    }
   });
 });
 

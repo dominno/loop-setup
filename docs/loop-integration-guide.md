@@ -64,7 +64,11 @@ self-approve).
    restart behavior, off-hours behavior, and **self-stop when the watchlist empties**.
 4. **Adapt the denylist to your repo:** keep auth, payments, secrets/`.env`,
    infra/deploy, CI config, and DB migrations off-limits; add anything
-   project-specific. Adjust the localhost/command references to your stack.
+   project-specific. Keep the loop's own gates off-limits too: `.claude/`, `CLAUDE.md`,
+   the root `scripts/` directory, the root `package.json` and the test/lint/type/E2E
+   runner configs (a one-line change to the `test` script or to vitest's include would
+   make `pnpm test` skip every `scripts/**` gate). If your gate tests or runner configs
+   live elsewhere, add those paths. Adjust the localhost/command references to your stack.
 5. **Set the budget & limits:** a **per-run cap** (turn budget, e.g. 25 turns, or a
    token ceiling), max iterations per item, max auto-PRs/day, and a kill switch.
    Record remaining budget in each run-log entry.

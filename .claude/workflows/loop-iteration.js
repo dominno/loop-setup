@@ -200,6 +200,11 @@ const DENYLIST = [
   /(^|\/)\.claude(\/|$)/i, /(^|\/)CLAUDE\.md$/i,
   // ...and the deterministic gate code that enforces the record contract.
   /(^|\/)scripts\/trace(\/|$)/i,
+  // ...and what runs the gates: a one-line patch to the root package.json ("test" script) or to a
+  // runner config (vitest's include) would turn pnpm test into a green run that skips every
+  // scripts/** gate. So the root package.json, the test/lint/type/E2E runner configs and every path
+  // under the root scripts/ directory escalate too. e2e/ and src/ stay open: the loop's real work.
+  /^package\.json$/i, /^(vitest|playwright|eslint)\.config\.[^/]+$/i, /^tsconfig\.json$/i, /^scripts(\/|$)/i,
 ]
 const hitsDenylist = (files) => (files || []).some((f) => DENYLIST.some((re) => re.test(f)))
 
@@ -269,7 +274,8 @@ const repoRelative = (f) => String(f).replace(/^.*?\/\.claude\/worktrees\/[^/]+\
 
 // An agent() that throws (token budget spent, harness error) is a FAILED agent: log it and
 // resolve to the same null a dead agent returns, so the call site's fail-safe null path runs.
-// Uncaught, the stage rejects and the engine leaves the item's pipeline slot null.
+// Every agent() starts inside a then(), so one that throws before it returns a promise takes this
+// .catch too. Uncaught, the stage rejects and the engine leaves the item's pipeline slot null.
 const agentFailed = (label) => (e) => {
   log(`agent failed: ${label}: ${String((e && e.message) || e).slice(0, 200)}`)
   return null
@@ -300,10 +306,10 @@ const deadItem = (item, cause) => {
 const outcomes = await pipeline(
   items,
   (item, _item, i) =>
-    agent(
-      `Implement the SMALLEST safe fix for this loop work item in your isolated worktree. Stay in scope; NEVER touch denylist paths (auth, payments, secrets/.env, infra, CI config, migrations, .claude/, CLAUDE.md).\n- Your worktree is a fresh checkout without dependencies. First record \`git rev-parse HEAD\` as \`baseSha\`. Then install with the lockfile: \`pnpm install --frozen-lockfile --prefer-offline\`; in the web env, use the pnpm invocation from .claude/memory/topics/remote-env.md (pnpm 10 vs 11).\n- Edit only inside your worktree, and run typecheck, lint and unit tests there.\n- Never run pnpm dev, pnpm build, pnpm test:e2e or pnpm verify: build rewrites tracked files into your diff, and port 3000 belongs to the user. The Lead runs those after applying.\n- Never commit, push, switch branches, stash or reset, and never stop or kill a process you did not start.\n- Before capturing the diff, run \`git add -N .\` so new files appear in it. Then capture the ACTUAL change with \`git diff --src-prefix=a/ --dst-prefix=b/\` (explicit prefixes: the gate parses only a/ and b/, whatever the git config says) and return it as \`diff\` (the real patch, not a summary). Report changedFiles repo-relative, as the a/ and b/ paths in the diff. In notes, give each check command with its exit code (no | tail) and your worktree root. Set checksPassed to whether those checks passed.\n\n${JSON.stringify(item)}`,
+    Promise.resolve().then(() => agent(
+      `Implement the SMALLEST safe fix for this loop work item in your isolated worktree. Stay in scope; NEVER touch denylist paths (auth, payments, secrets/.env, infra, CI config, migrations, .claude/, CLAUDE.md, the root scripts/ directory, the root package.json, and the vitest, playwright, eslint and tsconfig configs).\n- Your worktree is a fresh checkout without dependencies. First record \`git rev-parse HEAD\` as \`baseSha\`. Then install with the lockfile: \`pnpm install --frozen-lockfile --prefer-offline\`; in the web env, use the pnpm invocation from .claude/memory/topics/remote-env.md (pnpm 10 vs 11).\n- Edit only inside your worktree, and run typecheck, lint and unit tests there.\n- Never run pnpm dev, pnpm build, pnpm test:e2e or pnpm verify: build rewrites tracked files into your diff, and port 3000 belongs to the user. The Lead runs those after applying.\n- Never commit, push, switch branches, stash or reset, and never stop or kill a process you did not start.\n- Before capturing the diff, run \`git add -N .\` so new files appear in it. Then capture the ACTUAL change with \`git diff --src-prefix=a/ --dst-prefix=b/\` (explicit prefixes: the gate parses only a/ and b/, whatever the git config says) and return it as \`diff\` (the real patch, not a summary). Report changedFiles repo-relative, as the a/ and b/ paths in the diff. In notes, give each check command with its exit code (no | tail) and your worktree root. Set checksPassed to whether those checks passed.\n\n${JSON.stringify(item)}`,
       { label: `impl:${item.id || 'item'}-${i}`, phase: 'Implement', schema: IMPL_SCHEMA, isolation: 'worktree' },
-    ).catch(agentFailed(`impl:${item.id || 'item'}-${i}`)).then((impl) => ({ impl })),
+    )).catch(agentFailed(`impl:${item.id || 'item'}-${i}`)).then((impl) => ({ impl })),
   ({ impl }, item, i) => {
     const im = impl || {}
     // The reported base as `git rev-parse HEAD` prints it (trimmed, lower case). The outcome carries
@@ -356,10 +362,12 @@ const outcomes = await pipeline(
         reason: 'implementer returned no diff — nothing to verify or apply',
       }
     }
-    return agent(
+    // Started inside then(), so a verifier whose agent() throws synchronously is a dead verifier
+    // (verdict-missing + agent-failed, its diff kept), never a lost slot counted as a dead implementer.
+    return Promise.resolve().then(() => agent(
       verifierPrompt(item, im),
       { label: `verify:${item.id || 'item'}-${i}`, phase: 'Verify', schema: VERIFIER_SCHEMA, model: JUDGE_MODEL },
-    ).catch(agentFailed(`verify:${item.id || 'item'}-${i}`)).then((v) => {
+    )).catch(agentFailed(`verify:${item.id || 'item'}-${i}`)).then((v) => {
       // Fail safe: no verdict / verifier died → defer (not applied). The evidence gate
       // also defers an accept that does not cite the real diff. A dead verifier (threw, or
       // returned nothing) is also marked 'agent-failed': re-dispatch, never wait for evidence.
@@ -385,9 +393,9 @@ const outcomes = await pipeline(
   },
 )
 
-// A slot that is still null lost its item: a stage threw past its .catch (an agent() that threw
-// before its .catch attached, or the stage's own code), and the engine keeps no partial result.
-// It takes the dead-item outcome, so every item yields one outcome and one record draft.
+// A slot that is still null lost its item: a stage's own code threw past its .catch (every agent()
+// starts inside a then(), so an agent() that throws takes that .catch instead), and the engine keeps
+// no partial result. It takes the dead-item outcome, so every item yields one outcome and one record draft.
 const settled = outcomes.map((o, i) => {
   if (o) return o
   log(`WARNING: pipeline slot ${i} (${items[i].id || 'item'}) came back null: a stage threw, so no report survived — deferred as agent-failed (re-dispatch)`)

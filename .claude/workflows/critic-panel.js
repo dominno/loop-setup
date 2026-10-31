@@ -169,7 +169,7 @@ const ALL_CRITICS = [
     cq: ['Which file:line shows the boundary/state/typing problem?', 'Does it violate a stated rule (SOLID/DRY/KISS, CLAUDE.md) or only a preference?', 'What concrete failure or maintenance cost follows from it?'] },
   { key: 'qa-e2e', ui: false, label: 'QA / E2E Critic', lens: 'Critical paths, missing Playwright tests, meaningful vs superficial assertions, edge cases, did we actually verify localhost?',
     cq: ['Which user path is uncovered — which spec would cover it, and does it really not?', 'Is the existing assertion actually superficial (quote it)?', 'Would the proposed test fail on the bug it targets?'] },
-  { key: 'accessibility', ui: true, label: 'Accessibility Critic', lens: 'Keyboard nav, focus states, accessible names, labels, form-error linkage, contrast, semantic HTML, dialog a11y. Judge against the CONCRETE bar in .claude/memory/topics/quality-bar.md (WCAG 2.1 AA: 4.5:1 / 3:1 contrast; zero serious/critical axe violations on the main flow), not vague "is it accessible" — cite the specific target a finding violates. Confirm pass/fail against an ACTUAL axe run (`pnpm test:e2e e2e/a11y.spec.ts`, or a result already in priorEvidence); never assert a11y status from memory.',
+  { key: 'accessibility', ui: true, label: 'Accessibility Critic', lens: 'Keyboard nav, focus states, accessible names, labels, form-error linkage, contrast, semantic HTML, dialog a11y. Judge against the CONCRETE bar in .claude/memory/topics/quality-bar.md (WCAG 2.1 AA: 4.5:1 / 3:1 contrast; zero serious/critical axe violations on the main flow), not vague "is it accessible" — cite the specific target a finding violates. Confirm pass/fail against the Lead\'s axe result in priorEvidence (`pnpm test:e2e e2e/a11y.spec.ts`, run by the Lead — never run it yourself); if none was supplied, report it as missing evidence; never assert a11y status from memory.',
     cq: ['Which WCAG / quality-bar target is violated (cite it)?', 'Is there an axe result or keyboard run that shows it, or only code reading?', 'Does a visible label or ARIA attribute elsewhere already satisfy it?'] },
   { key: 'performance', ui: false, label: 'Performance Critic', lens: 'Unnecessary re-renders, large client bundles, heavy images, blocking fetches, overuse of client components. Judge against the CONCRETE bar in .claude/memory/topics/quality-bar.md (first-load client JS ≤ the documented gzipped budget), not vague "is it fast" — cite the measured number vs the budget. Obtain that number by running `pnpm build && pnpm check:bundle` (or reuse a bundle figure already in priorEvidence); never estimate or restate the quality-bar.md baseline as if it were a fresh measurement.',
     cq: ['What is the measured number vs the budget (pnpm check:bundle)?', 'Is the claimed cost on the first-load path?', 'Without a measurement, is this only a causal guess?'] },
@@ -266,8 +266,9 @@ const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim()
 const slug = (s) => norm(s).replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'untitled'
 // An agent() that throws (token budget spent, harness error) is a FAILED agent, not a crashed
 // round: log it and hand the next stage the same null a dead agent returns, so that stage's
-// fail-safe null path runs. Uncaught, parallel() turns the whole thunk into a null slot that
-// is filtered out — a skeptic's finding would vanish with no record.
+// fail-safe null path runs. Every agent() starts inside a then(), so one that throws before it
+// returns a promise takes this .catch too; uncaught, the throw would crash a top-level await or
+// leave a null parallel() slot. A slot a thunk's own code still loses is filled after Verify.
 const agentFailed = (label) => (e) => {
   log(`agent failed: ${label}: ${String((e && e.message) || e).slice(0, 200)}`)
   return null
@@ -318,11 +319,14 @@ let unassigned = [] // single-pass findings tagged with no in-scope lens: droppe
 const reviews = budgetStopped
   ? CRITICS.map((c) => ({ critic: c.key, label: c.label, findings: [], failed: true })) // the start floor: no reviewer ran
   : reviewMode === 'single-pass'
-    ? await agent(
-        `You are the reviewer for this project, covering EVERY lens below in a single pass. ${readOnlyBrief}, then review through each lens in turn and tag every finding with the key of the lens it belongs to:\n${CRITICS.map((c) => `- ${c.key} (${c.label}): ${c.lens}`).join('\n')}\n${reviewTail}`,
-        { label: 'critic:all-lenses-0', phase: 'Review', schema: SINGLE_FINDINGS_SCHEMA, model: FANOUT_MODEL },
-      )
-        .catch(agentFailed('critic:all-lenses-0')) // a throwing reviewer is a failed reviewer, not a crashed round
+    ? await Promise.resolve()
+        .then(() =>
+          agent(
+            `You are the reviewer for this project, covering EVERY lens below in a single pass. ${readOnlyBrief}, then review through each lens in turn and tag every finding with the key of the lens it belongs to:\n${CRITICS.map((c) => `- ${c.key} (${c.label}): ${c.lens}`).join('\n')}\n${reviewTail}`,
+            { label: 'critic:all-lenses-0', phase: 'Review', schema: SINGLE_FINDINGS_SCHEMA, model: FANOUT_MODEL },
+          ),
+        )
+        .catch(agentFailed('critic:all-lenses-0')) // a throwing reviewer (synchronously too) is a failed reviewer, not a crashed round
         .then((r) => {
           const found = r ? (r.findings || []).map((f) => ({ ...f, lens: lensOf(f) })) : []
           unassigned = found.filter((f) => !CRITICS.some((c) => c.key === f.lens))
@@ -332,10 +336,13 @@ const reviews = budgetStopped
         })
     : await parallel(
         CRITICS.map((c, i) => () =>
-          agent(
-            `You are the **${c.label}** for this project. ${readOnlyBrief}, then review strictly through your lens:\n${c.lens}\n${reviewTail}`,
-            { label: `critic:${c.key}-${i}`, phase: 'Review', schema: FINDINGS_SCHEMA, model: FANOUT_MODEL },
-          )
+          Promise.resolve()
+            .then(() =>
+              agent(
+                `You are the **${c.label}** for this project. ${readOnlyBrief}, then review strictly through your lens:\n${c.lens}\n${reviewTail}`,
+                { label: `critic:${c.key}-${i}`, phase: 'Review', schema: FINDINGS_SCHEMA, model: FANOUT_MODEL },
+              ),
+            )
             .catch(agentFailed(`critic:${c.key}-${i}`))
             .then((r) => ({ critic: c.key, label: c.label, findings: (r && r.findings) || [], failed: !r })),
         ),
@@ -495,6 +502,35 @@ const coverageNote = (f) =>
     ? `\nThis finding comes from the opt-in completeness pass of the round on: ${focus}. That pass may report only a problem inside that focus and outside every finding the round already raised:\n${raisedList}\n`
     : ''
 
+// A skeptic's outcome for toVerify[i] from its reply `v` (null: it threw or returned nothing).
+// Fail safe: a missing/failed verdict becomes defer (never confirmed, never "refuted" — an
+// unreadable verdict is evidence of nothing). The deterministic evidence gate then caps any
+// licensing verdict the cited evidence cannot carry — under BOTH the critic's and the skeptic's
+// claim type, so re-typing a claim can never lower its bar. A dead skeptic (threw, or returned
+// nothing) is also marked 'agent-failed': an infra failure to re-run, not evidence anyone has to
+// supply. Only this code sets that gate: the gate copies a live skeptic's own failedGates, so an
+// 'agent-failed' among them is dropped (a live checker cannot forge the infra signal).
+const skepticOutcome = (f, i, v) => {
+  const prior = priors[i]
+  const t = EVIDENCE_POLICY[f.claimType] ? f.claimType : 'factual'
+  const g = applyEvidenceGateStrict(v || {}, [v && v.claimType, t])
+  return {
+    ...f,
+    verdict: g.verdict,
+    claimType: g.claimType,
+    ...(v && v.claimType && v.claimType !== t ? { retypedFrom: t } : {}),
+    qualifier: g.qualifier,
+    missing: g.missing,
+    repair: g.repair,
+    failedGates: v ? g.failedGates.filter((x) => x !== 'agent-failed') : [...g.failedGates, 'agent-failed'],
+    evidenceChecked: g.evidenceChecked,
+    counterReasons: (v && v.counterReasons) || [],
+    preGateVerdict: (v && v.verdict) || null,
+    verifyReason: (v && v.reason) || 'verifier returned no verdict — deferred, not confirmed',
+    ...(prior ? { revises: prior.record_id } : {}),
+  }
+}
+
 const settledAll = await parallel(
   toVerify.map((f, i) => () => {
     const prior = priors[i]
@@ -536,39 +572,29 @@ const settledAll = await parallel(
         ...(prior ? { revises: prior.record_id } : {}),
       })
     }
-    return agent(
-      `Adversarially adjudicate this ${f.severity} finding from the ${f.criticLabel}. Try to REFUTE it by inspecting the actual code/flow, then return a TYPED verdict:\n- accept: holds as stated, and you verified evidence of the kind its claim type needs\n- qualify: holds, but only at a weaker strength (say which in qualifier)\n- revise: does not hold as stated, but a restated claim or bounded fix does (put it in repair)\n- defer: cannot be settled with the evidence available (name exactly what is missing)\n- reject: refuted\nDefault to defer when you cannot check the evidence, and to reject when the evidence does not hold up — never accept on the critic's word.\n\n${AGENT_SAFETY}\n\n${leadEvidence}Claim type: ${t} — ${CLAIM_TYPE_DEFS[t] || ''}. An accept needs evidence of kind ${EVIDENCE_POLICY[t].acceptNeeds.join('/')} that YOU checked; otherwise it is capped at ${EVIDENCE_POLICY[t].onFail}. Re-type the claim if the critic mistyped it.\n\nCritical questions for this lens (answer each in counterReasons):\n${(c && c.cq ? c.cq : ['Does the cited evidence actually show the claim?']).map((q) => `- ${q}`).join('\n')}\n${coverageNote(f)}${f.independentEvidence.length ? `\nIndependent evidence from other critics (different evidence, not mere agreement):\n${f.independentEvidence.map((e) => `- ${e.critic}: ${e.evidence}`).join('\n')}\n` : ''}${prior ? `\nThis claim revisits prior record ${prior.record_id} (verdict ${prior.final_status}${prior.missing && prior.missing.length ? `, missing: ${prior.missing.join('; ')}` : ''}; reason: ${prior.reason}). Decide whether the evidence now changes that verdict; if nothing material changed, return the prior verdict.\n` : ''}\nTitle: ${f.title}\nEvidence: ${f.evidence}\nRecommendation: ${f.recommendation}`,
-      { label: `verify:${f.critic}:${i}`, phase: 'Verify', schema: VERDICT_SCHEMA, model: JUDGE_MODEL },
-    ).catch(agentFailed(`verify:${f.critic}:${i}`)).then((v) => {
-      // Fail safe: a missing/failed verdict becomes defer (never confirmed, never
-      // "refuted" — an unreadable verdict is evidence of nothing). The deterministic
-      // evidence gate then caps any licensing verdict the cited evidence cannot carry —
-      // under BOTH the critic's and the skeptic's claim type, so re-typing a claim can
-      // never lower its bar. A dead skeptic (threw, or returned nothing) is also marked
-      // 'agent-failed': an infra failure to re-run, not evidence anyone has to supply. Only
-      // this code sets that gate: the gate copies a live skeptic's own failedGates, so an
-      // 'agent-failed' among them is dropped (a live checker cannot forge the infra signal).
-      const g = applyEvidenceGateStrict(v || {}, [v && v.claimType, t])
-      return {
-        ...f,
-        verdict: g.verdict,
-        claimType: g.claimType,
-        ...(v && v.claimType && v.claimType !== t ? { retypedFrom: t } : {}),
-        qualifier: g.qualifier,
-        missing: g.missing,
-        repair: g.repair,
-        failedGates: v ? g.failedGates.filter((x) => x !== 'agent-failed') : [...g.failedGates, 'agent-failed'],
-        evidenceChecked: g.evidenceChecked,
-        counterReasons: (v && v.counterReasons) || [],
-        preGateVerdict: (v && v.verdict) || null,
-        verifyReason: (v && v.reason) || 'verifier returned no verdict — deferred, not confirmed',
-        ...(prior ? { revises: prior.record_id } : {}),
-      }
-    })
+    // Started inside then(), so an agent() that throws synchronously takes the same .catch as one that rejects.
+    return Promise.resolve()
+      .then(() =>
+        agent(
+          `Adversarially adjudicate this ${f.severity} finding from the ${f.criticLabel}. Try to REFUTE it by inspecting the actual code/flow, then return a TYPED verdict:\n- accept: holds as stated, and you verified evidence of the kind its claim type needs\n- qualify: holds, but only at a weaker strength (say which in qualifier)\n- revise: does not hold as stated, but a restated claim or bounded fix does (put it in repair)\n- defer: cannot be settled with the evidence available (name exactly what is missing)\n- reject: refuted\nDefault to defer when you cannot check the evidence, and to reject when the evidence does not hold up — never accept on the critic's word.\n\n${AGENT_SAFETY}\n\n${leadEvidence}Claim type: ${t} — ${CLAIM_TYPE_DEFS[t] || ''}. An accept needs evidence of kind ${EVIDENCE_POLICY[t].acceptNeeds.join('/')} that YOU checked; otherwise it is capped at ${EVIDENCE_POLICY[t].onFail}. Re-type the claim if the critic mistyped it.\n\nCritical questions for this lens (answer each in counterReasons):\n${(c && c.cq ? c.cq : ['Does the cited evidence actually show the claim?']).map((q) => `- ${q}`).join('\n')}\n${coverageNote(f)}${f.independentEvidence.length ? `\nIndependent evidence from other critics (different evidence, not mere agreement):\n${f.independentEvidence.map((e) => `- ${e.critic}: ${e.evidence}`).join('\n')}\n` : ''}${prior ? `\nThis claim revisits prior record ${prior.record_id} (verdict ${prior.final_status}${prior.missing && prior.missing.length ? `, missing: ${prior.missing.join('; ')}` : ''}; reason: ${prior.reason}). Decide whether the evidence now changes that verdict; if nothing material changed, return the prior verdict.\n` : ''}\nTitle: ${f.title}\nEvidence: ${f.evidence}\nRecommendation: ${f.recommendation}`,
+          { label: `verify:${f.critic}:${i}`, phase: 'Verify', schema: VERDICT_SCHEMA, model: JUDGE_MODEL },
+        ),
+      )
+      .catch(agentFailed(`verify:${f.critic}:${i}`))
+      .then((v) => skepticOutcome(f, i, v))
   }),
 )
 
-const settled = settledAll.filter(Boolean).map((o) => ({ ...o, real: LICENSING.includes(o.verdict) }))
+// A slot that is still null lost its finding: the thunk's own code threw past the skeptic's .catch.
+// It takes the dead-skeptic outcome (agent-failed: re-run), so every blocker and important finding
+// yields one outcome and one record draft — never filtered away.
+const settled = settledAll
+  .map((o, i) => {
+    if (o) return o
+    log(`WARNING: Verify slot ${i} (${toVerify[i].critic}: ${JSON.stringify(String(toVerify[i].title || 'untitled'))}) came back null: its code threw, so no verdict survived — deferred as agent-failed (re-run)`)
+    return skepticOutcome(toVerify[i], i, null)
+  })
+  .map((o) => ({ ...o, real: LICENSING.includes(o.verdict) }))
 const confirmed = settled.filter((o) => LICENSING.includes(o.verdict)) // accept + qualify — the actionable matrix
 const revised = settled.filter((o) => o.verdict === 'revise')
 const deferred = settled.filter((o) => o.verdict === 'defer')

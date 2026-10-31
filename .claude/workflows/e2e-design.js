@@ -167,7 +167,9 @@ const JUDGE_SCHEMA = {
 }
 
 // An agent() that throws (token budget spent, harness error) is a FAILED agent, not a crashed
-// run: log it and return the same null a dead agent returns, so the category is reported.
+// run: log it and return the same null a dead agent returns, so the category is reported. Every
+// agent() starts inside a then(), so one that throws before it returns a promise takes this
+// .catch too, the judge's top-level await included.
 const agentFailed = (label) => (e) => {
   log(`agent failed: ${label}: ${String((e && e.message) || e).slice(0, 200)}`)
   return null
@@ -177,10 +179,13 @@ const tally = (list) => Object.fromEntries(VERDICTS.map((v) => [v, list.filter((
 phase('Design')
 const results = await parallel(
   CATEGORIES.map((c, i) => () =>
-    agent(
-      `Enumerate concrete Playwright E2E test cases for "${flow}" covering ${c.prompt}. Inspect the routes/components and existing specs first. Each case needs: title, steps, and the visible expected outcome to assert.\n\n${AGENT_SAFETY}`,
-      { label: `e2e:${c.key}-${i}`, phase: 'Design', schema: CASES_SCHEMA, model: FANOUT_MODEL },
-    )
+    Promise.resolve()
+      .then(() =>
+        agent(
+          `Enumerate concrete Playwright E2E test cases for "${flow}" covering ${c.prompt}. Inspect the routes/components and existing specs first. Each case needs: title, steps, and the visible expected outcome to assert.\n\n${AGENT_SAFETY}`,
+          { label: `e2e:${c.key}-${i}`, phase: 'Design', schema: CASES_SCHEMA, model: FANOUT_MODEL },
+        ),
+      )
       .catch(agentFailed(`e2e:${c.key}-${i}`))
       .then((r) => ({ cases: ((r && r.cases) || []).map((x) => ({ ...x, category: c.key })), failed: !r })),
   ),
@@ -221,10 +226,16 @@ const judgeStop = designed.length && budget.total && budget.remaining() < JUDGE_
   : ''
 if (judgeStop) log(`${judgeStop} — no judge started; ${designed.length} case(s) deferred (not-verified:budget)`)
 const numbered = designed.map((c, i) => JSON.stringify({ index: i + 1, category: c.category, title: c.title, steps: c.steps, expected: c.expected }))
-const judge = !designed.length || judgeStop ? null : await agent(
-  `You are the JUDGE of proposed Playwright E2E test cases for "${flow}". Other agents enumerated the numbered cases below; each claims to be a distinct case worth implementing, whose expected outcome is user-visible and that no existing spec already asserts. Try to REFUTE each one: read the routes and components that render the flow, its acceptance criteria (docs/stories/, docs/prd.md) and the existing specs (e2e/*.spec.ts). Then return exactly one typed verdict per case, by its index:\n- accept: a distinct case whose expected outcome is user-visible. The visible-outcome rule (docs/e2e-coverage-map.md): a test counts only when it asserts a visible outcome, not just page load. Cite the file:line that renders the outcome, or the acceptance criterion that specifies it, as file_line evidence.\n- qualify: it holds only in a narrower form; say which in qualifier, with the same evidence.\n- revise: the expected outcome is not user-visible as stated; put the case restated with a visible outcome in repair.\n- reject: a duplicate of another case in this list (set duplicateOf to that case's index), already asserted by an existing e2e/*.spec.ts (set coveredBy to that spec's file:line and cite it as file_line evidence), or unobservable in the browser (say why in reason).\n- defer: you cannot tell from the evidence available (name exactly what is missing).\nDefault to defer when you cannot check the evidence, and never accept on the enumerating agent's word: cite in evidenceChecked only what YOU opened or ran. An accept or qualify needs evidence of kind ${EVIDENCE_POLICY.factual.acceptNeeds.join('/')} that YOU checked ("reading" alone never licenses a case); otherwise it is capped at ${EVIDENCE_POLICY.factual.onFail}.\n\n${AGENT_SAFETY}\n\nCases (one JSON object per line):\n${numbered.join('\n')}`,
-  { label: 'e2e:judge-0', phase: 'Judge', schema: JUDGE_SCHEMA, model: JUDGE_MODEL },
-).catch(agentFailed('e2e:judge-0'))
+// Started inside then(), so an agent() that throws synchronously takes the same .catch as one that
+// rejects, instead of crashing the run at this top-level await.
+const judge = !designed.length || judgeStop ? null : await Promise.resolve()
+  .then(() =>
+    agent(
+      `You are the JUDGE of proposed Playwright E2E test cases for "${flow}". Other agents enumerated the numbered cases below; each claims to be a distinct case worth implementing, whose expected outcome is user-visible and that no existing spec already asserts. Try to REFUTE each one: read the routes and components that render the flow, its acceptance criteria (docs/stories/, docs/prd.md) and the existing specs (e2e/*.spec.ts). Then return exactly one typed verdict per case, by its index:\n- accept: a distinct case whose expected outcome is user-visible. The visible-outcome rule (docs/e2e-coverage-map.md): a test counts only when it asserts a visible outcome, not just page load. Cite the file:line that renders the outcome, or the acceptance criterion that specifies it, as file_line evidence.\n- qualify: it holds only in a narrower form; say which in qualifier, with the same evidence.\n- revise: the expected outcome is not user-visible as stated; put the case restated with a visible outcome in repair.\n- reject: a duplicate of another case in this list (set duplicateOf to that case's index), already asserted by an existing e2e/*.spec.ts (set coveredBy to that spec's file:line and cite it as file_line evidence), or unobservable in the browser (say why in reason).\n- defer: you cannot tell from the evidence available (name exactly what is missing).\nDefault to defer when you cannot check the evidence, and never accept on the enumerating agent's word: cite in evidenceChecked only what YOU opened or ran. An accept or qualify needs evidence of kind ${EVIDENCE_POLICY.factual.acceptNeeds.join('/')} that YOU checked ("reading" alone never licenses a case); otherwise it is capped at ${EVIDENCE_POLICY.factual.onFail}.\n\n${AGENT_SAFETY}\n\nCases (one JSON object per line):\n${numbered.join('\n')}`,
+      { label: 'e2e:judge-0', phase: 'Judge', schema: JUDGE_SCHEMA, model: JUDGE_MODEL },
+    ),
+  )
+  .catch(agentFailed('e2e:judge-0'))
 if (designed.length && !judgeStop && !judge) log(`WARNING: the judge returned no result — every case is deferred (agent-failed: re-run)`)
 
 // The live judge's verdicts, grouped by case index. A verdict for no listed case is ignored.

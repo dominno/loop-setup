@@ -219,7 +219,11 @@ explicitly allowed it for this loop (CLAUDE.md: commit/push only when asked). **
 agent's own configuration and
 prompt surface — `.claude/` (commands, workflows, `loop.md`, `loop-checklist.md`,
 the memory wiki's topic pages) and `CLAUDE.md`, plus the TRACE gate code in
-`scripts/trace/`: a loop never self-modifies its own instructions or gates
+`scripts/trace/` and the gate runner (every path under the root `scripts/` directory,
+the root `package.json`, and the `vitest.config.*`, `playwright.config.*`,
+`eslint.config.*` and `tsconfig.json` runner configs, since a one-line change to the
+`test` script or to vitest's include could make `pnpm test` skip every `scripts/**`
+gate): a loop never self-modifies its own instructions or gates
 autonomously, even at L3 — propose and escalate instead** (this is enforced
 deterministically by the `loop-iteration.js` denylist regex; the sanctioned path to
 change the prompt surface is the manual, confirmation-gated `/improve-skills`). The

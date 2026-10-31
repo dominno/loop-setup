@@ -206,7 +206,9 @@ const ORDER_SCHEMA = {
 }
 
 // An agent() that throws (token budget spent, harness error) is a FAILED agent, not a crashed
-// run: log it and return the same null a dead agent returns, so the failure is reported.
+// run: log it and return the same null a dead agent returns, so the failure is reported. Every
+// agent() starts inside a then(), so one that throws before it returns a promise takes this
+// .catch too, the synthesizer's top-level await included.
 const agentFailed = (label) => (e) => {
   log(`agent failed: ${label}: ${String((e && e.message) || e).slice(0, 200)}`)
   return null
@@ -317,10 +319,14 @@ phase('Dimensions')
 const results = await pipeline(
   DIMS,
   (d, _d, i) =>
-    agent(
-      `Analyze the gap for "${scope}" along this dimension by reading docs/, src/, e2e/, and the story map:\n${d.prompt}\nReturn only gaps backed by concrete references; an empty list is a valid, honest answer.\n\n${AGENT_SAFETY}`,
-      { label: `gap:${d.key}-${i}`, phase: 'Dimensions', schema: GAP_SCHEMA, model: FANOUT_MODEL },
-    ).catch(agentFailed(`gap:${d.key}-${i}`)),
+    Promise.resolve()
+      .then(() =>
+        agent(
+          `Analyze the gap for "${scope}" along this dimension by reading docs/, src/, e2e/, and the story map:\n${d.prompt}\nReturn only gaps backed by concrete references; an empty list is a valid, honest answer.\n\n${AGENT_SAFETY}`,
+          { label: `gap:${d.key}-${i}`, phase: 'Dimensions', schema: GAP_SCHEMA, model: FANOUT_MODEL },
+        ),
+      )
+      .catch(agentFailed(`gap:${d.key}-${i}`)),
   verifyDimension,
 )
 // A dimension whose finder died analysed nothing — that is NOT "no gaps": it is named in
@@ -360,10 +366,16 @@ for (const g of licensed) {
   const entry = { id: g.id, item: g.item, detail: g.detail, priority: g.priority, verdict: g.verdict, ...(g.qualifier ? { qualifier: g.qualifier } : {}) }
   licensedByDimension[g.dimension] = [...(licensedByDimension[g.dimension] || []), entry]
 }
-const synth = !licensed.length || synthStop ? null : await agent(
-  `Given these gaps grouped by dimension, propose the recommended NEXT-implementation order (highest-leverage first), each with a one-line "why". Be concrete. A separate skeptic licensed every gap here: an "accept" holds as stated, a "qualify" only in the narrower form its qualifier states, so keep such a gap within it. Order only these gaps, and cite in each "why" the id of every gap the item addresses.\n\n${JSON.stringify(licensedByDimension)}\n\n${AGENT_SAFETY}`,
-  { label: 'synthesize', phase: 'Synthesize', schema: ORDER_SCHEMA, model: JUDGE_MODEL },
-).catch(agentFailed('synthesize'))
+// Started inside then(), so an agent() that throws synchronously takes the same .catch as one that
+// rejects, instead of crashing the run at this top-level await.
+const synth = !licensed.length || synthStop ? null : await Promise.resolve()
+  .then(() =>
+    agent(
+      `Given these gaps grouped by dimension, propose the recommended NEXT-implementation order (highest-leverage first), each with a one-line "why". Be concrete. A separate skeptic licensed every gap here: an "accept" holds as stated, a "qualify" only in the narrower form its qualifier states, so keep such a gap within it. Order only these gaps, and cite in each "why" the id of every gap the item addresses.\n\n${JSON.stringify(licensedByDimension)}\n\n${AGENT_SAFETY}`,
+      { label: 'synthesize', phase: 'Synthesize', schema: ORDER_SCHEMA, model: JUDGE_MODEL },
+    ),
+  )
+  .catch(agentFailed('synthesize'))
 // The order is null with its missing named when a dead synthesizer or the pre-synth floor left the
 // licensed gaps unordered, or when no gap is licensed while deferred or revised gaps remain: never an
 // empty "nothing to do". It is empty only when no gap is open (none found, or every one refuted).
