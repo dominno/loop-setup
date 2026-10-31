@@ -34,8 +34,11 @@ Procedure:
    `/scan-project-docs` step 9 does (an `error` → no status changes and no records: re-run
    it; accept → COMMIT, qualify → COMMIT_QUALIFIED at the lower status, revise/defer →
    status unchanged + HOLD; Lead-raised `Browser verified`/`Done` only with its own record
-   citing the browser observation and a critic round whose `completion.verdict` is
-   `accept`, that completion cited in its evidence). That critic round runs as
+   — claim_text `Story <id> (<title>) is at status "<S>"`, the form scan-docs writes —
+   citing the browser observation (a `browser` item) and a critic round whose
+   `completion.verdict` is `accept` (its records as `record` items), that completion cited
+   in its evidence; `pnpm trace story-lint` checks that each cited record licenses exactly
+   the story's status with that level's evidence kinds). That critic round runs as
    `/scan-project-docs` step 15 says: when UI or perf lenses are in scope, first run
    `pnpm test:e2e` (including `e2e/a11y.spec.ts`) and `pnpm build && pnpm check:bundle`
    yourself and pass their output as `priorEvidence` (the critics and skeptics never run

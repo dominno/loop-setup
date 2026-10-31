@@ -51,6 +51,8 @@ const lint = (stories, over, state) => storyMapViolations(storyMap(stories, over
 // Every message starts with its rule tag (e2e-coverage has a digit), then the story id when it is about one story.
 const rulesOf = (msgs) => msgs.map((m) => /^\[([a-z0-9-]+)\]/.exec(m)?.[1]);
 const flagged = (msgs, rule) => [...new Set(msgs.filter((m) => m.startsWith(`[${rule}] `)).map((m) => /^\[[a-z0-9-]+\] (US-\d+)/.exec(m)?.[1]))];
+// The warning a story raises on the builder's default 'Record: (pre-TRACE)' line: no record backs its status (rule 6).
+const preTrace = (id) => expect.stringMatching(new RegExp(`^\\[pre-trace\\] ${id} `));
 
 describe("parseStory", () => {
   it("reads the status under **Final status:** (on its line or the next), the Record: line only in that section, and unchecked ACs only in the AC section", () => {
@@ -92,8 +94,8 @@ describe("parseStory", () => {
 });
 
 describe("story-lint: the story map against itself", () => {
-  it("a consistent story map has no errors and no warnings", () => {
-    expect(lint([{ id: "US-001" }, { id: "US-002", status: "Implemented", spec: null, log: false }])).toEqual({ errors: [], warnings: [], stories: 2, absent: false });
+  it("a consistent story map has no errors, and no warnings but the [pre-trace] one of each story no record backs", () => {
+    expect(lint([{ id: "US-001" }, { id: "US-002", status: "Implemented", spec: null, log: false }])).toEqual({ errors: [], warnings: [preTrace("US-001"), preTrace("US-002")], stories: 2, absent: false });
   });
 
   it("an absent story map passes vacuously", () => {
@@ -191,6 +193,23 @@ describe("story-lint: the story map against itself", () => {
     expect(errors[1]).toContain("e2e/gone.spec.ts");
   });
 
+  it("(4) a bracket inside a spec path is part of it: an unbackticked e2e/users/[id].spec.ts is read whole, also as link text", () => {
+    const exists = (p) => specExists(p) || p === "e2e/users/[id].spec.ts";
+    const map = storyMap([{ id: "US-001" }, ...["US-002", "US-003", "US-004", "US-005", "US-006"].map((id) => ({ id, spec: null }))]);
+    map.coverage.text += "| US-002 | A flow | e2e/users/[id].spec.ts | Yes | Yes | — | 2026-10-01 | None |\n"; // line 6: exists
+    map.coverage.text += "| US-003 | A flow | e2e/users/[slug].spec.ts | Yes | Yes | — | 2026-10-01 | None |\n"; // line 7: missing
+    map.coverage.text += "| US-004 | A flow | [e2e/users/[id].spec.ts](../e2e/users/[id].spec.ts) | Yes | Yes | — | 2026-10-01 | None |\n";
+    // Two adjacent links are two words; the existing spec of the second one counts.
+    map.coverage.text += "| US-005 | A flow | [e2e/gone.spec.ts](../e2e/gone.spec.ts)[e2e/users/[id].spec.ts](../e2e/users/[id].spec.ts) | Yes | Yes | — | 2026-10-01 | None |\n";
+    // A link's closing bracket before a :line suffix is the link's, not the path's.
+    map.coverage.text += "| US-006 | A flow | [e2e/b.spec.ts](../e2e/b.spec.ts):12 | Yes | Yes | — | 2026-10-01 | None |\n";
+    const { errors } = storyMapViolations(map, undefined, { specExists: exists });
+    expect(rulesOf(errors)).toEqual(["e2e-coverage"]);
+    expect(flagged(errors, "e2e-coverage")).toEqual(["US-003"]);
+    // The missing spec is named whole, never as the fragment after its last bracket.
+    expect(errors[0]).toMatch(/ — e2e\/users\/\[slug\]\.spec\.ts \(line 7\) is not a file in the repo$/);
+  });
+
   it("(5) an unchecked AC at Implemented or higher is a warning, never an error", () => {
     const res = lint([
       { id: "US-001", status: "Implemented", acs: ["- [x] AC1: done", "- [ ] AC2: not yet"] },
@@ -198,7 +217,8 @@ describe("story-lint: the story map against itself", () => {
       { id: "US-003", acs: ["- [x] AC1: done"], extra: "**Notes:**\n- [ ] browser-verify it" }, // a checkbox outside the AC section is no AC
     ]);
     expect(res.errors).toEqual([]);
-    expect(rulesOf(res.warnings)).toEqual(["unchecked-ac"]);
+    // Each story here leans on the builder's 'Record: (pre-TRACE)' line, so each also warns [pre-trace] (rule 6).
+    expect(rulesOf(res.warnings)).toEqual(["unchecked-ac", "pre-trace", "pre-trace", "pre-trace"]);
     expect(flagged(res.warnings, "unchecked-ac")).toEqual(["US-001"]);
   });
 
@@ -218,6 +238,24 @@ describe("story-lint: the story map against itself", () => {
     // Blocked and Deprecated rank above Not started: an index saying Not started never hides the story file's Blocked.
     const masked = lint([{ id: "US-001", status: "Blocked", record: null, index: "Not started" }]).errors;
     expect(rulesOf(masked).sort()).toEqual(["record", "status"]);
+  });
+
+  it("(6) 'Record: (pre-TRACE)' stays allowed below Browser verified, but warns [pre-trace] on every use — never an error", () => {
+    const one = lint([{ id: "US-001" }]); // E2E tested, pre-TRACE
+    expect(one.errors).toEqual([]);
+    expect(rulesOf(one.warnings)).toEqual(["pre-trace"]);
+    // It names the Record: line (line 8 of a story file) and how to back the status with a record.
+    expect(one.warnings[0]).toMatch(new RegExp(`^\\[pre-trace\\] US-001 \\(${storyPath("US-001")}:8\\): E2E tested is not backed by a TRACE record .*/sync-story-status`));
+    const res = lint([
+      { id: "US-001", status: "Implemented", spec: null },
+      { id: "US-002", status: "Blocked" }, // off the ladder: allowed, and warned like every other use
+      { id: "US-003", status: "Not started" }, // the marker backs no status here: nothing to warn about
+      { id: "US-004", status: "Done" }, // not allowed at Done: the [record] error, not a warning too
+    ]);
+    expect(rulesOf(res.errors)).toEqual(["record"]);
+    expect(flagged(res.errors, "record")).toEqual(["US-004"]);
+    expect(rulesOf(res.warnings)).toEqual(["pre-trace", "pre-trace"]);
+    expect(flagged(res.warnings, "pre-trace")).toEqual(["US-001", "US-002"]);
   });
 
   it("a story-map file that is missing or has lost its table fails closed, naming the file", () => {
@@ -252,13 +290,13 @@ describe("story-lint: the story map against itself", () => {
     const map = storyMap([{ id: "US-001" }]);
     const example = `\`\`\`md\n${COVERAGE}\n| US-001 | An example | \`e2e/missing.spec.ts\` | Yes | — | — | 2026-01-01 | None |\n\`\`\`\n`;
     map.coverage.text = map.coverage.text.replace(COVERAGE, `${example}${COVERAGE}`);
-    expect(storyMapViolations(map, undefined, { specExists })).toEqual({ errors: [], warnings: [], stories: 1, absent: false });
+    expect(storyMapViolations(map, undefined, { specExists })).toEqual({ errors: [], warnings: [preTrace("US-001")], stories: 1, absent: false });
   });
 
   it("an escaped \\| stays inside its cell (GFM)", () => {
     const map = storyMap([{ id: "US-001" }]);
     map.index.text = map.index.text.replace("| US-001 | A story |", "| US-001 | Sign in \\| out |");
-    expect(storyMapViolations(map, undefined, { specExists })).toEqual({ errors: [], warnings: [], stories: 1, absent: false });
+    expect(storyMapViolations(map, undefined, { specExists })).toEqual({ errors: [], warnings: [preTrace("US-001")], stories: 1, absent: false });
   });
 });
 
@@ -307,7 +345,7 @@ describe("story-lint: a cited TR id (a temp store written by writeRecords / appe
   it("(7) a cited record must resolve, be the story's own status claim, license (accept/qualify) and carry COMMIT or COMMIT_QUALIFIED", () => {
     const ok = write(storyRec("US-001"));
     act(ok, "COMMIT", "US-001");
-    const qualified = write(storyRec("US-002", { final_status: "qualify", qualifier: "holds at Unit tested" }));
+    const qualified = write(storyRec("US-002", { final_status: "qualify", qualifier: 'holds only at "Unit tested"' })); // as scan-docs writes a qualify
     act(qualified, "COMMIT_QUALIFIED", "US-002");
     const otherClaim = write(storyRec("US-003", { claim_id: storyClaim("US-099") }));
     act(otherClaim, "COMMIT", "US-003");
@@ -329,6 +367,89 @@ describe("story-lint: a cited TR id (a temp store written by writeRecords / appe
     // US-004's defer also lacks a COMMIT; the licensing sub-check must name the verdict itself.
     expect(errors.find((e) => e.includes("US-004"))).toContain("not accept/qualify");
     expect(warnings).toEqual([]);
+  });
+
+  // A Lead record behind Browser verified/Done: the browser observation and the post-scan critic round's records.
+  const BROWSER_ROUND = [
+    { kind: "browser", ref: "http://localhost:3000/ — the flow works" },
+    { kind: "record", ref: "TR-0123456789ab (post-scan critic round, completion accept)" },
+  ];
+  const statusText = (id, status) => `Story ${id} (A story) is at status "${status}"`;
+
+  it("(7) the cited record licenses the story's very status: an accept the one its claim_text names, a qualify the lower one its qualifier holds it at", () => {
+    const low = write(storyRec("US-001", { claim_text: statusText("US-001", "Implemented"), evidence: BROWSER_ROUND }));
+    act(low, "COMMIT", "US-001");
+    const done = write(storyRec("US-002", { writer_id: "lead", claim_text: statusText("US-002", "Done"), evidence: BROWSER_ROUND }));
+    act(done, "COMMIT", "US-002");
+    // scan-docs' qualify: the claim_text keeps the overclaimed proposal, the qualifier the status the verifier held it at.
+    const held = write(storyRec("US-003", { final_status: "qualify", qualifier: 'holds only at "Unit tested"', evidence: [{ kind: "file_line", ref: "src/lib/greeting.test.ts:1" }] }));
+    act(held, "COMMIT_QUALIFIED", "US-003");
+    const vagueQualify = write(storyRec("US-004", { final_status: "qualify", qualifier: "holds at Unit tested" }));
+    act(vagueQualify, "COMMIT_QUALIFIED", "US-004");
+    const vagueAccept = write(storyRec("US-005", { claim_text: "Story US-005 (A story) is E2E tested" }));
+    act(vagueAccept, "COMMIT", "US-005");
+    const twoStatuses = write(storyRec("US-006", { claim_text: 'Story US-006 (A story is at status "Done") is at status "E2E tested"' }));
+    act(twoStatuses, "COMMIT", "US-006");
+    const res = lintStored([
+      { id: "US-001", status: "Done", record: low },
+      { id: "US-002", status: "Done", record: done },
+      { id: "US-003", status: "Unit tested", record: held },
+      { id: "US-004", status: "Unit tested", record: vagueQualify },
+      { id: "US-005", record: vagueAccept },
+      { id: "US-006", record: twoStatuses },
+    ]);
+    expect(flagged(res.errors, "status-record")).toEqual(["US-001", "US-004", "US-005", "US-006"]);
+    expect(rulesOf(res.errors).every((r) => r === "status-record")).toBe(true);
+    const msg = (id) => res.errors.find((e) => e.includes(`] ${id} `));
+    expect(msg("US-001")).toMatch(new RegExp(`${low}: it licenses "Implemented", not "Done" \\(${storyPath("US-001")}:7\\)`));
+    expect(msg("US-004")).toMatch(/names no status it licenses/);
+    expect(msg("US-004")).toContain('holds only at "<S>"');
+    expect(msg("US-005")).toMatch(/names no status it licenses/);
+    expect(msg("US-005")).toContain('is at status "<S>"');
+    expect(msg("US-006")).toMatch(/names more than one status \("Done", "E2E tested"\)/);
+    expect(res.warnings).toEqual([]);
+    // The same qualify cited at the status its claim_text overclaims: it licenses only the lower one.
+    const over = lintStored([{ id: "US-003", record: held }]); // E2E tested
+    expect(rulesOf(over.errors)).toEqual(["status-record"]);
+    expect(over.errors[0]).toMatch(/it licenses "Unit tested", not "E2E tested"/);
+  });
+
+  it("(7) a status record carries its level's evidence: Browser verified/Done a browser and a record item, Unit/E2E tested a command or file_line item", () => {
+    const noBrowser = write(storyRec("US-001", { claim_text: statusText("US-001", "Done"), evidence: [{ kind: "command", ref: "pnpm test:e2e", result: "1 passed" }, BROWSER_ROUND[1]] }));
+    act(noBrowser, "COMMIT", "US-001");
+    const neither = write(storyRec("US-002", { claim_text: statusText("US-002", "Browser verified") })); // a command item only
+    act(neither, "COMMIT", "US-002");
+    // A causal qualify may stand on a reading alone at the evidence gate, but a reading is no test run or file read.
+    const readingOnly = write(storyRec("US-003", { claim_type: "causal", final_status: "qualify", claim_text: statusText("US-003", "Browser verified"), qualifier: 'holds only at "E2E tested"', evidence: [{ kind: "reading", ref: "scan-docs evidence agent (maker report)" }] }));
+    act(readingOnly, "COMMIT_QUALIFIED", "US-003");
+    const fileRead = write(storyRec("US-004", { evidence: [{ kind: "file_line", ref: "e2e/a.spec.ts:1" }] })); // E2E tested on a test file read
+    act(fileRead, "COMMIT", "US-004");
+    const res = lintStored([
+      { id: "US-001", status: "Done", record: noBrowser },
+      { id: "US-002", status: "Browser verified", record: neither },
+      { id: "US-003", record: readingOnly },
+      { id: "US-004", record: fileRead },
+    ]);
+    expect(flagged(res.errors, "status-record")).toEqual(["US-001", "US-002", "US-003"]);
+    expect(rulesOf(res.errors).every((r) => r === "status-record")).toBe(true);
+    const msg = (id) => res.errors.find((e) => e.includes(`] ${id} `));
+    expect(msg("US-001")).toMatch(/Done needs a browser and a record evidence item .* — it has no browser item$/);
+    expect(msg("US-002")).toMatch(/Browser verified needs a browser and a record evidence item .* — it has no browser and no record item$/);
+    expect(msg("US-003")).toMatch(/E2E tested needs a command or file_line evidence item .* — it has no command or file_line item$/);
+    expect(res.warnings).toEqual([]);
+  });
+
+  it("(7) a cited record that a newer record revises is superseded: an error, not only a [latest] warning", () => {
+    const first = write(storyRec("US-001"));
+    act(first, "COMMIT", "US-001");
+    const second = write(storyRec("US-001", { revises: first, reason: "re-scanned after the E2E spec grew" }));
+    const res = lintStored([{ id: "US-001", record: first }]);
+    expect(rulesOf(res.errors)).toEqual(["status-record"]);
+    expect(res.errors[0]).toContain(`${first}: it is superseded: ${second} revises it — cite the claim's latest licensing record`);
+    expect(res.warnings).toEqual([]);
+    // Its revision, once COMMITted, is the record to cite.
+    act(second, "COMMIT", "US-001");
+    expect(lintStored([{ id: "US-001", record: second }])).toMatchObject({ errors: [], warnings: [] });
   });
 
   it("a record that is not the newest for its claim depends on line order, so it only warns", () => {
@@ -382,7 +503,9 @@ describe("pnpm trace story-lint (CLI process)", () => {
     const root = checkout(storyMap([{ id: "US-001" }, { id: "US-002" }]));
     const ok = trace(["story-lint", "--root", root]);
     expect(ok.status).toBe(0);
-    expect(JSON.parse(ok.stdout)).toMatchObject({ ok: true, errors: 0, warnings: 0, stories: 2 });
+    // A warning never fails the lint: both stories lean on 'Record: (pre-TRACE)', so each warns [pre-trace].
+    expect(JSON.parse(ok.stdout)).toMatchObject({ ok: true, errors: 0, warnings: 2, stories: 2 });
+    expect(ok.stderr.split("\n").filter((l) => l.startsWith("warn: "))).toEqual([expect.stringMatching(/^warn: \[pre-trace\] US-001 /), expect.stringMatching(/^warn: \[pre-trace\] US-002 /)]);
     const index = join(root, STORY_MAP_PATHS.index);
     writeFileSync(index, readFileSync(index, "utf8").replace(/^(\| US-002 \|.*\|) E2E tested (\|.*)$/m, "$1 Done $2"));
     const bad = trace(["story-lint", "--root", root]);
@@ -398,7 +521,8 @@ describe("pnpm trace story-lint (CLI process)", () => {
     const res = trace(["story-lint", "--root", root]);
     expect(res.status).toBe(1);
     expect(res.stderr).toMatch(/^error: \[e2e-coverage\] US-001 .*e2e\/a\.spec\.ts/m);
-    expect(res.stderr).not.toMatch(/US-002/);
+    // US-002's spec still exists: the one line that names it is its [pre-trace] warning, never an error.
+    expect(res.stderr.split("\n").filter((l) => l.includes("US-002"))).toEqual([expect.stringMatching(/^warn: \[pre-trace\] US-002 /)]);
   });
 
   it("a cited spec counts only inside the checkout: a file beside it, cited with ../ or by its absolute path, fails rule (4)", () => {

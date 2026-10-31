@@ -5,8 +5,10 @@
 // It checks consistency, not truth: that the story files, the index and the dashboard list the
 // same stories at the same status; that each status has what its level needs on paper (a
 // verification-log row, a coverage row whose spec file exists, a Record: line); and that a cited
-// TRACE record is the story's own licensing, committed status record. It cannot tell whether a
-// story works, whether a log row was a real check, or whether the record's checker was right.
+// TRACE record is the story's own licensing, committed, unrevised status record and licenses that
+// very status with its level's evidence kinds (a 'Record: (pre-TRACE)' grandfather only warns). It
+// cannot tell whether a story works, whether a log row was a real check, or whether the record's
+// checker was right.
 //
 // Markdown tables are read heuristically (GFM pipe tables outside ``` fences, found by their
 // column names), and every finding names the file and line. Pure (no fs / git): cli.mjs reads the
@@ -46,7 +48,21 @@ const UNCHECKED_RE = /^[-*+]\s+\[ \]/;
 /** The grandfather marker for a status set before TRACE-lite records existed (allowed below Browser verified). */
 const PRE_TRACE = "(pre-TRACE)";
 const COMMITS = ["COMMIT", "COMMIT_QUALIFIED"];
-const EMPTY_STATE = { records: new Map(), actions: new Map(), latestOfClaim: new Map(), errors: [] };
+const EMPTY_STATE = { records: new Map(), actions: new Map(), superseded: new Set(), latestOfClaim: new Map(), errors: [] };
+// Where a licensing status record names the status it licenses, as scan-docs writes it (the Lead's own
+// record takes the same form): an accept in its claim_text, `Story <id> (<title>) is at status "<S>"`; a
+// qualify in its qualifier, `holds only at "<S>"` — the lower status the verifier held it at, never the
+// overclaimed proposal its claim_text keeps.
+const LICENSED_IN = {
+  accept: { field: "claim_text", phrase: 'is at status "<S>"', re: /is at status "([^"]*)"/g },
+  qualify: { field: "qualifier", phrase: 'holds only at "<S>"', re: /holds only at "([^"]*)"/g },
+};
+// The evidence kinds a status record needs at a level, read from its evidence items: every group met
+// by one of its kinds. Above the repo-evidence levels, the browser observation and the post-scan critic
+// round's records; at the tested levels, a test run or a test file read.
+const ROUND_EVIDENCE = { needs: [["browser"], ["record"]], why: "the browser observation, and the post-scan critic round's records" };
+const TEST_EVIDENCE = { needs: [["command", "file_line"]], why: "a test run, or a test file read" };
+const LEVEL_EVIDENCE = { "Unit tested": TEST_EVIDENCE, "E2E tested": TEST_EVIDENCE, "Browser verified": ROUND_EVIDENCE, Done: ROUND_EVIDENCE };
 
 const norm = (s) => String(s ?? "").replace(/[`*]/g, "").trim();
 const q = (s) => JSON.stringify(s);
@@ -155,9 +171,9 @@ export function parseStory({ path, text }) {
  * each file { path, text } with text null when the file is missing; `specExists(path)` answers
  * whether a cited spec path, relative to the repo root, is a regular file inside the repo (a path
  * that climbs out with ../ is not, even when a file exists there). Every message starts with its
- * rule tag, then the story id and the file:line it is about. The status rules (3)-(6) apply at the
+ * rule tag, then the story id and the file:line it is about. The status rules (3)-(7) apply at the
  * highest status any of the three places claims, so a raised projection is checked for the evidence
- * it claims, not only reported as a mismatch.
+ * and the licensing record it claims, not only reported as a mismatch.
  */
 export function storyMapViolations(map = {}, state = EMPTY_STATE, { specExists = () => false } = {}) {
   const errors = [];
@@ -237,7 +253,8 @@ export function storyMapViolations(map = {}, state = EMPTY_STATE, { specExists =
       }
     }
 
-    // (3)-(6) at the highest status claimed anywhere (the story file wins a tie)
+    // (3)-(6), and the status (7) checks a cited record against, at the highest status claimed anywhere
+    // (the story file wins a tie)
     const known = claims.filter((c) => STORY_STATUSES.includes(c.status));
     const top = known.reduce((a, c) => (rank(c.status) > rank(a.status) ? c : a), known[0]);
     if (top) {
@@ -263,13 +280,16 @@ export function storyMapViolations(map = {}, state = EMPTY_STATE, { specExists =
           errors.push(`[record] ${s.id} (${at}): ${status} needs a Record: line under **Final status:** citing its licensing TRACE record (TR-…)${rec ? ` — ${s.path}:${rec.line} names none` : ""}; only a status set before TRACE-lite may carry 'Record: (pre-TRACE)'`);
         } else if (atLeast(status, "Browser verified")) {
           errors.push(`[record] ${s.id} (${at}): ${status} needs a TR record id on its Record: line (${s.path}:${rec.line}) — 'Record: (pre-TRACE)' is allowed only below Browser verified`);
+        } else {
+          warnings.push(`[pre-trace] ${s.id} (${s.path}:${rec.line}): ${status} is not backed by a TRACE record — 'Record: (pre-TRACE)' grandfathers a status set before TRACE-lite; re-sync the story with /sync-story-status to record it`);
         }
       }
     }
-    for (const id of s.record?.ids ?? []) citations.push({ story: s, id, at: `${s.path}:${s.record.line}` });
+    for (const id of s.record?.ids ?? []) citations.push({ story: s, id, at: `${s.path}:${s.record.line}`, status: top?.status, statusAt: top?.at });
   }
 
-  // (7) every cited TR id: the story's own status record, licensing, COMMITted
+  // (7) every cited TR id: the story's own status record — licensing, COMMITted, not superseded by a
+  // revision — that licenses the very status the story is checked at, with that level's evidence kinds
   for (const c of citations) {
     const claim = storyClaim(c.story.id);
     if (state.errors?.length) {
@@ -287,8 +307,15 @@ export function storyMapViolations(map = {}, state = EMPTY_STATE, { specExists =
     if (!(state.actions.get(c.id) || []).some((a) => COMMITS.includes(a.action))) {
       problems.push(`it carries no COMMIT or COMMIT_QUALIFIED${LICENSING.includes(rec.final_status) ? ` (pnpm trace act ${c.id} story-status ${rec.final_status === "accept" ? "COMMIT" : "COMMIT_QUALIFIED"} --ref ${c.story.id})` : ""}`);
     }
+    // A formal revision is structural (unlike [latest] below, it does not depend on line order).
+    if (state.superseded?.has(c.id)) {
+      const by = [...state.records.values()].find((r) => r.revises === c.id)?.record_id;
+      problems.push(`it is superseded: ${by} revises it — cite the claim's latest licensing record`);
+    }
+    // What a record licenses is read only from a licensing record of the story's own claim.
+    if (rec.claim_id === claim && LICENSING.includes(rec.final_status) && c.status) problems.push(...licenseProblems(rec, c.status, c.statusAt));
     if (problems.length) {
-      errors.push(`[status-record] ${c.story.id} (${c.at}): a status cites its own licensing record (claim ${claim}, accept/qualify, COMMIT or COMMIT_QUALIFIED) — ${c.id}: ${problems.join("; ")}`);
+      errors.push(`[status-record] ${c.story.id} (${c.at}): a status cites its own licensing record (claim ${claim}, accept/qualify, COMMIT or COMMIT_QUALIFIED, not superseded) for that very status, with its level's evidence — ${c.id}: ${problems.join("; ")}`);
       continue;
     }
     const latest = state.latestOfClaim.get(claim);
@@ -299,12 +326,32 @@ export function storyMapViolations(map = {}, state = EMPTY_STATE, { specExists =
   return { errors, warnings, stories: stories.size, absent: false };
 }
 
+// Why a licensing record of the story's own claim does not license `status` (claimed at `where`): the
+// one status it names (LICENSED_IN) must be that status, and its evidence items must carry that level's
+// kinds (LEVEL_EVIDENCE).
+function licenseProblems(rec, status, where) {
+  const problems = [];
+  const { field, phrase, re } = LICENSED_IN[rec.final_status];
+  const named = [...new Set([...String(rec[field] ?? "").matchAll(re)].map((m) => m[1]))];
+  if (!named.length) problems.push(`it names no status it licenses — its ${field} has no ${phrase}`);
+  else if (named.length > 1) problems.push(`it names more than one status (${named.map(q).join(", ")}) in its ${field} — a status record licenses one`);
+  else if (named[0] !== status) problems.push(`it licenses ${q(named[0])}, not ${q(status)} (${where})`);
+  const level = LEVEL_EVIDENCE[status];
+  const kinds = new Set((rec.evidence || []).map((e) => e?.kind));
+  const lacking = (level?.needs ?? []).filter((group) => !group.some((k) => kinds.has(k))).map((group) => group.join(" or "));
+  if (lacking.length) problems.push(`${status} needs a ${level.needs.map((g) => g.join(" or ")).join(" and a ")} evidence item (${level.why}) — it has no ${lacking.join(" and no ")} item`);
+  return problems;
+}
+
 // The spec files an "E2E test file" cell cites: its code spans (or, without any, its words) that end
 // in a file extension; a file:line suffix names the file. A markdown link is read by its text, as in an
-// id cell (linkText), never by its target: [e2e/a.spec.ts](../e2e/a.spec.ts) cites e2e/a.spec.ts.
+// id cell (linkText), never by its target: [e2e/a.spec.ts](../e2e/a.spec.ts) cites e2e/a.spec.ts. A word
+// ends at whitespace, a comma or a semicolon, or between two adjacent links (`][`), and sheds one leading
+// `[` and one closing `]` (the brackets linkText leaves, the closing one also before a :line suffix) —
+// never a bracket inside a path: e2e/users/[id].spec.ts is read whole.
 function specsIn(cell) {
   const text = linkText(cell);
   const spans = [...text.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
-  const words = spans.length ? spans : text.split(/[\s,;[\]]+/);
+  const words = spans.length ? spans : text.split(/[\s,;]+|(?<=\])(?=\[)/).map((w) => w.replace(/^\[/, "").replace(/\](?=(?::\d+){0,2}$)/, ""));
   return [...new Set(words.map((w) => w.trim().replace(/:\d+(?::\d+)?$/, "")).filter((w) => /\.[A-Za-z0-9]+$/.test(w)))];
 }

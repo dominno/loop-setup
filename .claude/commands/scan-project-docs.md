@@ -57,24 +57,31 @@ Procedure:
    **No status change without a licensing TRACE record** (consumer protocol in
    `.claude/memory/topics/trace.md`): record the workflow's `traceRecords` (scratchpad
    file → `pnpm trace write <file>`), then per story:
-   - `accept` → write the verified status, cite the `record_id` on the `Record:` line under
-     "Final status" (the template's format, which `pnpm trace story-lint` reads),
-     `pnpm trace act <id> story-status COMMIT --ref US-<id>`;
-   - `qualify` (the verifier held it at a lower status) → write that lower status and cite
-     the record the same way, `COMMIT_QUALIFIED`;
+   - `accept` → write the verified status (the one its claim_text names: `is at status "<S>"`),
+     cite the `record_id` on the `Record:` line under "Final status" (the template's format,
+     which `pnpm trace story-lint` reads), `pnpm trace act <id> story-status COMMIT --ref US-<id>`;
+   - `qualify` (the verifier held it at a lower status) → write that lower status (the one its
+     qualifier names: `holds only at "<S>"`, never its claim_text's proposal) and cite the
+     record the same way, `COMMIT_QUALIFIED`;
    - `revise` or `defer` → **leave the story's current status unchanged**, `HOLD` the
      record, and put its `repair`/`missing` in the story's "Next action" (a defer is
      resolved by supplying the missing evidence and re-running this workflow for the story).
    Raising a story to `Browser verified`/`Done` is the Lead's own claim: only after a
    post-scan critic round (step 15) whose `completion.verdict` is `accept`, write a record
    (writer_id `lead`, claim_id `story:<id>:status` with the id lowercased as scan-docs
-   writes it, e.g. `story:us-001:status`, `revises` the story's latest record,
-   evidence = the `browser` observation, the critic round's record ids as `record`, and
-   that round's completion as a `record` item (ref: the completion claim, its verdict
-   `accept` and the round's `treeId`)), then COMMIT it and cite it on the story's
-   `Record:` line. Never cite the completion as `command` evidence: it is derived from the
-   round's records, and it must not stand in for the `browser` observation at the evidence
-   gate.
+   writes it, e.g. `story:us-001:status`, claim_text in the scan-docs form
+   `Story <id> (<title>) is at status "<S>"` naming the raised status, `revises` the
+   story's latest record, evidence = the `browser` observation, the critic round's record
+   ids as `record`, and that round's completion as a `record` item (ref: the completion
+   claim, its verdict `accept` and the round's `treeId`)), then COMMIT it and cite it on
+   the story's `Record:` line. Never cite the completion as `command` evidence: it is
+   derived from the round's records, and it must not stand in for the `browser` observation
+   at the evidence gate. `pnpm trace story-lint` (step 19) holds every cited record to the
+   story's status: it must license exactly that status (an accept's claim_text, a
+   qualify's qualifier, as above), not be superseded by a revision (cite the claim's latest
+   licensing record), and carry that level's evidence kinds — at `Unit tested`/`E2E tested`
+   a `command` or `file_line` item, at `Browser verified`/`Done` a `browser` and a `record`
+   item.
 10. Start or reuse localhost when browser verification is possible.
 11. Open relevant pages using Chrome or Playwright MCP.
 12. Verify implemented user flows in browser when possible.
@@ -106,11 +113,13 @@ Procedure:
     run `pnpm -s trace story-lint`. It checks consistency, not truth: the story files, the
     index and the dashboard agree on each story's status, and each status has the
     verification-log row, the E2E coverage row and the licensing `Record:` line its level
-    needs. It must exit 0. On an error, fix the projections (the index, the dashboard) to
-    match the story file's recorded status, and add a log or coverage row only for a check
-    that was actually run. Never change a status to satisfy the lint without a licensing
-    record (step 9). `Record: (pre-TRACE)` only grandfathers a status set before TRACE-lite
-    (allowed below `Browser verified`): never add it to a story; the story's next status
+    needs (a cited record must license exactly that status, step 9). It must exit 0. On an
+    error, fix the projections (the index, the dashboard) to match the story file's recorded
+    status, and add a log or coverage row only for a check that was actually run. Never
+    change a status to satisfy the lint without a licensing record (step 9).
+    `Record: (pre-TRACE)` only grandfathers a status set before TRACE-lite (allowed below
+    `Browser verified`, and warned as `[pre-trace]` on every use until the story is
+    re-synced with `/sync-story-status`): never add it to a story; the story's next status
     change cites its record instead.
 
 Output:
