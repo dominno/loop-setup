@@ -34,6 +34,8 @@ scripts/trace/                `pnpm trace` CLI + its tests (add "trace": "node s
                               to package.json and scripts/**/*.test.mjs to your unit-test globs)
 .claude/skills-index.md       Command catalog: which slash command fits which task
 .claude/settings.local.json   Allowed commands (adapt to your tools)
+.claude/hooks/stop-gate.mjs   Optional: the opt-in advisory Stop hook, enabled by no settings file (see
+                              "Optional hooks"); its tests are scripts/hooks/stop-gate.test.mjs
 docs/*.md  docs/stories/      Story-map scaffolds (user-stories index, stories/ per-story files, ...)
 ```
 
@@ -570,8 +572,9 @@ Adapt it to your stack:
 - **Required checks.** In *Settings → Branches → branch protection*, add
   `typecheck`, `lint`, `test`, `build`, `e2e` as required status checks.
 - **Merge method.** Squash-merging a PR that appends TRACE records orphans their provenance
-  commits: once the branch is gone (or in a fresh clone), `pnpm trace reaudit` reports those
-  records as unreachable. Prefer a merge commit for such PRs.
+  commits: in a fresh clone, or locally once the deleted branch's commits have been pruned
+  (deleting the branch alone keeps them), `pnpm trace reaudit` reports those records as
+  unreachable. Prefer a merge commit for such PRs.
 
 ---
 
@@ -657,6 +660,8 @@ issues; record nice-to-haves; avoid unrelated refactors.
 [ ] Package-manager + localhost URL/port updated to match my project
 [ ] Monorepo: src/ , e2e/ , and port paths adjusted to my package layout
 [ ] .claude/settings.local.json allows only my real commands; git auto-allow kept or removed deliberately
+[ ] Optional: copied the opt-in Stop hook .claude/hooks/stop-gate.mjs + scripts/hooks/stop-gate.test.mjs
+    (off until I add its snippet, see "Optional hooks"), or left both out
 [ ] .gitignore covers .claude/worktrees/; my linter ignores .claude/worktrees/**
 [ ] CLAUDE.md memory @import path resolves from where my CLAUDE.md lives
 [ ] Memory wiki: removed stack facts that don't apply (BEFORE first task); will re-seed via /dream

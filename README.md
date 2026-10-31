@@ -107,6 +107,9 @@ in **[`docs/adoption-guide.md`](docs/adoption-guide.md)** — the short version:
    `.claude/settings.local.json`, `scripts/trace/`, `docs/*.md`, `docs/stories/`, and
    `.github/workflows/verify.yml`. Then add `"trace": "node scripts/trace/cli.mjs"` to
    your `package.json` scripts and `scripts/**/*.test.mjs` to your unit-test globs.
+   Optionally copy the opt-in Stop hook `.claude/hooks/stop-gate.mjs` and its tests
+   `scripts/hooks/stop-gate.test.mjs` (no settings file enables it; see
+   [Optional hooks](docs/adoption-guide.md#optional-hooks)).
    **Do not** copy the starter app (`src/`, `e2e/`, `package.json`, `pnpm-lock.yaml`,
    and the build configs) — that's only a demo.
 2. **Wire the verification commands** — point `CLAUDE.md`'s *Main commands* at your
