@@ -4,13 +4,14 @@ export const meta = {
     'Deterministic multi-agent critic round: fan out the critics as parallel subagents (each in its own context, each typing its claims; a code-only round uses one all-lens reviewer instead), adversarially adjudicate every blocker, and important findings up to a verifier cap (the rest are recorded as defers), each with a separate skeptic that returns a typed TRACE verdict (accept/qualify/revise/defer/reject) held to the claim type evidence standard, reuse unchanged prior verdicts, then return a synthesized matrix plus TRACE-lite record drafts.',
   phases: [
     { title: 'Review', detail: 'each critic reviews independently, in its own context, and types each claim (a code-only round: one all-lens reviewer)' },
+    { title: 'Coverage', detail: 'opt-in (args.completeness: true; off by default, unmeasured): one completeness critic, given the lenses reviewed and the titles already raised, looks for the important problem the round missed' },
     { title: 'Verify', detail: 'a separate skeptic adjudicates each blocker, and each important claim up to the verifier cap; a deterministic evidence gate caps overclaims' },
   ],
 }
 
 // Normalize args: the Workflow tool may hand args as an object, a plain string, or a
-// JSON-encoded string. Parse the JSON-string case so structured fields (models,
-// priorEvidence, uiInScope, priorRecords, treeId, maxVerifiers) resolve instead of silently no-opping.
+// JSON-encoded string. Parse the JSON-string case so structured fields (models, priorEvidence,
+// uiInScope, priorRecords, treeId, maxVerifiers, completeness) resolve instead of silently no-opping.
 let a = args
 if (typeof a === 'string') {
   const s = a.trim()
@@ -44,6 +45,11 @@ const treeId = (a && typeof a.treeId === 'string' && /^[0-9a-f]{16}$/.test(a.tre
 // beyond the cap is recorded as a defer, never dropped.
 const maxVerifiers = a && Number.isInteger(a.maxVerifiers) && a.maxVerifiers >= 0 ? a.maxVerifiers : 30
 if (a && a.maxVerifiers !== undefined && a.maxVerifiers !== maxVerifiers) log(`ignored args.maxVerifiers=${JSON.stringify(a.maxVerifiers)} (expected an integer >= 0) — using ${maxVerifiers}`)
+// Optional, off by default and unmeasured (bench it before turning it on by default): the
+// completeness critic (args.completeness === true), one more agent after the review's merge-dedup
+// that looks for the important problem the round missed (phase Coverage, below).
+const completeness = !!a && a.completeness === true
+if (a && typeof a === 'object' && a.completeness !== undefined && typeof a.completeness !== 'boolean') log(`ignored args.completeness=${JSON.stringify(a.completeness)} (expected true or false) — the completeness critic stays off`)
 
 // Model tiering (graph-engineering): high-volume fan-out on the fast tier, the
 // high-stakes adversarial gate on the strong tier. Override via args.models.
@@ -173,14 +179,25 @@ const ALL_CRITICS = [
     cq: ['Which caller/route depends on the changed code (file:line)?', 'Does the diff actually change that path\'s behavior?', 'Which existing test would catch the regression, and does it pass?'] },
 ]
 // </critic-roster>
+// The opt-in completeness lens (args.completeness), defined OUTSIDE <critic-roster> so the
+// trace-bench roster and its F1 measurement are untouched. Never in CRITICS: it reviews after the
+// roster lenses (phase Coverage), against what they already raised.
+const COMPLETENESS = {
+  key: 'completeness', label: 'Completeness Critic',
+  lens: 'The IMPORTANT problem this critic round MISSED: inside the focus, outside every finding it already raised (listed below), and shown by a file:line, command output or browser observation.',
+  cq: ['Is it outside every finding the round already raised (name the closest one and how this differs)?', 'Which file:line, command output or browser observation shows it?', 'Is it inside the focus of this round, or scope creep?'],
+}
+// Every lens a finding can name, in round-robin order: the roster, then the completeness lens.
+const LENSES = [...ALL_CRITICS, COMPLETENESS]
 const CRITICS = ALL_CRITICS.filter((c) => uiInScope || !c.ui)
 // Review mode. TRACE-Bench-lite measured it (F1, record TR-34201765532f; qualified:
 // one 19-fixture run, 5 of 10 critics, diff-level block/no-block with the bench's own
 // single-pass prompt): on CODE-ONLY review one all-lens reviewer matched the critic panel's
 // recall and false-block rate at ~5x lower cost. So a round with no browser-facing critic in scope (uiInScope: false) uses
 // ONE reviewer covering every in-scope lens by default; rounds that drive the app keep the
-// panel (that case was not measured). Either way each finding names its lens and still goes
-// to its own separate skeptic. Override with args.reviewMode: 'panel' | 'single-pass'.
+// panel (that case was not measured). Either way each finding names its lens; every blocker, and
+// each important finding up to the verifier cap, goes to its own separate skeptic, and the rest
+// are recorded as defers. Override with args.reviewMode: 'panel' | 'single-pass'.
 const reviewMode = (a && ['panel', 'single-pass'].includes(a.reviewMode) && a.reviewMode) || (uiInScope ? 'panel' : 'single-pass')
 if (a && a.reviewMode !== undefined && a.reviewMode !== reviewMode) log(`ignored args.reviewMode=${JSON.stringify(a.reviewMode)} (expected 'panel' or 'single-pass') — using ${reviewMode}`)
 if (reviewMode === 'single-pass' && uiInScope) log('WARNING: single-pass forced with browser-facing lenses in scope — that combination was not measured')
@@ -262,7 +279,10 @@ phase('Review')
 // under START_FLOOR left, no reviewer starts. The round still runs to the end on no findings, so
 // it returns every key, failedReviewers names every in-scope lens, and completion comes from the
 // same code as any round (defer: each lens's missing names the floor). budgetStopped says why.
+// Verify floor: under VERIFY_FLOOR left, no skeptic starts (Phase 2) and, when enabled, neither
+// does the completeness critic (Coverage).
 const START_FLOOR = 80_000
+const VERIFY_FLOOR = 60_000
 const budgetStopped = !!(budget.total && budget.remaining() < START_FLOOR)
 const startStop = budgetStopped ? `token budget floor reached before Review (${Math.round(budget.remaining() / 1000)}k left < ${START_FLOOR / 1000}k)` : ''
 if (budgetStopped) log(`${startStop} — no agent started; every lens is reported unreviewed`)
@@ -323,6 +343,8 @@ const reviews = budgetStopped
 // A critic that died returned nothing — that is NOT "no findings". Surface it so a round
 // with a silent lens is never mistaken for a clean pass. `reviews` is index-aligned with
 // CRITICS in both modes (a dead parallel() thunk is a null slot), so each is named by its key.
+// The completeness lens is not in CRITICS: Coverage appends it, after `error` below is computed
+// from the roster lenses alone.
 const failedReviewers = reviews.map((r, i) => (!r || r.failed ? CRITICS[i].key : null)).filter(Boolean)
 if (failedReviewers.length && !budgetStopped) log(`WARNING: ${failedReviewers.length} critic(s) returned no result: ${failedReviewers.join(', ')} — the round is incomplete`)
 // Every in-scope lens failed (or, below the start floor, none started): nothing was reviewed, so
@@ -343,15 +365,14 @@ const all = reviews
   .flatMap((r) => r.findings.map((f) => ({ ...f, critic: r.critic, criticLabel: r.label })))
 const byKey = new Map()
 const evidenceSeen = new Map()
-for (const f of all) {
+// `independent`: whether this finding's different evidence may corroborate one already merged.
+const mergeFinding = (f, independent) => {
   const k = `${f.severity}::${norm(f.title)}`
   const existing = byKey.get(k)
   if (existing) {
     existing.alsoFlaggedBy.push({ critic: f.critic, evidence: f.evidence })
     const ev = norm(f.evidence)
-    // Corroboration needs a SEPARATE agent: in single-pass mode one reviewer filing the same
-    // claim under two lenses is not independent evidence.
-    if (reviewMode === 'panel' && ev && !evidenceSeen.get(k).has(ev)) {
+    if (independent && ev && !evidenceSeen.get(k).has(ev)) {
       evidenceSeen.get(k).add(ev)
       existing.independentEvidence.push({ critic: f.critic, evidence: f.evidence })
     }
@@ -360,10 +381,52 @@ for (const f of all) {
     evidenceSeen.set(k, new Set([norm(f.evidence)]))
   }
 }
-const deduped = [...byKey.values()]
-log(`${deduped.length} findings from ${CRITICS.length} lenses, ${reviewMode} (${all.length} before merge-dedup)`)
+// Corroboration needs a SEPARATE agent: in single-pass mode one reviewer filing the same
+// claim under two lenses is not independent evidence.
+for (const f of all) mergeFinding(f, reviewMode === 'panel')
+log(`${byKey.size} findings from ${CRITICS.length} lenses, ${reviewMode} (${all.length} before merge-dedup)`)
 
-const criticByKey = new Map(ALL_CRITICS.map((c) => [c.key, c]))
+// Phase 1b — Coverage (opt-in: args.completeness === true; unmeasured). One more agent, given the
+// lenses reviewed and the titles already raised, looks for the IMPORTANT problem the round missed.
+// Its findings merge as critic 'completeness' and take the same Verify, cap, gate and record path
+// (claim_id critic:completeness:<slug>). It never makes or prevents `error`. It does not start under
+// the start or verify floor, or when every roster lens failed (an error round has no review to
+// complete and writes no records); then, or when it dies, failedReviewers names it and
+// completion.missing says why — never a silent skip.
+const raised = [...byKey.values()] // what the roster lenses raised: the completeness critic's anti-scope
+const raisedList = raised.map((f) => `- [${f.severity}] ${f.title} (${f.critic})`).join('\n') || '- (none)'
+let coverageStarted = false
+let coverageMiss = '' // why the enabled completeness lens was not reviewed; '' = it was (or it is off)
+if (completeness) {
+  phase('Coverage')
+  if (budgetStopped) coverageMiss = `not started: ${startStop}`
+  else if (error) coverageMiss = 'not started: every in-scope lens failed, so the round has no review to complete'
+  else if (budget.total && budget.remaining() < VERIFY_FLOOR) coverageMiss = `not started: token budget floor reached before Coverage (${Math.round(budget.remaining() / 1000)}k left < ${VERIFY_FLOOR / 1000}k)`
+  else {
+    coverageStarted = true
+    const label = 'critic:completeness-0'
+    const reviewedList = CRITICS.filter((c) => !failedReviewers.includes(c.key)).map((c) => `- ${c.key} (${c.label}): ${c.lens}`).join('\n')
+    // Started inside then(), so an agent() that throws synchronously takes the same .catch as one that rejects.
+    const r = await Promise.resolve()
+      .then(() =>
+        agent(
+          `You are the **${COMPLETENESS.label}** for this project. ${readOnlyBrief}, then review strictly through your lens:\n${COMPLETENESS.lens}\n\nLenses this round already reviewed:\n${reviewedList}\n\nFindings it already raised ([severity] title (lens)):\n${raisedList}\n\nReport only a blocker or important problem; never re-raise or rephrase a finding above.\n${reviewTail}`,
+          { label, phase: 'Coverage', schema: FINDINGS_SCHEMA, model: FANOUT_MODEL },
+        ),
+      )
+      .catch(agentFailed(label))
+    if (!r) coverageMiss = 'its reviewer failed (infra)'
+    // A repeat of a raised finding merges into it but never corroborates it: this agent was shown that title.
+    else for (const f of r.findings || []) mergeFinding({ ...f, critic: COMPLETENESS.key, criticLabel: COMPLETENESS.label }, false)
+  }
+  if (coverageMiss) {
+    failedReviewers.push(COMPLETENESS.key)
+    log(`WARNING: the completeness lens was not reviewed (${coverageMiss}) — the round is incomplete`)
+  } else log(`Coverage: ${byKey.size - raised.length} new finding(s) from the completeness critic`)
+}
+const deduped = [...byKey.values()]
+
+const criticByKey = new Map(LENSES.map((c) => [c.key, c]))
 const sameTree = (t) => !!(treeId && t && t === treeId)
 const ownClaimId = (f) => `critic:${f.critic}:${slug(f.title)}`
 // A critic's `revisits` link is an LLM assertion, never trusted on its own: it binds only
@@ -388,10 +451,10 @@ const reusable = (f, prior) => !!(prior && f.revisitReason === 'still-present' &
 
 // Cost bounds. A reused verdict starts no agent, so it takes no slot. Every fresh blocker gets its
 // skeptic; important findings fill the slots left under maxVerifiers, one per lens in turn (roster
-// order), so review order never starves a lens. Below the verify floor no skeptic starts at all.
+// order, the completeness lens last), so review order never starves a lens. Below the verify floor
+// no skeptic starts at all.
 // A finding left out is an explicit defer (failedGates not-verified:*), never dropped; a defer is
 // never reused, so the next round verifies it.
-const VERIFY_FLOOR = 60_000
 const fresh = toVerify.map((f, i) => i).filter((i) => !reusable(toVerify[i], priors[i]))
 const freshBlockers = fresh.filter((i) => toVerify[i].severity === 'blocker').length
 const roundRobin = (queues, slots) => {
@@ -402,7 +465,7 @@ const roundRobin = (queues, slots) => {
   return out
 }
 const granted = new Set(roundRobin(
-  ALL_CRITICS.map((c) => fresh.filter((i) => toVerify[i].severity === 'important' && toVerify[i].critic === c.key)),
+  LENSES.map((c) => fresh.filter((i) => toVerify[i].severity === 'important' && toVerify[i].critic === c.key)),
   Math.max(0, maxVerifiers - freshBlockers),
 ))
 const overCap = fresh.filter((i) => toVerify[i].severity === 'important' && !granted.has(i))
@@ -424,6 +487,13 @@ if (verifyStop) {
 const leadEvidence = priorEvidence
   ? `Evidence the Lead ran this session (command output, not a critic's opinion). Cite it as evidence of the kind it is: an axe run or a bundle figure is a measurement, a test run is a command. Do not re-run E2E or start a server to reproduce it; if the claim needs a result that is not here, defer and name it as missing.\n${priorEvidenceText}\n\n`
   : ''
+// A completeness finding's skeptic also gets the focus and the titles the roster lenses raised: that
+// lens's critical questions ask whether it is inside the one and outside the other. Every other
+// skeptic prompt is unchanged.
+const coverageNote = (f) =>
+  f.critic === COMPLETENESS.key
+    ? `\nThis finding comes from the opt-in completeness pass of the round on: ${focus}. That pass may report only a problem inside that focus and outside every finding the round already raised:\n${raisedList}\n`
+    : ''
 
 const settledAll = await parallel(
   toVerify.map((f, i) => () => {
@@ -467,7 +537,7 @@ const settledAll = await parallel(
       })
     }
     return agent(
-      `Adversarially adjudicate this ${f.severity} finding from the ${f.criticLabel}. Try to REFUTE it by inspecting the actual code/flow, then return a TYPED verdict:\n- accept: holds as stated, and you verified evidence of the kind its claim type needs\n- qualify: holds, but only at a weaker strength (say which in qualifier)\n- revise: does not hold as stated, but a restated claim or bounded fix does (put it in repair)\n- defer: cannot be settled with the evidence available (name exactly what is missing)\n- reject: refuted\nDefault to defer when you cannot check the evidence, and to reject when the evidence does not hold up — never accept on the critic's word.\n\n${AGENT_SAFETY}\n\n${leadEvidence}Claim type: ${t} — ${CLAIM_TYPE_DEFS[t] || ''}. An accept needs evidence of kind ${EVIDENCE_POLICY[t].acceptNeeds.join('/')} that YOU checked; otherwise it is capped at ${EVIDENCE_POLICY[t].onFail}. Re-type the claim if the critic mistyped it.\n\nCritical questions for this lens (answer each in counterReasons):\n${(c && c.cq ? c.cq : ['Does the cited evidence actually show the claim?']).map((q) => `- ${q}`).join('\n')}\n${f.independentEvidence.length ? `\nIndependent evidence from other critics (different evidence, not mere agreement):\n${f.independentEvidence.map((e) => `- ${e.critic}: ${e.evidence}`).join('\n')}\n` : ''}${prior ? `\nThis claim revisits prior record ${prior.record_id} (verdict ${prior.final_status}${prior.missing && prior.missing.length ? `, missing: ${prior.missing.join('; ')}` : ''}; reason: ${prior.reason}). Decide whether the evidence now changes that verdict; if nothing material changed, return the prior verdict.\n` : ''}\nTitle: ${f.title}\nEvidence: ${f.evidence}\nRecommendation: ${f.recommendation}`,
+      `Adversarially adjudicate this ${f.severity} finding from the ${f.criticLabel}. Try to REFUTE it by inspecting the actual code/flow, then return a TYPED verdict:\n- accept: holds as stated, and you verified evidence of the kind its claim type needs\n- qualify: holds, but only at a weaker strength (say which in qualifier)\n- revise: does not hold as stated, but a restated claim or bounded fix does (put it in repair)\n- defer: cannot be settled with the evidence available (name exactly what is missing)\n- reject: refuted\nDefault to defer when you cannot check the evidence, and to reject when the evidence does not hold up — never accept on the critic's word.\n\n${AGENT_SAFETY}\n\n${leadEvidence}Claim type: ${t} — ${CLAIM_TYPE_DEFS[t] || ''}. An accept needs evidence of kind ${EVIDENCE_POLICY[t].acceptNeeds.join('/')} that YOU checked; otherwise it is capped at ${EVIDENCE_POLICY[t].onFail}. Re-type the claim if the critic mistyped it.\n\nCritical questions for this lens (answer each in counterReasons):\n${(c && c.cq ? c.cq : ['Does the cited evidence actually show the claim?']).map((q) => `- ${q}`).join('\n')}\n${coverageNote(f)}${f.independentEvidence.length ? `\nIndependent evidence from other critics (different evidence, not mere agreement):\n${f.independentEvidence.map((e) => `- ${e.critic}: ${e.evidence}`).join('\n')}\n` : ''}${prior ? `\nThis claim revisits prior record ${prior.record_id} (verdict ${prior.final_status}${prior.missing && prior.missing.length ? `, missing: ${prior.missing.join('; ')}` : ''}; reason: ${prior.reason}). Decide whether the evidence now changes that verdict; if nothing material changed, return the prior verdict.\n` : ''}\nTitle: ${f.title}\nEvidence: ${f.evidence}\nRecommendation: ${f.recommendation}`,
       { label: `verify:${f.critic}:${i}`, phase: 'Verify', schema: VERDICT_SCHEMA, model: JUDGE_MODEL },
     ).catch(agentFailed(`verify:${f.critic}:${i}`)).then((v) => {
       // Fail safe: a missing/failed verdict becomes defer (never confirmed, never
@@ -510,10 +580,10 @@ const niceToHaves = deduped.filter((f) => f.severity === 'nice-to-have')
 // (defer) while a lens failed (or none started: the start floor), a finding went unassigned, a
 // blocker is deferred (by its skeptic, or with no skeptic below the verify floor) or revised,
 // or an OPEN prior blocker sits in a lens this round did not review. Otherwise it holds.
-// notRechecked = every prior record of an unreviewed lens (failed, out of scope, or an opt-in
-// lens that is off): this round shows nothing about them, so it never clears one. Derived
-// from the round's own results, so completion is not written as a record.
-const reviewedLenses = new Set(CRITICS.map((c) => c.key).filter((k) => !failedReviewers.includes(k)))
+// notRechecked = every prior record of an unreviewed lens (failed or not started, out of scope,
+// or the opt-in completeness lens when it is off): this round shows nothing about them, so it
+// never clears one. Derived from the round's own results, so completion is not written as a record.
+const reviewedLenses = new Set([...CRITICS, ...(completeness ? [COMPLETENESS] : [])].map((c) => c.key).filter((k) => !failedReviewers.includes(k)))
 const priorLens = (prior) => (/^critic:([^:]+):/.exec(String(prior.claim_id || '')) || [])[1] || null
 const unreviewedPriors = priorRecords.filter((prior) => priorLens(prior) && !reviewedLenses.has(priorLens(prior)))
 const newestOfClaim = new Map() // claim_id → newest created_at among the priors
@@ -527,7 +597,7 @@ const openPriorBlockers = unreviewedPriors.filter((prior) =>
   String(prior.created_at || '') >= newestOfClaim.get(prior.claim_id))
 const blockersIn = (list) => list.filter((f) => f.severity === 'blocker')
 const completionMissing = [
-  ...failedReviewers.map((k) => (budgetStopped ? `a review through the ${k} lens — not started: ${startStop}` : `a review through the ${k} lens — its reviewer failed (infra)`)),
+  ...failedReviewers.map((k) => `a review through the ${k} lens — ${k === COMPLETENESS.key ? coverageMiss : budgetStopped ? `not started: ${startStop}` : 'its reviewer failed (infra)'}`),
   ...(unassigned.length ? [`an in-scope lens for ${unassigned.length} finding(s) the reviewer tagged with none — dropped, never adjudicated: ${unassigned.map((f) => JSON.stringify(String(f.title || 'untitled'))).join(', ')}`] : []),
   ...blockersIn(deferred).map((f) => `blocker "${f.title}" (${f.critic}) is deferred — missing: ${f.missing.join('; ')}`),
   ...blockersIn(revised).map((f) => `blocker "${f.title}" (${f.critic}) was revised — adjudicate the restated claim: ${f.repair}`),
@@ -580,11 +650,11 @@ return {
   focus,
   treeId,
   reviewMode, // 'panel' (one critic per lens) or 'single-pass' (one all-lens reviewer)
-  failedReviewers, // critics that returned nothing — the round is incomplete if non-empty
+  failedReviewers, // lenses not reviewed (a critic that returned nothing; the completeness lens, when on, that died or did not start) — the round is incomplete if non-empty
   completion, // { claim, verdict, missing, notRechecked } — the round is clean only when verdict is 'accept'
   counts: {
     critics: CRITICS.length,
-    reviewAgents: budgetStopped ? 0 : reviewMode === 'single-pass' ? 1 : CRITICS.length, // review agents started
+    reviewAgents: (budgetStopped ? 0 : reviewMode === 'single-pass' ? 1 : CRITICS.length) + (coverageStarted ? 1 : 0), // review agents started (the completeness critic included)
     unassignedFindings: unassigned.length,
     failedReviewers: failedReviewers.length,
     confirmedBlockers: confirmed.filter((f) => f.severity === 'blocker').length,

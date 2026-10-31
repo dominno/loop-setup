@@ -53,7 +53,7 @@ fixed number, and fire only when the turn has a `+Nk` token target: without one,
 ```mermaid
 flowchart LR
   focus([focus / changed files]) --> sf{"▫️ start floor:<br/>under 80k tokens left?"}
-  sf -- yes --> bs[▫️ error + budgetStopped: no agent started<br/>every in-scope lens in failedReviewers]
+  sf -- yes --> bs[▫️ error + budgetStopped: no agent started<br/>every in-scope lens in failedReviewers<br/>completeness too, when on]
   bs --> comp
   sf -- no --> R
   subgraph R["Review — parallel barrier · 🟢 Sonnet"]
@@ -69,12 +69,19 @@ flowchart LR
     c10[Regression]
   end
   R --> dedup[▫️ merge-dedup<br/>agreement ≠ evidence; keep only<br/>independent evidence]
-  dedup --> reuse{"▫️ same claim (lens+title+type),<br/>licensing verdict, still-present,<br/>identical tree?"}
+  dedup --> cov{"▫️ args.completeness: true?<br/>opt-in, off by default, unmeasured"}
+  cov -- no --> reuse{"▫️ same claim (lens+title+type),<br/>licensing verdict, still-present,<br/>identical tree?"}
+  cov -- yes --> cf{"▫️ every in-scope lens failed,<br/>or under 60k tokens left (verify floor)?"}
+  cf -- yes --> ns[▫️ not started: completeness in failedReviewers<br/>completion.missing says why]
+  ns --> reuse
+  cf -- no --> C["Coverage — one completeness critic · 🟢 Sonnet<br/>critic:completeness-0, given the lenses reviewed<br/>and the titles already raised: the important problem<br/>the round missed"]
+  C --> cm["▫️ merge as critic 'completeness'<br/>a repeat of a raised finding merges, never corroborates"]
+  cm --> reuse
   reuse -- yes --> reused[▫️ reuse prior verdict<br/>→ REUSE action · takes no verifier slot]
   reuse -- no --> vf{"▫️ verify floor:<br/>under 60k tokens left?"}
   vf -- yes --> bd[▫️ defer, no agent: not-verified:budget<br/>every fresh blocker and important finding]
   bd --> comp
-  vf -- no --> cap{"▫️ verifier cap (args.maxVerifiers, default 30):<br/>every blocker; important findings fill<br/>the slots left, round-robin across lenses"}
+  vf -- no --> cap{"▫️ verifier cap (args.maxVerifiers, default 30):<br/>every blocker; important findings fill<br/>the slots left, round-robin across lenses<br/>(the completeness lens last)"}
   cap -- "past the cap" --> cd[▫️ defer, no agent: not-verified:verifier-cap<br/>counts.capDeferred · verified next round]
   cd --> comp
   cap -- "within the cap" --> V
@@ -89,6 +96,7 @@ flowchart LR
   comp["▫️ completion, computed in code: claim 'no open blocker in focus'<br/>reject = a blocker confirmed · defer = a failed or unstarted lens, a single-pass finding<br/>tagged with no in-scope lens, a deferred or revised blocker, or an open prior blocker<br/>in a lens not reviewed · else accept<br/>+ notRechecked = prior records of the lenses not reviewed"]
   comp --> out([completion · confirmed accept/qualify · deferred, cap and budget defers included<br/>· revised · refuted + failedReviewers + counts.capDeferred + traceRecords + reuseActions])
   R -.->|a critic threw or returned nothing| fr[▫️ failedReviewers, named by lens key<br/>round incomplete, never a clean pass]
+  C -.->|it threw or returned nothing| fr
   fr --> comp
   fr -.->|every lens failed| err[▫️ error: no review happened, re-run<br/>every other key kept, empty]
   err --> out
@@ -121,6 +129,20 @@ flowchart LR
 > in-scope lens's `missing` naming the floor). Cap and budget defers are records like any
 > other defer; a deferred blocker keeps completion at `defer`, and a cap never defers a
 > blocker.
+>
+> Opt-in completeness critic (`args.completeness: true`; off by default and unmeasured, so bench
+> it before turning it on by default): after the merge-dedup, phase `Coverage` starts one more
+> agent (`critic:completeness-0`, the critics' read-only brief and SAFETY block) with the lenses
+> reviewed and the titles already raised, and asks for the important problem the round missed.
+> Its findings merge as critic `completeness` and take the same reuse, cap, skeptic, gate and
+> record path (`critic:completeness:<slug>`); in the cap's round-robin its important findings come
+> after every roster lens, and its skeptic also gets the focus and the titles already raised, which
+> its critical questions ask about. The lens is defined outside `<critic-roster>`, so the bench
+> roster is untouched. If the agent dies, or does not start (below the start or verify floor, or
+> when every in-scope lens failed: an error round writes no records), the roster's findings still
+> take the reuse, verify-floor, cap and skeptic path, `failedReviewers` names `completeness`, and
+> completion is at least `defer` (`reject` when a blocker is confirmed); it never makes or prevents
+> `error`. Off, dead or not started, its prior records stay in `notRechecked`.
 
 ## `improve-skills` — meta-critic over our own prompts (`/improve-skills`)
 

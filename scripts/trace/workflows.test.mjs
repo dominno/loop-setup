@@ -954,6 +954,7 @@ describe("agent SAFETY: every prompt of a read-only workflow carries the <agent-
   it.each([
     ["critic-panel.js (panel, every lens)", "critic-panel.js", { focus: "x" }, (label) => (label.startsWith("critic:") ? onlySecurity([finding()])(label) : verdict()), ["critic:security", "verify:"]],
     ["critic-panel.js (single-pass)", "critic-panel.js", { focus: "x", uiInScope: false }, (label) => (label.startsWith("critic:") ? { findings: [finding({ lens: "security" })] } : verdict()), ["critic:all-lenses-0", "verify:"]],
+    ["critic-panel.js (completeness)", "critic-panel.js", { focus: "x", uiInScope: false, completeness: true }, (label) => (label === "critic:completeness-0" ? { findings: [finding({ title: "Retry loop has no bound" })] } : label.startsWith("critic:") ? { findings: [] } : verdict()), ["critic:all-lenses-0", "critic:completeness-0", "verify:completeness"]],
     ["improve-skills.js", "improve-skills.js", { targets: ["CLAUDE.md"] }, (label) => (label.startsWith("meta:safety") ? { findings: [metaBlocker] } : label.startsWith("meta:") ? { findings: [] } : null), ["meta:", "verify:"]],
     ["scan-docs.js", "scan-docs.js", { stories: [story] }, (label) => (label.startsWith("evidence:") ? storyEvidence : { finalStatus: "E2E tested", justification: "j", missing: [], evidenceChecked: [] }), ["evidence:", "verify:"]],
     ["gap-analysis.js", "gap-analysis.js", { scope: "mvp" }, (label) => (label.startsWith("gap:") ? { gaps: [{ item: label, detail: "src/a.ts:1", priority: "high" }] } : label.startsWith("gap-verify:") ? { verdicts: [gapVerdict(1)] } : { order: [] }), ["gap:", "gap-verify:", "synthesize"]],
@@ -2307,5 +2308,248 @@ describe("gap-analysis: a separate skeptic per non-empty dimension; synthesis ov
       scope: "mvp", error: expect.stringContaining("token budget floor reached (5k left < 40k)"), budgetStopped: true, totalGaps: 0, licensedGaps: 0, byDimension: {},
       deferred: [], rejected: [], failedDimensions: GAP_KEYS, recommendedOrder: null, missing: ["a synthesized order — skipped: no dimension was analysed (token budget floor)"], verdictCounts: NO_COUNTS,
     });
+  });
+});
+
+// The opt-in completeness critic (args.completeness === true; off by default and unmeasured). After
+// the review's merge-dedup, phase Coverage starts one more Sonnet agent ('critic:completeness-0'),
+// given the lenses reviewed and the titles already raised, for the IMPORTANT problem the round
+// missed. Its findings merge as critic 'completeness' and take the same skeptic, cap, gate and record
+// path (claim_id critic:completeness:<slug>). The lens sits outside <critic-roster>: the bench roster
+// and its F1 measurement are untouched.
+describe("critic-panel: the opt-in completeness critic (args.completeness, default off)", () => {
+  const code = { focus: "x", uiInScope: false, reviewMode: "panel" };
+  const COVERAGE = (c) => c.label.startsWith("critic:completeness");
+  const clean = () => ({ findings: [] });
+  const DEAD = "a review through the completeness lens — its reviewer failed (infra)";
+  const missed = (over = {}) => finding({ title: "Retry loop has no bound", evidence: "src/lib/fetch.ts:42", recommendation: "cap the retries", ...over });
+  // The completeness agent replies `found`, the security critic `raised`, every other critic nothing;
+  // every skeptic accepts on file_line evidence.
+  const withCoverage = (found, raised = [finding()]) => (label) =>
+    label === "critic:completeness-0" ? { findings: found } : label.startsWith("critic:") ? onlySecurity(raised)(label) : verdict();
+  // An open prior blocker of the completeness lens.
+  const completenessPrior = (over = {}) => ({
+    record_id: "TR-ffffffffff01", claim_id: "critic:completeness:retry-loop-has-no-bound", claim_text: "Retry loop has no bound", claim_type: "factual",
+    severity: "blocker", final_status: "accept", qualifier: "", repair: "", failed_gates: [], missing: [], reason: "verified earlier",
+    provenance: { tree: TREE }, created_at: "2026-10-07T12:00:00.000Z", cleared: false, ...over,
+  });
+  const reReview = (prior) => `re-review of the completeness lens for open prior blocker ${prior.record_id} (or CLEAR it on verified evidence)`;
+
+  it("is defined outside <critic-roster> (the bench roster keeps its 10 lenses), and meta.phases lists Coverage between Review and Verify", () => {
+    const { ALL_CRITICS } = loadWorkflowBlock("critic-panel.js", "critic-roster", ["ALL_CRITICS"]);
+    expect(ALL_CRITICS.map((c) => c.key)).toEqual(ALL_LENSES);
+    const text = readFileSync(join(ROOT, ".claude/workflows/critic-panel.js"), "utf8");
+    const meta = new Function(`return (${/^export const meta = (\{[\s\S]*?\n\})\n/m.exec(text)[1]})`)();
+    expect(meta.phases.map((p) => p.title)).toEqual(["Review", "Coverage", "Verify"]);
+  });
+
+  it("off by default (absent, false, or a non-boolean; either review mode): no 'critic:completeness' call, and a non-boolean is ignored out loud", async () => {
+    const reply = (label) => (label === "critic:all-lenses-0" ? { findings: [finding({ lens: "security" })] } : withCoverage([missed()])(label));
+    for (const args of [code, { ...code, completeness: false }, { ...code, completeness: "true" }, { focus: "x" }, { focus: "x", uiInScope: false, completeness: 1 }]) {
+      const { result, calls, logs } = await runWorkflow("critic-panel.js", args, reply);
+      const name = JSON.stringify(args);
+      expect(calls.filter(COVERAGE), name).toEqual([]);
+      expect(calls.filter((c) => c.opts.phase === "Coverage"), name).toEqual([]);
+      expect(result.failedReviewers, name).toEqual([]);
+      expect(result.confirmed.map((f) => f.critic), name).toEqual(["security"]);
+      expect(logs.map((l) => l.text).filter((t) => t.startsWith("ignored args.completeness")), name).toEqual(
+        args.completeness === undefined || args.completeness === false ? [] : [`ignored args.completeness=${JSON.stringify(args.completeness)} (expected true or false) — the completeness critic stays off`],
+      );
+    }
+  });
+
+  it("enabled: one Sonnet agent 'critic:completeness-0' (phase Coverage) after every reviewer and before any skeptic, given the lenses reviewed, every title already raised and the roster critics' review tail", async () => {
+    // The security lens dies, so it is never listed as reviewed; a raised nice-to-have is listed too.
+    const reply = (label) =>
+      label.startsWith("critic:security")
+        ? null
+        : label.startsWith("critic:frontend-arch")
+          ? { findings: [finding({ severity: "important", title: "Form state is duplicated" })] }
+          : label.startsWith("critic:regression")
+            ? { findings: [finding({ severity: "nice-to-have", title: "Rename the route helper" })] }
+            : label.startsWith("critic:")
+              ? { findings: [] }
+              : verdict();
+    const { result, calls } = await runWorkflow("critic-panel.js", { ...code, completeness: true }, reply);
+    expect(calls.map((c) => c.label)).toEqual([...CODE_LENSES.map((k, i) => `critic:${k}-${i}`), "critic:completeness-0", "verify:frontend-arch:0"]);
+    const cov = calls.find(COVERAGE);
+    expect(cov.opts).toMatchObject({ phase: "Coverage", model: "sonnet" });
+    expect(cov.prompt).toMatch(/MISSED/);
+    for (const k of ["frontend-arch", "qa-e2e", "performance", "regression"]) expect(cov.prompt, k).toContain(`- ${k} (`);
+    expect(cov.prompt).not.toContain("- security (");
+    expect(cov.prompt).toContain("Form state is duplicated");
+    expect(cov.prompt).toContain("Rename the route helper");
+    expect(result.failedReviewers).toEqual(["security"]); // only the dead roster lens: the completeness agent ran
+    expect(result.counts.reviewAgents).toBe(6); // 5 lens critics + the completeness critic
+    // Single-pass: the same agent, after the one all-lens reviewer.
+    const single = await runWorkflow("critic-panel.js", { focus: "x", uiInScope: false, completeness: true }, (label) =>
+      label === "critic:all-lenses-0" ? { findings: [finding({ lens: "security" })] } : label.startsWith("critic:") ? { findings: [] } : verdict(),
+    );
+    expect(single.calls.map((c) => c.label)).toEqual(["critic:all-lenses-0", "critic:completeness-0", "verify:security:0"]);
+    expect(single.calls.find(COVERAGE).prompt).toContain("Input has no accessible name");
+    expect(single.result.counts.reviewAgents).toBe(2);
+    // The same review tail as every roster critic: the Lead's evidence, the claim-type guide and the
+    // prior-records digest with its revisit instructions. An alive completeness agent makes its lens
+    // reviewed (its priors leave notRechecked), which holds only because it was shown those priors.
+    const tail = (await runWorkflow("critic-panel.js", { ...code, completeness: true, priorRecords: [completenessPrior()], priorEvidence: "EVID-123" }, clean)).calls.find(COVERAGE).prompt;
+    expect(tail).toContain("EVID-123");
+    expect(tail).toContain("Type every finding with a claimType");
+    expect(tail).toContain("- TR-ffffffffff01 [accept]");
+    expect(tail).toContain("set revisits to its record_id");
+  });
+
+  it("enabled: its blocker gets its own 'verify:completeness:<i>' skeptic (the lens's critical questions, the focus, the titles already raised) and a writable record 'critic:completeness:<slug>'", async () => {
+    const { result, calls } = await runWorkflow("critic-panel.js", { ...code, focus: "the checkout flow", completeness: true, treeId: TREE }, withCoverage([missed()]));
+    expect(calls.filter(VERIFY).map((c) => c.label)).toEqual(["verify:security:0", "verify:completeness:1"]);
+    const skeptic = calls.find((c) => c.label === "verify:completeness:1");
+    expect(skeptic.opts).toMatchObject({ phase: "Verify", model: "opus" });
+    expect(skeptic.prompt).toContain("finding from the Completeness Critic");
+    expect(skeptic.prompt).toContain("Is it inside the focus"); // its own critical questions, not the generic fallback
+    expect(skeptic.prompt).not.toContain("Does the cited evidence actually show the claim?");
+    expect(skeptic.prompt).toContain("the checkout flow");
+    expect(skeptic.prompt).toContain("Input has no accessible name"); // the title the round already raised
+    // That list is the roster's, from before the Coverage merge: never the finding's own title.
+    const raisedSection = skeptic.prompt.split("the round already raised:\n")[1].split("\nTitle: ")[0];
+    expect(raisedSection).toContain("- [blocker] Input has no accessible name (security)");
+    expect(raisedSection).not.toContain("Retry loop has no bound");
+    expect(calls.find((c) => c.label === "verify:security:0").prompt).not.toContain("completeness pass"); // a roster lens's skeptic is unchanged
+    expect(result.confirmed.map((f) => [f.critic, f.severity, f.title])).toEqual([
+      ["security", "blocker", "Input has no accessible name"],
+      ["completeness", "blocker", "Retry loop has no bound"],
+    ]);
+    expect(result.traceRecords.map((r) => r.claim_id)).toEqual(["critic:security:input-has-no-accessible-name", "critic:completeness:retry-loop-has-no-bound"]);
+    expect(result.traceRecords[1]).toMatchObject({ writer_id: "critic-panel/verify:completeness-1", severity: "blocker", final_status: "accept", provenance: { workflow: "critic-panel", tree: TREE } });
+    expect(result.failedReviewers).toEqual([]);
+    expect(result.completion.verdict).toBe("reject"); // a confirmed completeness blocker is a confirmed blocker
+    expectWritable(result.traceRecords);
+  });
+
+  it("enabled with a dead agent (nothing, a throw, or a synchronous throw): failedReviewers is ['completeness'], completion is defer naming the lens, no error, and the review's findings are still verified", async () => {
+    const nothing = (reply) => (label, ...rest) => (label === "critic:completeness-0" ? null : reply(label, ...rest));
+    for (const kill of [nothing, (reply) => throwing("critic:completeness", reply), (reply) => throwingSync("critic:completeness", reply)]) {
+      const { result, calls } = await runWorkflow("critic-panel.js", { ...code, completeness: true }, kill(withCoverage([missed()], [finding({ severity: "important" })])));
+      expect(calls.filter(COVERAGE)).toHaveLength(1);
+      expect(result.error).toBeUndefined();
+      expect(result.failedReviewers).toEqual(["completeness"]);
+      expect(result.counts.failedReviewers).toBe(1);
+      expect(result.completion).toMatchObject({ verdict: "defer", missing: [DEAD] });
+      expect(result.confirmed.map((f) => [f.critic, f.severity])).toEqual([["security", "important"]]);
+      const single = await runWorkflow("critic-panel.js", { focus: "x", uiInScope: false, completeness: true }, kill(clean));
+      expect(single.result.error).toBeUndefined();
+      expect(single.result.failedReviewers).toEqual(["completeness"]);
+      expect(single.result.completion).toMatchObject({ verdict: "defer", missing: [DEAD] });
+    }
+  });
+
+  it("its prior records: off or dead, they stay in notRechecked and an open prior completeness blocker defers completion; enabled and alive, it is a reviewed lens", async () => {
+    const prior = completenessPrior();
+    const off = await runWorkflow("critic-panel.js", { ...code, priorRecords: [prior] }, clean);
+    expect(off.result.completion).toEqual({ claim: "no open blocker in: x", verdict: "defer", missing: [reReview(prior)], notRechecked: [prior.record_id] });
+    const offImportant = await runWorkflow("critic-panel.js", { ...code, priorRecords: [completenessPrior({ severity: "important" })] }, clean);
+    expect(offImportant.result.completion).toEqual({ claim: "no open blocker in: x", verdict: "accept", missing: [], notRechecked: [prior.record_id] });
+    const on = await runWorkflow("critic-panel.js", { ...code, completeness: true, priorRecords: [prior] }, clean);
+    expect(on.result.completion).toEqual({ claim: "no open blocker in: x", verdict: "accept", missing: [], notRechecked: [] });
+    const dead = await runWorkflow("critic-panel.js", { ...code, completeness: true, priorRecords: [prior] }, (label) => (label === "critic:completeness-0" ? null : { findings: [] }));
+    expect(dead.result.completion).toEqual({ claim: "no open blocker in: x", verdict: "defer", missing: [DEAD, reReview(prior)], notRechecked: [prior.record_id] });
+    // Re-raised as still-present on an identical tree, its verdict is reused like any lens's: no skeptic, a REUSE action.
+    const reused = await runWorkflow("critic-panel.js", { ...code, completeness: true, priorRecords: [prior], treeId: TREE }, withCoverage([missed({ revisits: prior.record_id, revisitReason: "still-present" })], []));
+    expect(reused.calls.filter(VERIFY)).toEqual([]);
+    expect(reused.result.reuseActions).toEqual([expect.objectContaining({ record_id: prior.record_id, action: "REUSE" })]);
+    expect(reused.result.confirmed).toEqual([expect.objectContaining({ critic: "completeness", reused: prior.record_id })]);
+    expect(reused.result.completion).toMatchObject({ verdict: "reject", notRechecked: [] }); // the reused blocker is still a confirmed blocker
+  });
+
+  it("budget: under the verify floor (60k) the completeness critic does not start, and failedReviewers and completion.missing name it with the floor; above it, or with no token target, it runs", async () => {
+    const run = (left) => {
+      const d = draining(200_000, left);
+      return runWorkflow("critic-panel.js", { ...code, completeness: true }, d.tap(clean), d.budget);
+    };
+    const low = await run(50_000);
+    expect(low.calls.filter(COVERAGE)).toEqual([]);
+    expect(low.result.error).toBeUndefined();
+    expect(low.result.failedReviewers).toEqual(["completeness"]);
+    expect(low.result.counts.reviewAgents).toBe(5);
+    expect(low.result.completion).toMatchObject({ verdict: "defer", missing: ["a review through the completeness lens — not started: token budget floor reached before Coverage (50k left < 60k)"] });
+    expect(low.logs.filter((l) => l.text.includes("token budget floor reached before Coverage")).map((l) => l.calls)).toEqual([5]); // logged, never a silent skip
+    const above = await run(70_000);
+    expect(above.calls.filter(COVERAGE)).toHaveLength(1);
+    expect(above.result.failedReviewers).toEqual([]);
+    expect(above.result.counts.reviewAgents).toBe(6);
+    const untargeted = await runWorkflow("critic-panel.js", { ...code, completeness: true }, clean, { total: null, spent: () => 0, remaining: () => 0 });
+    expect(untargeted.calls.filter(COVERAGE)).toHaveLength(1);
+    // Under the start floor no agent starts at all: the completeness lens is named after the roster lenses.
+    const stopped = await runWorkflow("critic-panel.js", { ...code, completeness: true }, noAgent, LOW);
+    expect(stopped.calls).toEqual([]);
+    expect(stopped.result.failedReviewers).toEqual([...CODE_LENSES, "completeness"]);
+    expect(stopped.result.counts.reviewAgents).toBe(0);
+    expect(stopped.result.completion.missing.slice(-1)).toEqual(["a review through the completeness lens — not started: token budget floor reached before Review (5k left < 80k)"]);
+  });
+
+  it("every in-scope roster lens dead is still the whole-round error: the completeness critic does not start (no review to complete, no records) and is named; it alone never makes the error", async () => {
+    for (const reviewMode of ["panel", "single-pass"]) {
+      for (const reply of deadReplies("critic:")) {
+        const { result, calls } = await runWorkflow("critic-panel.js", { focus: "x", uiInScope: false, reviewMode, completeness: true }, reply);
+        expect(result.error, reviewMode).toBe("all 5 lens(es) failed (infra) — no review happened; re-run");
+        expect(calls.filter(COVERAGE), reviewMode).toEqual([]);
+        expect(result.failedReviewers).toEqual([...CODE_LENSES, "completeness"]);
+        expect(result.completion.verdict).toBe("defer");
+        expect(result.completion.missing.slice(-1)).toEqual(["a review through the completeness lens — not started: every in-scope lens failed, so the round has no review to complete"]);
+        for (const k of ["confirmed", "deferred", "revised", "niceToHaves", "refuted", "traceRecords", "reuseActions"]) expect(result[k], k).toEqual([]);
+      }
+    }
+  });
+
+  it("verifier cap: a completeness blocker is always verified; its important findings join the round-robin after every roster lens", async () => {
+    // Review order: Route removed (0) and Redirect dropped (1) from regression, the last roster lens;
+    // then the completeness blocker (2) and important finding (3).
+    const reply = (label) =>
+      label === "critic:completeness-0"
+        ? { findings: [missed(), missed({ severity: "important", title: "Cache key ignores the locale" })] }
+        : label.startsWith("critic:regression")
+          ? { findings: [finding({ severity: "important", title: "Route removed" }), finding({ severity: "important", title: "Redirect dropped" })] }
+          : label.startsWith("critic:")
+            ? { findings: [] }
+            : verdict();
+    const capped = async (maxVerifiers) => {
+      const { result, calls } = await runWorkflow("critic-panel.js", { ...code, completeness: true, maxVerifiers }, reply);
+      expectWritable(result.traceRecords);
+      for (const f of result.deferred) expect(f.failedGates).toEqual(["not-verified:verifier-cap"]);
+      return { verified: calls.filter(VERIFY).map((c) => c.label), capDeferred: result.deferred.map((f) => f.title), count: result.counts.capDeferred };
+    };
+    // One important slot: regression's first finding comes before the completeness lens.
+    expect(await capped(2)).toEqual({ verified: ["verify:regression:0", "verify:completeness:2"], capDeferred: ["Redirect dropped", "Cache key ignores the locale"], count: 2 });
+    // Two slots: a round-robin, not a strict priority — completeness gets one before regression's second.
+    expect(await capped(3)).toEqual({ verified: ["verify:regression:0", "verify:completeness:2", "verify:completeness:3"], capDeferred: ["Redirect dropped"], count: 1 });
+    // No slot: the completeness blocker is verified regardless.
+    expect(await capped(0)).toEqual({ verified: ["verify:completeness:2"], capDeferred: ["Route removed", "Redirect dropped", "Cache key ignores the locale"], count: 3 });
+  });
+
+  it("merge-dedup: a separate critic's different evidence still corroborates; a completeness finding repeating a raised one merges into it (one skeptic) but never corroborates it (the agent was shown that title)", async () => {
+    // qa-e2e raises it first; security repeats its evidence (agreement only); regression brings different evidence.
+    const lenses = (label) =>
+      label.startsWith("critic:qa-e2e") || label.startsWith("critic:security")
+        ? { findings: [finding()] }
+        : label.startsWith("critic:regression")
+          ? { findings: [finding({ evidence: "src/app/page.tsx:9" })] }
+          : label === "critic:completeness-0"
+            ? { findings: [finding({ evidence: "src/lib/form.ts:3" })] }
+            : label.startsWith("critic:")
+              ? { findings: [] }
+              : verdict();
+    const panel = await runWorkflow("critic-panel.js", code, lenses);
+    expect(panel.result.confirmed).toEqual([
+      expect.objectContaining({
+        critic: "qa-e2e",
+        alsoFlaggedBy: [{ critic: "security", evidence: "src/components/GreetingForm.tsx:58" }, { critic: "regression", evidence: "src/app/page.tsx:9" }],
+        independentEvidence: [{ critic: "regression", evidence: "src/app/page.tsx:9" }],
+      }),
+    ]);
+    expect(panel.result.counts.independentlyCorroborated).toBe(1);
+    const { result, calls } = await runWorkflow("critic-panel.js", { ...code, completeness: true }, lenses);
+    expect(calls.filter(VERIFY).map((c) => c.label)).toEqual(["verify:qa-e2e:0"]);
+    expect(result.confirmed).toHaveLength(1);
+    expect(result.confirmed[0].alsoFlaggedBy.map((x) => x.critic)).toEqual(["security", "regression", "completeness"]);
+    expect(result.confirmed[0].independentEvidence).toEqual([{ critic: "regression", evidence: "src/app/page.tsx:9" }]);
+    expect(result.traceRecords.map((r) => r.claim_id)).toEqual(["critic:qa-e2e:input-has-no-accessible-name"]);
   });
 });

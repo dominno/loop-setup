@@ -80,6 +80,15 @@ $ARGUMENTS
   (F1; qualified: one run on the 19-fixture bench, 5 of the 10 critics, measured as diff-level block/no-block with the bench's own single-pass prompt — not this round's production prompt). Each finding still names its lens; every blocker, and each
   important finding up to the verifier cap, gets a typed verdict from a separate skeptic,
   and the rest are recorded as defers. Pass `reviewMode: 'panel'` to force the fan-out.
+- Opt-in completeness critic, off by default: add `"completeness": true` to the step-3 args.
+  After the review, one more agent (`critic:completeness-0`) gets the lenses reviewed and the
+  titles already raised and looks for the important problem the round missed; its findings
+  take the same skeptics, verifier cap, gate and records (`critic:completeness:<slug>`). If it
+  dies or does not start (a budget floor, or every lens failed), `failedReviewers` names
+  `completeness` and `completion.verdict` is at least `defer` (`reject` if a blocker is
+  confirmed). While it is off, its prior records stay in `completion.notRechecked`. It is
+  unmeasured (one more agent per round, and its noise costs skeptic runs): bench it before
+  turning it on by default.
 - `completion` sees only the prior records passed in, and `--brief` carries the newest 40.
   Before a task is declared complete, also check the whole store for an open blocker:
   `pnpm -s trace query --latest --writer critic-panel --json` lists each latest critic
