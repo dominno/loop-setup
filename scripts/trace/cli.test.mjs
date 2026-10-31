@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { encodeBench, opaqueFixtureId, readBench, ROOT } from "./lib.mjs";
 import { appliedFixtures, benchPreconditionStep, benchPreflight, judgeEnv, runBenchJudge, runJudge, SIGNALS } from "./bench-judge.mjs";
+import { DEFAULT_PLAN, parsePlan, readyIds } from "./plan.mjs";
 
 const CLI = join(ROOT, "scripts/trace/cli.mjs");
 let dir;
@@ -104,6 +105,89 @@ describe("pnpm trace (CLI process)", () => {
     const out = trace(["bench-score", runs, "--record"]);
     expect(out.status).toBe(1);
     expect(out.stdout).toMatch(/--transcripts/);
+  });
+});
+
+// The loop plan's DAG commands, run as a process on a temp --plan (and the temp store).
+describe("plan commands (CLI process)", () => {
+  const HEADER = "| id | description | after | status | record | missing | origin | notes |\n|---|---|---|---|---|---|---|---|";
+  let plans = 0;
+  const writePlan = (...rows) => {
+    const p = join(dir, `loop-plan-${(plans += 1)}.md`);
+    writeFileSync(p, `# Loop Plan\n\n## Plan\n\n${HEADER}\n${rows.join("\n")}\n`);
+    return p;
+  };
+
+  it("plan-ready reads the committed plan by default (the ids readyIds computes from it), prints the ready ids of a temp --plan in table order (--max N keeps the first N), and fails closed on a table that does not parse", () => {
+    // The committed plan is loop state (loop.md step 9 writes nodes into it): compare, never pin it.
+    const head = trace(["plan-ready"]);
+    expect(head.status).toBe(0);
+    expect(JSON.parse(head.stdout)).toEqual(readyIds(parsePlan(readFileSync(DEFAULT_PLAN, "utf8")).nodes));
+    const p = writePlan(
+      "| LP-003 | third | — | ready | | | human | |",
+      "| LP-001 | first | — | done | | | human | |",
+      "| LP-002 | second | LP-001 | blocked | | | human | |",
+      "| LP-004 | fourth | LP-003 | blocked | | | human | |",
+    );
+    const out = trace(["plan-ready", "--plan", p]);
+    expect(out.status).toBe(0);
+    expect(JSON.parse(out.stdout)).toEqual(["LP-003", "LP-002"]);
+    expect(JSON.parse(trace(["plan-ready", "--max", "1", "--plan", p]).stdout)).toEqual(["LP-003"]);
+    expect(JSON.parse(trace(["plan-ready", "--json", "--plan", p]).stdout).map((n) => [n.id, n.description])).toEqual([["LP-003", "third"], ["LP-002", "second"]]);
+    const bad = trace(["plan-ready", "--plan", writePlan("| LP-001 | first | ready |")]);
+    expect(bad.status).toBe(1);
+    expect(bad.stdout).toBe(""); // no ids
+    expect(bad.stderr).toMatch(/\[cells\]/);
+    expect(trace(["plan-ready", "--plan", join(dir, "missing.md")]).status).toBe(1);
+    expect(trace(["plan-ready", "--max", "0", "--plan", p]).status).toBe(2);
+  });
+
+  it("plan-lint exits 1 naming the rule when a done node cites a defer record, 0 on a consistent plan, and 2 when the store does not replay", () => {
+    expect(trace(["write", "-"], draft({ writer_id: "loop-iteration/verify:LP-001-0", claim_id: "loop:lp-001", claim_type: "practical", final_status: "defer", missing: ["a unit test run"], evidence: [] })).status).toBe(0);
+    const id = JSON.parse(trace(["query", "--json"]).stdout)[0].record_id;
+    const done = trace(["plan-lint", "--plan", writePlan(`| LP-001 | first | — | done | ${id} | — | human | |`)]);
+    expect(done.status).toBe(1);
+    expect(done.stderr).toMatch(/\[done-record\] LP-001/);
+    expect(trace(["act", id, "loop", "HOLD", "--ref", "LP-001"]).status).toBe(0);
+    const ok = writePlan(`| LP-001 | first | — | deferred | ${id} | a unit test run | human | attempt 1 |`);
+    const clean = trace(["plan-lint", "--pre-dispatch", "--plan", ok]);
+    expect(clean.status).toBe(0);
+    expect(JSON.parse(clean.stdout)).toMatchObject({ ok: true, errors: 0, nodes: 1 });
+    const inflight = writePlan("| LP-002 | second | — | in-progress | | | human | |");
+    expect(trace(["plan-lint", "--plan", inflight]).status).toBe(0); // the contract test can run mid-loop
+    expect(trace(["plan-lint", "--pre-dispatch", "--plan", inflight]).status).toBe(1);
+    writeFileSync(store, `${readFileSync(store, "utf8")}not json\n`);
+    expect(trace(["plan-lint", "--plan", ok]).status).toBe(2);
+  });
+
+  it("plan-items prints loop-iteration items for ready ids and refuses a non-ready id with exit 1 (no items)", () => {
+    const p = writePlan("| LP-001 | first fix | — | ready | | | human | n |", "| LP-002 | second | LP-001 | blocked | | | human | |");
+    const out = trace(["plan-items", "LP-001", "--plan", p]);
+    expect(out.status).toBe(0);
+    expect(JSON.parse(out.stdout)).toEqual([{ id: "LP-001", description: "first fix" }]);
+    const refused = trace(["plan-items", "LP-001", "LP-002", "--plan", p]);
+    expect(refused.status).toBe(1);
+    expect(refused.stdout).toBe("");
+    expect(refused.stderr).toMatch(/LP-002/);
+    expect(trace(["plan-items", "--plan", p]).status).toBe(2);
+  });
+
+  it("plan-items replays the store: priorRecordId is the node's own loop:<id> record only (never a critic record), and a store that does not replay exits 2 with no items", () => {
+    expect(trace(["write", "-"], draft({ writer_id: "loop-iteration/verify:LP-003-0", claim_id: "loop:lp-003", claim_type: "practical", final_status: "defer", missing: ["a unit test run"], evidence: [] })).status).toBe(0);
+    expect(trace(["write", "-"], draft({ writer_id: "critic-panel/verify:qa-e2e-0", claim_id: "critic:qa-e2e:untested", final_status: "defer", missing: ["an E2E run"], evidence: [] })).status).toBe(0);
+    const [own, critic] = JSON.parse(trace(["query", "--json"]).stdout).map((r) => r.record_id);
+    const reset = writePlan(`| LP-003 | third | — | ready | ${own} | a unit test run | human | |`, `| LP-004 | fourth | — | ready | ${critic} | an E2E run | critic rec:${critic} | |`);
+    const items = trace(["plan-items", "LP-003", "LP-004", "--plan", reset]);
+    expect(items.status).toBe(0);
+    expect(JSON.parse(items.stdout)).toEqual([
+      { id: "LP-003", description: "third", priorRecordId: own, missing: "a unit test run" },
+      { id: "LP-004", description: "fourth", missing: "an E2E run" },
+    ]);
+    writeFileSync(store, `${readFileSync(store, "utf8")}not json\n`);
+    const broken = trace(["plan-items", "LP-003", "--plan", reset]);
+    expect(broken.status).toBe(2);
+    expect(broken.stdout).toBe("");
+    expect(broken.stderr).toMatch(/does not replay/);
   });
 });
 
@@ -536,7 +620,7 @@ function tempRepo({ manifest, repo = "commit" } = {}) {
     mkdirSync(dirname(join(d, rel)), { recursive: true });
     writeFileSync(join(d, rel), readFileSync(join(ROOT, rel)));
   };
-  for (const f of ["lib.mjs", "cli.mjs", "bench-judge.mjs"]) copy(`scripts/trace/${f}`);
+  for (const f of ["lib.mjs", "cli.mjs", "bench-judge.mjs", "plan.mjs"]) copy(`scripts/trace/${f}`);
   for (const f of [".claude/workflows/loop-iteration.js", ".claude/trace/schema-v1.json", ".claude/memory/topics/trace.md"]) copy(f);
   const bundle = join(d, ".claude/trace/bench/fixtures.bundle");
   const setBundle = (m) => {

@@ -27,6 +27,7 @@ import {
   readPolicyVersion,
   replay,
 } from "./lib.mjs";
+import { DEFAULT_PLAN, NOT_READY, STATUSES, parsePlan, planViolations } from "./plan.mjs";
 
 const WF_DIR = join(ROOT, ".claude/workflows");
 const workflows = readdirSync(WF_DIR)
@@ -161,6 +162,25 @@ describe("committed record store", () => {
   it("replays cleanly — every record and action satisfies the contract", () => {
     const state = replay(loadEntries(DEFAULT_STORE), schema, readPolicyVersion());
     expect(state.errors).toEqual([]);
+  });
+});
+
+// The loop plan is the loop's state: `pnpm trace plan-lint` must pass on what is committed (an
+// in-progress node is only a warning here, since this can run mid-loop), and plan.mjs must read
+// the same status list and ready rule that loop-plan.md documents.
+describe("committed loop plan ↔ plan.mjs", () => {
+  const doc = readFileSync(DEFAULT_PLAN, "utf8");
+
+  it("the committed plan and store pass plan-lint with no errors", () => {
+    const state = replay(loadEntries(DEFAULT_STORE), schema, readPolicyVersion());
+    expect(planViolations(parsePlan(doc), state).errors).toEqual([]);
+  });
+
+  it("the documented status list and the ready rule's excluded set match the plan.mjs constants", () => {
+    const statusRow = /^\| `status` \| (.+) \|$/m.exec(doc)?.[1] ?? "";
+    expect([...statusRow.matchAll(/`([a-z-]+)`/g)].map((m) => m[1]).sort()).toEqual([...STATUSES].sort());
+    const excluded = /`status ∉ \{([^}]+)\}`/.exec(doc)?.[1] ?? "";
+    expect(excluded.split(",").map((s) => s.trim()).sort()).toEqual([...NOT_READY].sort());
   });
 });
 

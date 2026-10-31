@@ -39,6 +39,7 @@ import {
   storeMetrics,
   writeRecords,
 } from "./lib.mjs";
+import { DEFAULT_PLAN, parsePlan, planItems, planViolations, readyIds } from "./plan.mjs";
 
 const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (policy: .claude/memory/topics/trace.md)
 
@@ -57,6 +58,19 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
                                        every path git's own parser finds in it (git apply --numstat) — exit 1 on a hit,
                                        exit 2 when it cannot be verified (git error, no paths)
   pnpm trace lint                      replay the whole store and check every contract invariant (exit 1 on error)
+  pnpm trace plan-ready [--max N] [--json] [--plan p]
+                                       the loop plan's ready node ids as a JSON array (loop-plan.md's ready-node rule, in
+                                       table order; --max N keeps the first N; --json prints those rows in full) — exit 1
+                                       and no ids when the plan table does not parse
+  pnpm trace plan-lint [--pre-dispatch] [--plan p]
+                                       check the plan against its contract and the record store (consistency, not truth):
+                                       exit 1 on an error, 2 when the store does not replay; --pre-dispatch also fails on
+                                       an in-progress node (run it before every dispatch)
+  pnpm trace plan-items <ids…> [--plan p]
+                                       loop-iteration args.items for ready nodes: [{id, description, priorRecordId?,
+                                       missing?}]; priorRecordId only for the node's own loop:<id> record, never a
+                                       critic one — exit 1 and no items when any id is not ready, 2 when the store
+                                       does not replay
   pnpm trace reaudit [--act]           licensing records whose file evidence changed since their commit
   pnpm trace metrics                   store-level consumer-value metrics
   pnpm trace rotate [--max 500] [--keep 200]   lossless move of old lines into <YYYY>.jsonl archives
@@ -71,6 +85,7 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
                                        deterministic check; --recover reverses fixture patches left applied by a killed run
 
   --store <path>  use another store (default .claude/memory/trace/records.jsonl; env TRACE_STORE)
+  --plan <path>   use another loop plan (default .claude/memory/loop-plan.md)
   Actions: CLEAR HOLD COMMIT COMMIT_QUALIFIED QUARANTINE REJECT REUSE REAUDIT`;
 
 function parseArgs(argv) {
@@ -158,6 +173,40 @@ async function main() {
       }
     });
     process.stdout.write(treeFingerprint({ head, diff, untracked }) + "\n");
+    return 0;
+  }
+
+  // The loop plan's DAG (.claude/memory/loop-plan.md, or --plan p). Readiness is computed, never
+  // hand-derived, and a table that does not parse fails closed: no ids, exit 1.
+  const planPath = typeof flags.plan === "string" ? resolve(flags.plan) : DEFAULT_PLAN;
+  const readPlan = () => {
+    try {
+      return parsePlan(readFileSync(planPath, "utf8"));
+    } catch (e) {
+      return { nodes: [], errors: [`[table] cannot read the plan ${planPath}: ${e.message}`] };
+    }
+  };
+  // True (after reporting why) when the plan table does not parse: then no ids are printed at all.
+  const unparsed = (plan) => {
+    if (!plan.errors.length) return false;
+    for (const e of plan.errors) process.stderr.write(`error: ${e}\n`);
+    process.stderr.write(`${cmd}: the plan table does not parse — no ids (pnpm trace plan-lint lists every problem)\n`);
+    return true;
+  };
+
+  if (cmd === "plan-ready") {
+    const max = flags.max !== undefined ? (/^[1-9]\d*$/.test(String(flags.max)) ? Number(flags.max) : NaN) : undefined;
+    if (flags.plan === true || Number.isNaN(max)) {
+      out("usage: pnpm trace plan-ready [--max N] [--json] [--plan p]   (N a positive integer)");
+      return 2;
+    }
+    const plan = readPlan();
+    if (unparsed(plan)) return 1;
+    const ids = readyIds(plan.nodes, { max });
+    if (flags.json) {
+      const byId = new Map(plan.nodes.map((n) => [n.id, n]));
+      out(ids.map((id) => byId.get(id)), true);
+    } else process.stdout.write(JSON.stringify(ids) + "\n");
     return 0;
   }
 
@@ -274,6 +323,46 @@ async function main() {
     for (const e of state.errors) process.stderr.write(`error: ${e}\n`);
     out({ ok: state.errors.length === 0, errors: state.errors.length, warnings: state.warnings.length, records: m.records, store: storePath });
     return state.errors.length ? 1 : 0;
+  }
+
+  if (cmd === "plan-lint") {
+    if (flags.plan === true) {
+      out("usage: pnpm trace plan-lint [--pre-dispatch] [--plan p] [--store s]");
+      return 2;
+    }
+    // The cross-checks read the store; one that does not replay cannot vouch for any node.
+    if (state.errors.length) {
+      out({ ok: false, error: `the record store does not replay (${state.errors.length} error(s)) — the plan cannot be checked against it; run pnpm trace lint`, store: storePath }, true);
+      return 2;
+    }
+    const plan = readPlan();
+    const preDispatch = !!flags["pre-dispatch"];
+    const { errors, warnings } = planViolations(plan, state, { preDispatch });
+    for (const w of warnings) process.stderr.write(`warn: ${w}\n`);
+    for (const e of errors) process.stderr.write(`error: ${e}\n`);
+    out({ ok: errors.length === 0, errors: errors.length, warnings: warnings.length, nodes: plan.nodes.length, preDispatch, plan: planPath, store: storePath }, true);
+    return errors.length ? 1 : 0;
+  }
+
+  if (cmd === "plan-items") {
+    if (flags.plan === true || !pos.length) {
+      out("usage: pnpm trace plan-items <id> [<id>…] [--plan p] [--store s]");
+      return 2;
+    }
+    // Whose record a node cites (its own loop:<id> record becomes priorRecordId) only the replayed
+    // store tells, so one that does not replay yields no items. Errors go to stderr: stdout is the items file.
+    if (state.errors.length) {
+      process.stderr.write(`error: the record store does not replay (${state.errors.length} error(s)) — no items; run pnpm trace lint\n`);
+      return 2;
+    }
+    const plan = readPlan();
+    if (unparsed(plan)) return 1;
+    // All or nothing: a batch with any id that is not ready is never half-emitted.
+    const { items, refused } = planItems(plan.nodes, pos, state);
+    for (const r of refused) process.stderr.write(`error: ${r.id}: ${r.reason}\n`);
+    if (refused.length) return 1;
+    out(items, true);
+    return 0;
   }
 
   if (cmd === "show") {

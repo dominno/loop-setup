@@ -46,7 +46,7 @@ this repo from the "loop engineering" loop-design checklist
       bootstraps a node rather than deadlocking
 - [ ] **No durable state change without a record:** every node status change cites a
       TRACE-lite record (`done` = accept/qualify + `CLEAR`); `deferred`/`escalated` nodes
-      name their `missing`; `pnpm trace lint` passes
+      name their `missing`; `pnpm trace lint` passes; `pnpm trace plan-lint` passes
 
 **6. Human handoff**
 - [ ] Escalation triggers explicit (max attempts, risk paths, ambiguity)
