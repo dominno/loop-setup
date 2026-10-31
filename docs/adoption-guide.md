@@ -160,6 +160,58 @@ verification commands **and `git add` / `git commit`**. Before copying it:
   ignores. ESLint's flat config does not read `.gitignore`, so a leftover worktree
   would otherwise turn `lint` red.
 
+### Optional hooks
+
+The template enables **no hooks**. It ships one tested, opt-in Stop hook,
+`.claude/hooks/stop-gate.mjs` (tests in `scripts/hooks/stop-gate.test.mjs`; it imports
+`scripts/trace/lib.mjs`). At the end of a turn it runs the unit suite once per
+working-tree state and, when tests fail, shows you one line:
+`stop-gate: N unit test file(s) failing — advisory; run pnpm test`. It is advisory: it
+never blocks the turn, always exits 0, and is never evidence that work is done (your own
+check run is).
+
+To try it, add this to your own `.claude/settings.local.json`, next to its `permissions`.
+This template still tracks that file, so do not commit the change (or untrack the file in
+your copy first, which keeps it personal):
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/stop-gate.mjs\"", "timeout": 120 }
+        ]
+      }
+    ]
+  }
+}
+```
+
+- **A sync hook delays every turn end.** A run costs about one `pnpm test`; the gate kills
+  it after 90 s and reports "timed out … no result" (keep `timeout` at 120 so the hook can
+  stop itself first). It skips an unchanged tree, a tree it already reported, a turn that a
+  Stop hook is already continuing, a worktree where another session's gate is running, any
+  background workflow, subagent, teammate or cloud session, and any background task that
+  mentions a test, bench or trace run. It acts only on `Stop`: registered under any other
+  event (`SubagentStop`, say, or a tool event), it does nothing.
+  `STOP_GATE=0` turns it off. `STOP_GATE_MODE=related` runs only `vitest related` on
+  changed `src/` files plus `GLOBAL_GATES`, the tests that read files by path (add yours to
+  that list); any other change runs the full suite.
+- **It never runs E2E**, a build or a dev server.
+- **Its message reaches you, not Claude.** A sync hook's `systemMessage` is shown to the
+  user only. The `asyncRewake` hook option would wake the model instead (on exit code 2),
+  at a token cost each time it wakes the model; the gate does not use it.
+- **Committed hooks run in every session.** A hook in a committed settings file runs for
+  every adopter and in this repo's single-repo cloud sessions, which is why this one is
+  opt-in.
+- **Never add a `PreToolUse` or `PostToolUse` hook that prints.** Tool events fire inside
+  workflow subagents too, the measured loop verifier included, so its output would change
+  what the verifier sees. If you commit a `.claude/settings.json`,
+  `scripts/trace/config.test.mjs` fails on any tool-event hook in it.
+- Its manifest, lock and log live under `git rev-parse --git-path` (per worktree), never
+  in the tree; the log holds counts and exit codes only.
+
 ---
 
 ## Adapt the memory wiki
@@ -541,7 +593,12 @@ To adapt them:
 - **Cost is real.** A critic round spawns ~10 critic agents + a verifier per blocker and
   per important finding up to a cap; `/multi-agent-dev` runs that twice (pre + post).
   That's the price of genuine independent review — scale the roster down if you want it
-  lighter, or reserve the workflows for substantive changes. Built-in bounds: a round
+  lighter, or reserve the workflows for substantive changes. Hooks are not where the
+  budget goes: a non-blocking command hook (such as the opt-in stop gate under *Optional
+  hooks*) spends no model tokens, only local CPU and wall-clock time per firing, while one
+  critic round or bench run spends millions of subagent tokens (the measured runs are in
+  `.claude/memory/topics/workflow.md`). A hook that blocks, continues the turn or injects
+  context does spend tokens, on every firing. Built-in bounds: a round
   verifies every blocker and fills the rest of its verifier cap (`args.maxVerifiers`,
   default 30) with important findings, round-robin across lenses, and records any beyond
   it as a `defer` (`counts.capDeferred`) instead of dropping it; `scan-docs` refuses more

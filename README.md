@@ -50,6 +50,8 @@ CLAUDE.md                         Project rules + multi-agent workflow + doc-sca
     schema-v1.json                TRACE-lite record schema (versioned)
     bench/                        TRACE-Bench-lite: seeded-defect fixtures + scored runs
   settings.local.json             Allowed commands for the workflow
+  hooks/
+    stop-gate.mjs                 Opt-in Stop hook, enabled by no settings file: warns once per tree state when unit tests fail
   workflows/                      Deterministic multi-agent orchestration scripts (Workflow tool)
     critic-panel.js               Fan-out critics → adversarial verify → severity matrix
     scan-docs.js                  Per-story parallel evidence-gathering → status verifier
