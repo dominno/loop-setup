@@ -311,10 +311,16 @@ debate stage (critic panel + skeptic already is one).
 
 ## Gotchas
 - Workflow scripts cannot `import`; shared deterministic blocks (`<trace-evidence-gate>`,
-  `<loop-denylist>`, `<loop-verifier>`, `<critic-roster>`) are duplicated byte-for-byte
-  and parity-tested — edit the canonical copy, paste into every marked block, run
-  `pnpm test`. `scripts/trace/workflows.test.mjs` also runs the real workflow bodies with
-  stub agents, so a deleted gate call or a broken reuse key fails a test.
+  `<loop-denylist>`, `<loop-verifier>`, `<critic-roster>`, and `<agent-safety>` in exactly
+  the five read-only workflows) are duplicated byte-for-byte and parity-tested — edit the
+  canonical copy, paste into every marked block, run `pnpm test`.
+  `scripts/trace/workflows.test.mjs` also runs the real workflow bodies with stub agents, so
+  a deleted gate call or a broken reuse key fails a test. <!-- rec:TR-85dc794fd165 -->
+- The writer refuses any record or action whose text holds a bench leak marker, and a
+  patch-only token can be an ordinary word: a critic-panel draft whose prose happened to
+  contain one was refused (2026-10-31). The write is atomic, so nothing of that round lands
+  until the refused draft is left out; a workflow draft is never hand-edited to get past the
+  screen (`/critic-round` step 5). <!-- rec:TR-77dcaddf05c7 -->
 - The store lives under `.claude/`, and the TRACE gate code under `scripts/trace/`; the
   `loop-iteration` denylist blocks both for implementer diffs — records are written only by
   checkers/the Lead via `pnpm trace`.
@@ -376,11 +382,11 @@ debate stage (critic panel + skeptic already is one).
   excluded by F0, so the full-bench record is `qualify` and does not meet the L3 gate.
   <!-- rec:TR-00fe5f1e955b -->
 - Measured (confirmatory run after both instrument fixes; 29 fixtures incl. the 10 held-out,
-  3 repeats, nothing excluded): WrongAcceptRate 0, FalseHoldRate 0, invariance 1.00, only F2
-  → the latest bench record is `accept` and the L3 measured-checker item is met. Qualified:
-  two runs on the same fixtures; FalseHold 0 relies on the leak-guard fix made after the
-  previous run (WrongAccept 0 does not); ~30% of verdicts are `defer`, so an L3 loop would
-  still escalate often; it is one item of `loop-checklist.md`, not a license to run
-  unattended. <!-- rec:TR-3ce4efb91999 -->
+  3 repeats, nothing excluded): WrongAcceptRate 0, FalseHoldRate 0, invariance 1.00, only F2.
+  Qualified: two runs on the same fixtures; FalseHold 0 relies on the leak-guard fix made
+  after the previous run (WrongAccept 0 does not); ~30% of verdicts are `defer`. Its record
+  (TR-df7ab02dc866) predates L3 freshness — no `<loop-verifier>` hash, no per-repeat fixture
+  counts — and the verifier block changed after it, so `pnpm trace l3-check` reports the L3
+  measured-checker item NOT met until `/bench-checkers` is re-run. <!-- rec:TR-634fa314a7bf -->
 
 Related: [workflow](./workflow.md) · [quality-bar](./quality-bar.md) · [testing](./testing.md)
