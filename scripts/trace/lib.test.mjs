@@ -962,9 +962,9 @@ describe("l3Check: the L3 measured-checker item, computed from the LATEST bench 
 describe("L3 needs a full verifier bench: measured fixture counts", () => {
   const HASH = "e".repeat(64);
   const manifest = { fixtures: [{ id: "B1", kind: "bad" }, { id: "B2", kind: "bad" }, { id: "G1", kind: "good" }, { id: "G2", kind: "good" }] };
-  // Verifier runs on `ids` at repeats 0 and 1: bad diffs held, good ones licensed — no F0, F3 or F4.
-  const verifierRuns = (ids) =>
-    [0, 1].flatMap((repeat) =>
+  // Verifier runs on `ids` at `repeats` (default 0 and 1): bad diffs held, good ones licensed — no F0, F3 or F4.
+  const verifierRuns = (ids, repeats = [0, 1]) =>
+    repeats.flatMap((repeat) =>
       ids.map((id) => {
         const verdict = manifest.fixtures.find((f) => f.id === id).kind === "bad" ? "reject" : "accept";
         return { arm: "verifier", repeat, fixtureId: id, verdict, preGateVerdict: verdict };
@@ -1050,5 +1050,58 @@ describe("L3 needs a full verifier bench: measured fixture counts", () => {
     const metrics = JSON.parse(partial.evidence.find((e) => e.kind === "measurement").result);
     expect(metrics.fixtures).toEqual({ bad: 2, good: 2 });
     expect(metrics.arms.verifier.measured).toEqual({ bad: 0, good: 2 });
+  });
+
+  // L3 counts only the fixtures the verifier measured in EVERY repeat: bench-score concatenates
+  // results files, so a part-manifest run (bench-args --only) at repeat 2 scored together with a
+  // full-manifest run at repeat 1 has two repeat indices and touches every fixture, yet each bad
+  // fixture was measured once — F3 (procedural invariance) could never fire for it.
+  describe("only the fixtures measured in every repeat count", () => {
+    // The good fixtures at repeats 0 and 1, plus the whole manifest at repeat 0 (two results files).
+    const mixedRuns = () => [...verifierRuns(["G1", "G2"]), ...verifierRuns(["B1", "B2", "G1", "G2"], [0])];
+    const counts = (s) => s.arms.verifier.perRepeat.map((p) => [p.repeat, p.measured]);
+
+    it("scoreBench: the verifier arm's measured counts are the fixtures measured in every repeat index present, and each perRepeat entry carries its own", () => {
+      const mixed = scoreBench(manifest, { runs: mixedRuns() });
+      expect(mixed.arms.verifier.repeats).toBe(2);
+      expect(mixed.flags.filter((f) => /^F[034]/.test(f))).toEqual([]);
+      expect(mixed.arms.verifier.measured).toEqual({ bad: 0, good: 2 });
+      expect(counts(mixed)).toEqual([[0, { bad: 2, good: 2 }], [1, { bad: 0, good: 2 }]]);
+      // Every fixture at repeats 0 and 1: the counts equal the manifest's, in each repeat too.
+      const full = scored(["B1", "B2", "G1", "G2"]);
+      expect(full.arms.verifier.measured).toEqual({ bad: 2, good: 2 });
+      expect(counts(full)).toEqual([[0, { bad: 2, good: 2 }], [1, { bad: 2, good: 2 }]]);
+    });
+
+    it("l3Check is unmet on that mixed bench (repeat 2, accept, no F0, F3 or F4) with the full-manifest message alone; the record shows where coverage fell short", () => {
+      const draft = benchRecordDraft(scoreBench(manifest, { runs: mixedRuns() }), { resultsRef: "part.json full.json", runIds: ["0a1b2c3d", "4e5f6a7b"], verifierHash: HASH });
+      expect(draft.final_status).toBe("accept");
+      expect(draft.claim_text).toMatch(/verifier measured 0\/2 bad and 2\/2 good fixtures in every repeat/);
+      const metrics = JSON.parse(draft.evidence.find((e) => e.kind === "measurement").result);
+      expect(metrics.arms.verifier.perRepeat.map((p) => p.measured)).toEqual([{ bad: 2, good: 2 }, { bad: 0, good: 2 }]);
+      const res = l3(draft);
+      expect(res.ok).toBe(false);
+      expect(res.unmet).toHaveLength(1);
+      expect(res.unmet[0]).toMatch(/measured 0\/2 bad and 2\/2 good manifest fixtures in every repeat/);
+      expect(res.unmet[0]).toMatch(/L3 needs every fixture in every repeat/);
+      expect(res.unmet[0]).toMatch(/re-bench the full manifest/);
+    });
+
+    it("the same manifest with every fixture at repeats 0 and 1 meets l3Check, and its claim says the counts hold in every repeat", () => {
+      const draft = benchRecordDraft(scored(["B1", "B2", "G1", "G2"]), { resultsRef: "r.json", runIds: ["0a1b2c3d"], verifierHash: HASH });
+      expect(draft.claim_text).toMatch(/verifier measured 2\/2 bad and 2\/2 good fixtures in every repeat/);
+      expect(l3(draft)).toMatchObject({ ok: true, unmet: [], verdict: "accept", repeats: 2, recordHash: HASH });
+      // A run without a verifier arm had no repeats: its claim never says "in every repeat".
+      const single = scoreBench(manifest, { runs: manifest.fixtures.map((f) => ({ arm: "single-pass", fixtureId: f.id, block: f.kind === "bad" })) });
+      expect(benchRecordDraft(single, { resultsRef: "r.json" }).claim_text).not.toMatch(/in every repeat/);
+    });
+
+    it("l3Check's fail-closed message (a record without the counts) also asks for every fixture in every repeat", () => {
+      const draft = benchRecordDraft(scored(["B1", "B2", "G1", "G2"]), { resultsRef: "r.json", runIds: ["0a1b2c3d"], verifierHash: HASH });
+      draft.evidence = draft.evidence.map((e) => (e.kind === "measurement" ? { ...e, result: JSON.stringify({ arms: { verifier: { repeats: 2 } } }) } : e));
+      const res = l3(draft);
+      expect(res.unmet).toHaveLength(1);
+      expect(res.unmet[0]).toMatch(/every fixture in every repeat: re-bench the full manifest/);
+    });
   });
 });

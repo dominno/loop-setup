@@ -692,17 +692,21 @@ describe("round-3 CLI fixes", () => {
 
   describe("bench-score --record fails closed", () => {
     const RUN = "0a1b2c3d";
+    const writeTranscripts = (list) => {
+      const tdir = join(dir, "transcripts");
+      mkdirSync(tdir);
+      list.forEach((t, i) => {
+        writeFileSync(join(tdir, `agent-${i}.jsonl`), t.text);
+        writeFileSync(join(tdir, `agent-${i}.meta.json`), JSON.stringify({ description: t.label }));
+      });
+      return tdir;
+    };
     const setup = (transcripts, { runId = RUN, agents, repeats = 1, only = () => true } = {}) => {
       const m = readBench();
       const runs = join(dir, "runs.json");
       const verifierRuns = m.fixtures.filter(only).flatMap((f) => Array.from({ length: repeats }, (_, repeat) => ({ arm: "verifier", repeat, fixtureId: opaqueFixtureId(f.id), verdict: "defer", failedGates: [], missing: ["x"] })));
       writeFileSync(runs, JSON.stringify({ ...(runId ? { runId } : {}), ...(agents != null ? { agents } : {}), runs: verifierRuns }));
-      const tdir = join(dir, "transcripts");
-      mkdirSync(tdir);
-      transcripts(m).forEach((t, i) => {
-        writeFileSync(join(tdir, `agent-${i}.jsonl`), t.text);
-        writeFileSync(join(tdir, `agent-${i}.meta.json`), JSON.stringify({ description: t.label }));
-      });
+      const tdir = writeTranscripts(transcripts(m));
       return (extra = []) => trace(["bench-score", runs, "--transcripts", tdir, "--record", ...extra]);
     };
     // Boolean checks only: bench-score's stdout names fixtures, and a failing toMatch would print it.
@@ -789,6 +793,33 @@ describe("round-3 CLI fixes", () => {
       const out = trace(["l3-check", "--json"]);
       expect(out.status).toBe(1);
       expect(JSON.parse(out.stdout).unmet).toEqual([expect.stringMatching(new RegExp(`measured 0/${counts.bad} bad and ${counts.good}/${counts.good} good manifest fixtures`))]);
+    });
+    it("two results files scored together (the good fixtures at repeat 2, the whole manifest at repeat 1) count only the fixtures measured in every repeat: l3-check exits 1 on the full-manifest condition alone", () => {
+      const m = readBench();
+      const good = (f) => f.kind === "good";
+      const PART = RUN;
+      const FULL = "4e5f6a7b";
+      const results = (runId, fixtures, repeats) => {
+        const file = join(dir, `runs-${runId}.json`);
+        const runs = fixtures.flatMap((f) => Array.from({ length: repeats }, (_, repeat) => ({ arm: "verifier", repeat, fixtureId: opaqueFixtureId(f.id), verdict: "defer", failedGates: [], missing: ["x"] })));
+        writeFileSync(file, JSON.stringify({ runId, runs }));
+        return file;
+      };
+      const files = [results(PART, m.fixtures.filter(good), 2), results(FULL, m.fixtures, 1)];
+      const tdir = writeTranscripts([...covering({ fixtures: m.fixtures.filter(good) }, PART, 2), ...covering(m, FULL, 1)]);
+      expect(trace(["bench-score", ...files, "--transcripts", tdir, "--record"]).status).toBe(0);
+      const rec = JSON.parse(readFileSync(store, "utf8").trim().split("\n").at(-1));
+      expect(rec.final_status).toBe("accept");
+      const metrics = JSON.parse(rec.evidence.find((e) => e.kind === "measurement").result);
+      const counts = { bad: m.fixtures.filter((f) => !good(f)).length, good: m.fixtures.filter(good).length };
+      expect(metrics.fixtures).toEqual(counts);
+      expect(metrics.arms.verifier.repeats).toBe(2);
+      expect(metrics.arms.verifier.measured).toEqual({ bad: 0, good: counts.good });
+      expect(metrics.arms.verifier.perRepeat.map((p) => p.measured)).toEqual([counts, { bad: 0, good: counts.good }]);
+      expect(namesCurrentVerifier()).toBe(true);
+      const out = trace(["l3-check", "--json"]);
+      expect(out.status).toBe(1);
+      expect(JSON.parse(out.stdout).unmet).toEqual([expect.stringMatching(new RegExp(`measured 0/${counts.bad} bad and ${counts.good}/${counts.good} good manifest fixtures in every repeat`))]);
     });
     it("refuses to record when the results path itself carries ground truth (the evidence ref is screened)", () => {
       const m = readBench();

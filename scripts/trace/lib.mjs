@@ -902,7 +902,7 @@ export function scoreBench(manifest, results, thresholds = { invariance: 0.8 }) 
   const runs = clean.filter((r) => !r.noVerdict);
   // What an arm actually measured: the manifest fixtures among its scored runs, beside the
   // manifest's counts (`fixtures`) — a run over part of the manifest (bench-args --only) must not
-  // read as a full bench (l3Check needs the verifier arm over every fixture).
+  // read as a full bench (l3Check needs the verifier arm over every fixture in every repeat).
   const measuredOf = (rs) => {
     const ids = new Set(rs.map((r) => r.fixtureId));
     return { bad: bad.filter((id) => ids.has(id)).length, good: good.filter((id) => ids.has(id)).length };
@@ -942,11 +942,19 @@ export function scoreBench(manifest, results, thresholds = { invariance: 0.8 }) 
   const ver = runs.filter((r) => r.arm === "verifier" && fixtures.has(r.fixtureId));
   if (ver.length) {
     const repeats = [...new Set(ver.map((r) => r.repeat ?? 0))].sort((x, y) => x - y);
+    // The arm measured a fixture only when EVERY repeat index present measured it (the
+    // intersection, not the union): bench-score concatenates results files, so a part-manifest
+    // run at repeat 2 scored together with a full-manifest run at repeat 1 would otherwise read
+    // as a full bench at repeat ≥ 2 although part of the manifest was measured once — F3
+    // (procedural invariance) could never fire for it.
+    const inEveryRepeat = (id) => repeats.every((rep) => ver.some((r) => r.fixtureId === id && (r.repeat ?? 0) === rep));
     const per = repeats.map((rep) => {
       const rs = ver.filter((r) => (r.repeat ?? 0) === rep);
       const licensed = (r) => LICENSING.includes(r.verdict) && !r.denylistHit;
       return {
         repeat: rep,
+        // What this repeat measured, so a record shows where coverage fell short.
+        measured: measuredOf(rs),
         wrongAcceptRate: rate(rs.filter((r) => isBad(r.fixtureId) && licensed(r)).length, rs.filter((r) => isBad(r.fixtureId)).length),
         falseHoldRate: rate(rs.filter((r) => !isBad(r.fixtureId) && !licensed(r)).length, rs.filter((r) => !isBad(r.fixtureId)).length),
         deferRate: rate(rs.filter((r) => r.verdict === "defer").length, rs.length),
@@ -969,7 +977,7 @@ export function scoreBench(manifest, results, thresholds = { invariance: 0.8 }) 
     }
     out.arms.verifier = {
       repeats: repeats.length,
-      measured: measuredOf(ver),
+      measured: measuredOf(ver.filter((r) => inEveryRepeat(r.fixtureId))),
       wrongAcceptRate: avg("wrongAcceptRate"),
       falseHoldRate: avg("falseHoldRate"),
       deferRate: avg("deferRate"),
@@ -1547,9 +1555,10 @@ export function benchArgs(manifest, { arms, repeat, critics, only, runId }) {
 
 /**
  * A TRACE-lite record draft for a scored bench run (a measured claim about our checkers). The
- * claim states the fixtures each scored arm measured next to the manifest's counts, and the
- * measurement item carries both (`fixtures`, `arms.<arm>.measured`), so a run over part of the
- * manifest never reads as a full bench (l3Check reads them). `verifierHash` (verifierBlockHash of
+ * claim states the fixtures each scored arm measured next to the manifest's counts — for the
+ * verifier arm, the fixtures it measured in every repeat (each `perRepeat` entry carries its own) —
+ * and the measurement item carries both (`fixtures`, `arms.<arm>.measured`), so a run over part of
+ * the manifest never reads as a full bench (l3Check reads them). `verifierHash` (verifierBlockHash of
  * the production verifier, read by the caller) names the <loop-verifier> block the run measured —
  * only when the score has a verifier arm: a run without one measured no verifier. Without a named
  * block the record never passes l3Check.
@@ -1562,7 +1571,7 @@ export function benchRecordDraft(score, { resultsRef, priorRecordId, runIds = []
   // "<measured>/<manifest> bad and <measured>/<manifest> good fixtures"; an arm that did not run measured none.
   const of = (m) => `${m?.bad ?? 0}/${score.fixtures.bad} bad and ${m?.good ?? 0}/${score.fixtures.good} good fixtures`;
   const parts = [
-    `verifier measured ${of(v.measured)}: WrongAcceptRate=${f(v.wrongAcceptRate)} FalseHoldRate=${f(v.falseHoldRate)} invariance=${f(v.proceduralInvariance)}`,
+    `verifier measured ${of(v.measured)}${score.arms.verifier ? " in every repeat" : ""}: WrongAcceptRate=${f(v.wrongAcceptRate)} FalseHoldRate=${f(v.falseHoldRate)} invariance=${f(v.proceduralInvariance)}`,
     score.arms.singlePass ? `single-pass measured ${of(s.measured)}: recall=${f(s.recall)} false-block=${f(s.falseBlockRate)}` : null,
     p.anyBlock ? `panel(any) measured ${of(p.measured)}: recall=${f(p.anyBlock.recall)} n_eff=${f(p.effectivePanelSize)}` : null,
   ].filter(Boolean);
@@ -1613,10 +1622,11 @@ export function verifierBlockHash(source) {
 /**
  * The L3 gate over a replayed store: the LATEST bench:trace-bench-lite record, licensing or not
  * (an older accept never stands in for a newer qualify), is an accept, from a verifier arm run at
- * repeat ≥ 2 over the full manifest (the arm's measured bad/good counts equal the manifest's, both
- * read from the record's measurement item), with no F0, F3 or F4 in its failed_gates, and names the
- * <loop-verifier> block it measured by a hash equal to `currentHash` (the current block's; null when
- * it cannot be read).
+ * repeat ≥ 2 over every manifest fixture in every repeat (the arm's measured bad/good counts, which
+ * scoreBench takes over the fixtures measured in every repeat index present, equal the manifest's,
+ * both read from the record's measurement item), with no F0, F3 or F4 in its failed_gates, and names
+ * the <loop-verifier> block it measured by a hash equal to `currentHash` (the current block's; null
+ * when it cannot be read).
  * Returns every unmet condition; ok only when there is none. Fail closed: a store that does not
  * replay, a missing record and an unreadable field are each an unmet condition, never a pass.
  */
@@ -1642,16 +1652,18 @@ export function l3Check(state, currentHash) {
   const repeats = metrics?.arms?.verifier?.repeats;
   if (!Number.isInteger(repeats)) unmet.push("the record does not show the verifier arm's repeat count — L3 needs a bench of the verifier arm over the full manifest at repeat ≥ 2");
   else if (repeats < 2) unmet.push(`the verifier arm ran ${repeats} repeat(s) — needs repeat ≥ 2 (F3, procedural invariance, cannot fire on fewer)`);
-  // The full manifest: a verifier arm run over part of it (bench-args --only) never saw the rest —
-  // possibly no bad diff at all. With no verifier arm the repeat-count condition above already fails.
+  // The full manifest in every repeat: a verifier arm run over part of it (bench-args --only) never
+  // saw the rest — possibly no bad diff at all — and one scored together with a full-manifest run at
+  // fewer repeats saw the rest once (F3 could not fire for it), so scoreBench counts only the
+  // fixtures measured in every repeat. With no verifier arm the repeat-count condition above already fails.
   if (metrics?.arms?.verifier) {
     const total = metrics.fixtures;
     const seen = metrics.arms.verifier.measured;
     const count = (n, min) => Number.isInteger(n) && n >= min; // a manifest holds ≥ 1 bad and ≥ 1 good fixture
     if (!(count(total?.bad, 1) && count(total?.good, 1) && count(seen?.bad, 0) && count(seen?.good, 0))) {
-      unmet.push("the record does not show the manifest's fixture counts and the ones its verifier arm measured (a record scored before full-manifest counts carries none) — L3 needs a verifier bench of every fixture: re-bench the full manifest with /bench-checkers");
+      unmet.push("the record does not show the manifest's fixture counts and the ones its verifier arm measured (a record scored before full-manifest counts carries none) — L3 needs a verifier bench of every fixture in every repeat: re-bench the full manifest with /bench-checkers");
     } else if (seen.bad !== total.bad || seen.good !== total.good) {
-      unmet.push(`the verifier arm measured ${seen.bad}/${total.bad} bad and ${seen.good}/${total.good} good manifest fixtures — L3 needs every fixture (a run over part of the manifest, e.g. bench-args --only, never meets it): re-bench the full manifest with /bench-checkers`);
+      unmet.push(`the verifier arm measured ${seen.bad}/${total.bad} bad and ${seen.good}/${total.good} good manifest fixtures in every repeat — L3 needs every fixture in every repeat (a run over part of the manifest, e.g. bench-args --only, never meets it, even scored together with a full-manifest run at fewer repeats): re-bench the full manifest with /bench-checkers`);
     }
   }
   const blocking = rec.failed_gates.filter((g) => /^F[034](?![0-9])/.test(g));

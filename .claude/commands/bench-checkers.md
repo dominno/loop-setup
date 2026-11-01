@@ -27,10 +27,11 @@ $ARGUMENTS
    truth never reaches the agents):
    `pnpm -s trace bench-args --arms <arms> --repeat <N>` → save to a scratch file.
    Default arms `verifier,single-pass`, repeat `2` (repeat ≥ 2 is needed for the
-   procedural-invariance metric). A bench for L3 runs the verifier arm over the whole
-   manifest: `--only` benches a subset, which `pnpm trace l3-check` never accepts. `panel`
-   adds one agent per critic per fixture (~10× fixtures) — run it deliberately, optionally
-   with `--critics a,b`.
+   procedural-invariance metric). A bench for L3 runs the verifier arm over every manifest
+   fixture in every repeat: `--only` benches a subset, which `pnpm trace l3-check` never
+   accepts, even when scored with a full-manifest run at fewer repeats (only the fixtures
+   measured in every repeat count). `panel` adds one agent per critic per fixture (~10×
+   fixtures) — run it deliberately, optionally with `--critics a,b`.
 3. **Run the Workflow** — `scriptPath: .claude/workflows/trace-bench.js`, `args` = the
    step-2 JSON. This command opts into multi-agent orchestration (it spawns
    fixtures × repeat verifier agents + fixtures single-pass agents); invoking Workflow

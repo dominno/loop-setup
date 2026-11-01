@@ -88,9 +88,9 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
                                        warnings}; exit 1 on an error, 2 when the store does not replay
   pnpm trace l3-check [--json]         the L3 measured-checker item of .claude/loop-checklist.md, computed: the latest
                                        bench:trace-bench-lite record is accept, from a verifier arm run at repeat ≥ 2
-                                       over every manifest fixture (no --only subset), with no F0, F3 or F4 in its
-                                       failed_gates, and names the current <loop-verifier> block by its sha256 —
-                                       exit 0 when all hold, else exit 1 listing every unmet condition
+                                       over every manifest fixture in every repeat (no --only subset), with no F0, F3
+                                       or F4 in its failed_gates, and names the current <loop-verifier> block by its
+                                       sha256 — exit 0 when all hold, else exit 1 listing every unmet condition
   pnpm trace reaudit [--act]           licensing records whose file evidence changed since their commit; one whose
                                        commit the repo no longer has (squashed away) is listed apart, as unreachable
   pnpm trace metrics                   store-level consumer-value metrics

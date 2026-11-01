@@ -265,9 +265,12 @@ sha256=<hex>`, the hash of that block (marker lines included) as `bench-score --
 it from the working tree (a run without a verifier arm names none). `pnpm trace l3-check` is
 the measured-checker item of `.claude/loop-checklist.md`, computed: the latest
 `bench:trace-bench-lite` record, licensing or not, must be `accept`, from a verifier arm run at
-`repeat ≥ 2` over the full manifest (its measurement item's `arms.verifier.measured` bad/good
-counts equal the manifest's `fixtures` counts — a record without them, or from a run over part
-of the manifest, e.g. with `bench-args --only`, never passes), with no F0, F3 or F4 in its
+`repeat ≥ 2` over every manifest fixture in every repeat (its measurement item's
+`arms.verifier.measured` bad/good counts, taken over the fixtures measured in every repeat
+index present, never the union over repeats, equal the manifest's `fixtures` counts — a record
+without them, or from a run over part of the manifest, e.g. with `bench-args --only`, never
+passes, even when scored with a full-manifest run at fewer repeats; each `perRepeat` entry
+carries its own counts, to show where coverage fell short), with no F0, F3 or F4 in its
 `failed_gates`, and its hash must equal the current block's; exit 0 only when all hold, else
 exit 1 listing every unmet condition (a store that does not replay, or a block that cannot be
 read, is one too). Any edit inside the block needs a re-bench before L3, and a record scored
