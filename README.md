@@ -49,7 +49,7 @@ CLAUDE.md                         Project rules + multi-agent workflow + doc-sca
   trace/
     schema-v1.json                TRACE-lite record schema (versioned)
     bench/                        TRACE-Bench-lite: seeded-defect fixtures + scored runs
-  settings.local.json             Allowed commands for the workflow
+  settings.json                   Shared permissions: allow-list, force-push/hard-reset denies
   hooks/
     stop-gate.mjs                 Opt-in Stop hook, enabled by no settings file: warns once per tree state when unit tests fail
   workflows/                      Deterministic multi-agent orchestration scripts (Workflow tool)
@@ -104,9 +104,10 @@ in **[`docs/adoption-guide.md`](docs/adoption-guide.md)** — the short version:
    overwrite), `.claude/commands/`, `.claude/workflows/`, `.claude/loop.md`,
    `.claude/loop-checklist.md`, `.claude/memory/` (start `.claude/memory/trace/` and
    `quarantine.md` empty), `.claude/trace/`, `.claude/skills-index.md`,
-   `.claude/settings.local.json`, `scripts/trace/`, `docs/*.md`, `docs/stories/`, and
-   `.github/workflows/verify.yml`. Then add `"trace": "node scripts/trace/cli.mjs"` to
-   your `package.json` scripts and `scripts/**/*.test.mjs` to your unit-test globs.
+   `.claude/settings.json` (merge into yours, don't overwrite), `scripts/trace/`,
+   `docs/*.md`, `docs/stories/`, and `.github/workflows/verify.yml`. Then add
+   `"trace": "node scripts/trace/cli.mjs"` to your `package.json` scripts and
+   `scripts/**/*.test.mjs` to your unit-test globs.
    Optionally copy the opt-in Stop hook `.claude/hooks/stop-gate.mjs` and its tests
    `scripts/hooks/stop-gate.test.mjs` (no settings file enables it; see
    [Optional hooks](docs/adoption-guide.md#optional-hooks)).
@@ -127,9 +128,9 @@ in **[`docs/adoption-guide.md`](docs/adoption-guide.md)** — the short version:
    Check name collisions, give each a `description`, and set
    `disable-model-invocation: true` only where the manual-only rule in
    `.claude/skills-index.md` applies (never on a command `CLAUDE.md` tells Claude to
-   run). Put shared permissions in a
-   committed `.claude/settings.json` (create it — the template ships only
-   `settings.local.json`); the `git add`/`git commit` auto-allow is opt-in. In CI,
+   run). Trim the shared allow-list in `.claude/settings.json` to your real commands and
+   keep its force-push/hard-reset denies; a `git add`/`git commit` auto-allow is a
+   personal opt-in in your own git-ignored `.claude/settings.local.json`. In CI,
    install the browser normally (no `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD`).
 6. **First session** — `pnpm verify` (green once) → `/scan-project-docs` →
    `/write-goal <your first task>` (review, then run it) → `/qa-pass` → `/dream`.

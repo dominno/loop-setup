@@ -116,9 +116,12 @@
   `docs/workflow-graphs.md` (Mermaid), with the model tier per node. Update the diagram
   when you add a node, edge, or change a tier — `/improve-skills` and `/dream lint`
   flag drift between a diagram and its script.
-- A command's `description` also lets Claude **auto-invoke** it. Add
-  `disable-model-invocation: true` to heavy/code-changing commands that should be
-  manual-only.
+- A command's `description` also lets Claude **auto-invoke** it.
+  `disable-model-invocation: true` stops that but also blocks Claude's Skill call, so a
+  command is manual-only only if it rewrites the governing prompt surface or runs a measured
+  fan-out `CLAUDE.md` never asks for (today `/improve-skills` and `/bench-checkers`), marked
+  `(manual-only)` in its `.claude/skills-index.md` row; `pnpm test` fails when a flag and its
+  row disagree. <!-- rec:TR-dc21201014e2 -->
 - Team-wide permissions belong in committed `.claude/settings.json`;
   `.claude/settings.local.json` is conventionally personal (often git-ignored).
   Auto-allowing `git commit`/`git add` lets the agent commit without a prompt — opt

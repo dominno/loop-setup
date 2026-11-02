@@ -361,3 +361,12 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
   `disable-model-invocation: true` to heavy/code-changing commands" predates the
   manual-only rule in `.claude/skills-index.md` (only commands that rewrite the governing
   prompts or run a measured fan-out CLAUDE.md never asks for are manual-only).
+
+## [2026-11-02] ingest | manual-only rule fact; shared settings.json landed
+- Flow 1e (iii), confirmed by the user: workflow.md's legacy bullet "Add
+  `disable-model-invocation: true` to heavy/code-changing commands" rewritten to the
+  manual-only rule of `.claude/skills-index.md` (TR-dc21201014e2, COMMIT).
+- Step 4b approved by the user: the committed `.claude/settings.json` (shared allow-list,
+  force-push/hard-reset denies, worktree.baseRef "head") replaces the tracked
+  `.claude/settings.local.json`, which is now git-ignored and personal.
+- Admission: committed 1, qualified 0, quarantined 0, rejected 0.

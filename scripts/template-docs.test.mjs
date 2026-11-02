@@ -1,7 +1,7 @@
 // Template-only doc gates: checks on this template's own instruction and guide prose, and on
-// the ignore rules it ships. It sits outside scripts/trace/ on purpose, so an adopter who
-// copies scripts/trace/ does not inherit assertions about wording and choices they will
-// rewrite (the portable settings gates live in scripts/trace/config.test.mjs).
+// the shared settings and ignore rules it ships. It sits outside scripts/trace/ on purpose, so
+// an adopter who copies scripts/trace/ does not inherit assertions about wording and choices
+// they will rewrite (the portable settings gates live in scripts/trace/config.test.mjs).
 // Prose is compared with whitespace collapsed: re-wrapping a paragraph never trips a check,
 // and a phrase split across a line break still counts as present.
 import { describe, it, expect } from "vitest";
@@ -62,9 +62,28 @@ describe("loop.md consumer procedure", () => {
   });
 });
 
-describe.skipIf(!inGitCheckout)("agent files stay out of git", () => {
-  it("ignores agent worktrees", () => {
-    expect(git("check-ignore", "-q", "--", ".claude/worktrees/x/a.ts").status).toBe(0);
+describe("shared permissions (.claude/settings.json)", () => {
+  const allow = () => JSON.parse(read(".claude/settings.json")).permissions?.allow ?? [];
+
+  it("allows every Main-command script", () => {
+    const scripts = [...section(read("CLAUDE.md"), "## Main commands").matchAll(/`pnpm ([^`\s]+)`/g)].map((m) => m[1]);
+    expect(scripts.length).toBeGreaterThan(0);
+    const rules = allow();
+    expect(scripts.filter((s) => !rules.includes(`Bash(pnpm ${s}:*)`))).toEqual([]);
+  });
+
+  it("shares no git add/commit auto-allow and no open-ended pnpm install", () => {
+    // git add/commit is a personal opt-in (settings.local.json); `pnpm install <pkg>` adds a dependency.
+    const open = allow().filter((r) => /^Bash\(git (add|commit)\b/.test(r) || ["Bash(pnpm install:*)", "Bash(pnpm install *)"].includes(r));
+    expect(open).toEqual([]);
+  });
+});
+
+describe.skipIf(!inGitCheckout)("personal and agent files stay out of git", () => {
+  it("does not track settings.local.json, and ignores it and agent worktrees", () => {
+    expect(git("ls-files", "--", ".claude/settings.local.json").stdout).toBe("");
+    const visible = [".claude/settings.local.json", ".claude/worktrees/x/a.ts"].filter((p) => git("check-ignore", "-q", "--", p).status !== 0);
+    expect(visible).toEqual([]);
   });
 });
 

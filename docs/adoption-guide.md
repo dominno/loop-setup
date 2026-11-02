@@ -33,7 +33,7 @@ CLAUDE.md                     Project rules, critic roster, completion gates
 scripts/trace/                `pnpm trace` CLI + its tests (add "trace": "node scripts/trace/cli.mjs"
                               to package.json and scripts/**/*.test.mjs to your unit-test globs)
 .claude/skills-index.md       Command catalog: which slash command fits which task
-.claude/settings.local.json   Allowed commands (adapt to your tools)
+.claude/settings.json         Shared permissions (merge into yours; adapt the allow-list)
 .claude/hooks/stop-gate.mjs   Optional: the opt-in advisory Stop hook, enabled by no settings file (see
                               "Optional hooks"); its tests are scripts/hooks/stop-gate.test.mjs
 docs/*.md  docs/stories/      Story-map scaffolds (user-stories index, stories/ per-story files, ...)
@@ -88,9 +88,9 @@ something real to run against until your own flows exist.
    re-seed with `/dream`).
 5. **Start the story map empty** — clear the US-001/US-002 example content from
    `docs/*.md`, keep the formats, then run `/scan-project-docs` against your docs.
-6. **Adjust `.claude/settings.local.json`** — see “Permissions” below: allow only
-   your real commands, and decide whether to keep the `git add`/`git commit`
-   auto-allow.
+6. **Merge `.claude/settings.json`** — see “Permissions” below: allow only your
+   real commands, keep the force-push/hard-reset denies, and put any personal
+   `git add`/`git commit` auto-allow in your own `.claude/settings.local.json`.
 7. **Already have a wiki in `docs/`?** Read “Reconciling with an existing `docs/`
    wiki” before you start the story map (step 5) — you’ll likely namespace the
    story map and bridge the two memory systems.
@@ -137,30 +137,65 @@ Notes:
 
 ---
 
-## Permissions (`settings.local.json`)
+## Permissions (`settings.json`)
 
-The template ships `.claude/settings.local.json` with an allow-list for the
-verification commands **and `git add` / `git commit`**. Before copying it:
+The template ships a committed **`.claude/settings.json`**, so every clone gets the
+same rules:
 
-- **Shared vs. personal.** `*.local.json` is conventionally personal and often
-  git-ignored — but this template *tracks* it. If your repo’s `.gitignore` excludes
-  `.claude/settings.local.json`, the permissions you copy won’t be shared with the
-  team. Put team-wide permissions in **`.claude/settings.json`** (committed) and keep
-  `settings.local.json` for personal overrides.
-- **Git auto-allow is opt-in, not a default to inherit.** The allow-list lets the
-  agent run `git add`/`git commit` **without a prompt**. That suited this template’s
-  workflow; it may not suit yours. Remove those two entries if you want to approve
-  commits yourself, and only allow the commands your tooling actually uses (swap the
-  `pnpm …` entries for your real ones).
+- **allow** — the verification commands (`pnpm dev`, `typecheck`, `lint`, `test`,
+  `test:e2e`, `build`, `verify`, `check:bundle`), an exact `pnpm install` (plus
+  `pnpm install --frozen-lockfile`, never `pnpm install <pkg>`), `git status`,
+  `git diff`, and the read-only TRACE calls (`pnpm -s trace query`/`tree-id`,
+  `pnpm trace show`/`lint`/`metrics`). The bench commands keep their prompt, and so do
+  TRACE record writes (`pnpm trace write`/`act`), except inside a `/dream` turn, whose
+  `allowed-tools` pre-approves the `write`, `act`, `reaudit` and `rotate` subcommands
+  it runs.
+- **deny** — force-pushes (`--force`, `--force-with-lease`, `-f`, a `+` refspec) and
+  `git reset --hard`. A plain `git push` is never denied: no allow rule can override a
+  deny, and the loop and commit flows still have to push.
+- **`worktree.baseRef: "head"`** — worktree-isolated agents (the `/loop` implementer)
+  branch from your local `HEAD`, so they see unpushed commits. It also sets the base
+  of your own `claude --worktree` sessions in this repo.
+
+Before you copy it:
+
+- **Merge, don't overwrite.** If your repo already has a `.claude/settings.json`,
+  merge these rules into it, and swap the `pnpm …` entries for your real commands.
+- **Git auto-allow is a personal opt-in.** Nothing shared lets the agent run
+  `git add`/`git commit` without a prompt. To allow it for yourself, put the rules in
+  your own `.claude/settings.local.json`; Claude Code combines its `allow` list with
+  the shared one. Keep that file git-ignored (Claude Code also saves your “don’t ask
+  again” approvals there):
+
+  ```json
+  {
+    "permissions": {
+      "allow": ["Bash(git add:*)", "Bash(git commit:*)"]
+    }
+  }
+  ```
+
+  An allow rule is a convenience, not a license: `CLAUDE.md` still says to commit
+  only when asked.
+- **Allow rules wait for workspace trust; deny rules apply at once.** A teammate gets
+  the shared `allow` rules only after accepting the trust dialog for the folder (a
+  `claude -p` or SDK run in a folder nobody trusted ignores them), while `deny` and
+  `ask` rules apply immediately. A deny rule is a speed bump, not a security boundary:
+  it matches the command text, so `git -C . push --force` or a `bash -c '…'` wrapper
+  slips past it.
+- **Cloud sessions.** A single-repository cloud session reads the committed
+  `.claude/settings.json` (never `settings.local.json`, which is not in the clone).
+  Cloud threads in a claude.ai Project apply none of a repository's permission rules,
+  hooks or `env`.
 - **`allowed-tools` pre-approves; it never restricts.** A command's `allowed-tools`
   frontmatter lets the listed tools run without a prompt until your next message, and
   workspace trust does not gate it, so keep it narrow (`/dream` lists only the
   `pnpm trace` subcommands it runs). This template never pre-approves `Workflow`:
   every multi-agent fan-out keeps your approval.
-- **Keep agent worktrees out of git and lint.** Git-ignore `.claude/worktrees/` (where
-  worktree-isolated agents check out), and add `.claude/worktrees/**` to your linter's
-  ignores. ESLint's flat config does not read `.gitignore`, so a leftover worktree
-  would otherwise turn `lint` red.
+- **Keep agent leftovers out of git and lint.** Git-ignore `.claude/settings.local.json`
+  and `.claude/worktrees/` (where worktree-isolated agents check out), and add
+  `.claude/worktrees/**` to your linter's ignores. ESLint's flat config does not read
+  `.gitignore`, so a leftover worktree would otherwise turn `lint` red.
 
 ### Optional hooks
 
@@ -172,9 +207,8 @@ working-tree state and, when tests fail, shows you one line:
 never blocks the turn, always exits 0, and is never evidence that work is done (your own
 check run is).
 
-To try it, add this to your own `.claude/settings.local.json`, next to its `permissions`.
-This template still tracks that file, so do not commit the change (or untrack the file in
-your copy first, which keeps it personal):
+To try it, add this to your own `.claude/settings.local.json` (git-ignored, so it stays
+personal), next to its `permissions`:
 
 ```json
 {
@@ -209,8 +243,8 @@ your copy first, which keeps it personal):
   opt-in.
 - **Never add a `PreToolUse` or `PostToolUse` hook that prints.** Tool events fire inside
   workflow subagents too, the measured loop verifier included, so its output would change
-  what the verifier sees. If you commit a `.claude/settings.json`,
-  `scripts/trace/config.test.mjs` fails on any tool-event hook in it.
+  what the verifier sees. `scripts/trace/config.test.mjs` fails on any tool-event hook in
+  the committed `.claude/settings.json`.
 - Its manifest, lock and log live under `git rev-parse --git-path` (per worktree), never
   in the tree; the log holds counts and exit codes only.
 
@@ -659,10 +693,11 @@ issues; record nice-to-haves; avoid unrelated refactors.
 [ ] verify trimmed to the scripts I actually have (no missing-script failure)
 [ ] Package-manager + localhost URL/port updated to match my project
 [ ] Monorepo: src/ , e2e/ , and port paths adjusted to my package layout
-[ ] .claude/settings.local.json allows only my real commands; git auto-allow kept or removed deliberately
+[ ] Merged .claude/settings.json into mine: allows only my real commands, denies kept;
+    any git add/commit auto-allow lives only in my own .claude/settings.local.json
 [ ] Optional: copied the opt-in Stop hook .claude/hooks/stop-gate.mjs + scripts/hooks/stop-gate.test.mjs
     (off until I add its snippet, see "Optional hooks"), or left both out
-[ ] .gitignore covers .claude/worktrees/; my linter ignores .claude/worktrees/**
+[ ] .gitignore covers .claude/settings.local.json and .claude/worktrees/; my linter ignores .claude/worktrees/**
 [ ] CLAUDE.md memory @import path resolves from where my CLAUDE.md lives
 [ ] Memory wiki: removed stack facts that don't apply (BEFORE first task); will re-seed via /dream
 [ ] If a docs/ wiki already exists: namespaced the story map + picked ONE canonical
@@ -703,8 +738,10 @@ console errors, and the current critical flow.
   template. Delete the inapplicable ones and run `/dream` to seed your own.
 - **A slash command isn’t found.** Commands live in `.claude/commands/*.md`;
   confirm the file exists and you’re in the project root.
-- **Permission prompts on every command.** Add the commands you trust to
-  `.claude/settings.local.json` (or a shared `.claude/settings.json` for the team).
+- **Permission prompts on every command.** The shared `.claude/settings.json` allow
+  rules apply only after you accept the workspace trust dialog for the folder. Add the
+  commands you trust: team-wide ones to `.claude/settings.json`, personal ones to your
+  own `.claude/settings.local.json`.
 - **The starter app fails after I changed the stack.** Remove the starter
   (`src/`, `e2e/`, build configs) once your own app and tests exist; it’s only a
   demonstration.
