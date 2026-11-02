@@ -18,9 +18,9 @@ The workflow starts with critique, not coding — and ends with proof, not confi
 
 ![Task cycle: intent, /write-goal, pre-critique, plan, TDD implementation, verify, post-critique, 0 blockers?, /qa-pass, /dream](docs/infographic-1-task-cycle.png)
 
-**2. The multi-agent workflows** — each node is a subagent with its own context.
+**2. The multi-agent workflows** — six of the seven workflows (`trace-bench`, added later, is drawn in [`docs/workflow-graphs.md`](docs/workflow-graphs.md)); each node is a subagent with its own context.
 
-![The six multi-agent workflows: critic-panel, scan-docs, gap-analysis, e2e-design, loop-iteration, improve-skills](docs/infographic-2-multi-agent-workflows.png)
+![Six of the seven multi-agent workflows: critic-panel, scan-docs, gap-analysis, e2e-design, loop-iteration, improve-skills — trace-bench, added later, is drawn in docs/workflow-graphs.md](docs/infographic-2-multi-agent-workflows.png)
 
 **3. The components** — four layers of files, and the evidence-based story statuses.
 
@@ -49,12 +49,14 @@ CLAUDE.md                         Project rules + multi-agent workflow + doc-sca
   trace/
     schema-v1.json                TRACE-lite record schema (versioned)
     bench/                        TRACE-Bench-lite: seeded-defect fixtures + scored runs
-  settings.local.json             Allowed commands for the workflow
+  settings.json                   Shared permissions: allow-list, force-push/hard-reset denies
+  hooks/
+    stop-gate.mjs                 Opt-in Stop hook, enabled by no settings file: warns once per tree state when unit tests fail
   workflows/                      Deterministic multi-agent orchestration scripts (Workflow tool)
     critic-panel.js               Fan-out critics → adversarial verify → severity matrix
     scan-docs.js                  Per-story parallel evidence-gathering → status verifier
-    gap-analysis.js               Per-dimension gap analysis → synthesized next-order
-    e2e-design.js                 Per-category E2E test-case enumeration → dedup
+    gap-analysis.js               Per-dimension gap analysis → skeptic per dimension (typed verdict per gap) → next-order over licensed gaps
+    e2e-design.js                 Per-category E2E test-case enumeration → dedup → separate judge (typed verdict per case)
     loop-iteration.js             Maker/checker: worktree implementer → separate verifier (typed verdict)
     improve-skills.js             Meta-critic over the project's own prompts → proposed edits
     trace-bench.js                Measure our own checkers on seeded-defect fixtures
@@ -62,7 +64,7 @@ CLAUDE.md                         Project rules + multi-agent workflow + doc-sca
     write-goal.md                 Write a production-grade /goal (or /loop) prompt for a task
     multi-agent-dev.md            Full critic-led development pass
     critic-round.md               Review-only multi-agent critic round
-    multi-agent-e2e.md            Critic-driven E2E test design + run
+    multi-agent-e2e.md            E2E test design (enumerate → judge) + run + a critic round on the new specs
     qa-pass.md                    Pre-ship QA checklist
     fix-localhost.md              Drive localhost back to a working state
     memory-audit.md               Audit project memory vs CLAUDE.md
@@ -72,7 +74,7 @@ CLAUDE.md                         Project rules + multi-agent workflow + doc-sca
     story-gap-analysis.md         Gap analysis: docs vs code vs E2E
     improve-skills.md             Self-improvement pass over the prompts/workflows (confirmation-gated)
     bench-checkers.md             TRACE-Bench-lite: measure the checkers, report falsification flags
-scripts/trace/                    `pnpm trace …` — record writer, linter, re-audit, metrics, bench scoring
+scripts/trace/                    `pnpm trace …` — record writer, linter, re-audit, metrics, bench scoring, loop-plan DAG checks, story-map lint, wiki check
 docs/
   adoption-guide.md               How to adopt this template in a real project
   loop-integration-guide.md       How to add hardened recurring /loop automations to a project
@@ -99,10 +101,18 @@ The full walkthrough (with snippets, the existing-wiki bridge, and a checklist) 
 in **[`docs/adoption-guide.md`](docs/adoption-guide.md)** — the short version:
 
 1. **Copy the portable workflow** — `CLAUDE.md` (merge into yours, don't
-   overwrite), `.claude/commands/`, `.claude/loop.md`, `.claude/memory/`,
-   `.claude/skills-index.md`, `.claude/settings.local.json`, `docs/*.md`, and
-   `.github/workflows/verify.yml`. **Do not** copy the starter app (`src/`, `e2e/`,
-   `package.json`, `pnpm-lock.yaml`, and the build configs) — that's only a demo.
+   overwrite), `.claude/commands/`, `.claude/workflows/`, `.claude/loop.md`,
+   `.claude/loop-checklist.md`, `.claude/memory/` (start `.claude/memory/trace/` and
+   `quarantine.md` empty), `.claude/trace/`, `.claude/skills-index.md`,
+   `.claude/settings.json` (merge into yours, don't overwrite), `scripts/trace/`,
+   `docs/*.md`, `docs/stories/`, and `.github/workflows/verify.yml`. Then add
+   `"trace": "node scripts/trace/cli.mjs"` to your `package.json` scripts and
+   `scripts/**/*.test.mjs` to your unit-test globs.
+   Optionally copy the opt-in Stop hook `.claude/hooks/stop-gate.mjs` and its tests
+   `scripts/hooks/stop-gate.test.mjs` (no settings file enables it; see
+   [Optional hooks](docs/adoption-guide.md#optional-hooks)).
+   **Do not** copy the starter app (`src/`, `e2e/`, `package.json`, `pnpm-lock.yaml`,
+   and the build configs) — that's only a demo.
 2. **Wire the verification commands** — point `CLAUDE.md`'s *Main commands* at your
    real scripts and **trim `verify`** to the steps you actually have (it's a hard
    `&&` chain — a missing script breaks the gate). Adjust the package manager,
@@ -116,9 +126,11 @@ in **[`docs/adoption-guide.md`](docs/adoption-guide.md)** — the short version:
 5. **Mind the integration gotchas** — already have a `docs/` wiki? Namespace the
    story map and *bridge* (don't run two memories). Already have slash commands?
    Check name collisions, give each a `description`, and set
-   `disable-model-invocation: true` on heavy ones. Put shared permissions in a
-   committed `.claude/settings.json` (create it — the template ships only
-   `settings.local.json`); the `git add`/`git commit` auto-allow is opt-in. In CI,
+   `disable-model-invocation: true` only where the manual-only rule in
+   `.claude/skills-index.md` applies (never on a command `CLAUDE.md` tells Claude to
+   run). Trim the shared allow-list in `.claude/settings.json` to your real commands and
+   keep its force-push/hard-reset denies; a `git add`/`git commit` auto-allow is a
+   personal opt-in in your own git-ignored `.claude/settings.local.json`. In CI,
    install the browser normally (no `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD`).
 6. **First session** — `pnpm verify` (green once) → `/scan-project-docs` →
    `/write-goal <your first task>` (review, then run it) → `/qa-pass` → `/dream`.
@@ -151,9 +163,11 @@ maker-checker verification:
 |---|---|---|
 | `critic-panel.js` | `/critic-round`, `/multi-agent-dev`, `/qa-pass`, `/loop` | fan-out critics → adversarial verify → severity matrix |
 | `scan-docs.js` | `/scan-project-docs` | per-story parallel evidence → separate status verifier |
-| `gap-analysis.js` | `/story-gap-analysis` | per-dimension gap analysis → synthesized next-order |
-| `e2e-design.js` | `/multi-agent-e2e` | per-category E2E case enumeration → dedup |
+| `gap-analysis.js` | `/story-gap-analysis` | per-dimension gap analysis → a separate skeptic per dimension types each gap → a synthesized next-order over the licensed (accept/qualify) gaps only |
+| `e2e-design.js` | `/multi-agent-e2e` | per-category E2E case enumeration → dedup → a separate judge types each case; only licensed (accept/qualify) cases are returned |
 | `loop-iteration.js` | `/loop` (L2/L3) | worktree implementer → separate verifier per item |
+| `improve-skills.js` | `/improve-skills` (manual-only) | per-lens meta-critic over the project's own prompts and workflows → a separate skeptic per blocker and important finding → proposed edits, applied only on confirmation (skill name `prompt-meta-critic`) |
+| `trace-bench.js` | `/bench-checkers` (manual-only) | the production loop verifier, a single-pass reviewer and an opt-in critic panel run on seeded-defect fixtures; `pnpm trace bench-score` scores the runs |
 
 It's heavier by design — independent review beats a single context role-playing the
 panel. Commands that don't fan out (`/fix-localhost`, `/write-goal`, `/dream`,
@@ -209,9 +223,7 @@ and uses Claude Code's **real** memory system (`@import` + `/memory`):
 .claude/memory/
   index.md        small catalog: each topic = one-line summary + link (always loaded)
   log.md          append-only history of ingest / lint operations
-  topics/         one page per subject — read ON DEMAND, not all at once
-    tooling.md  build-and-verify.md  testing.md  client-react.md
-    code-organization.md  remote-env.md  workflow.md
+  topics/         one page per subject — read ON DEMAND, not all at once (index.md lists them)
 ```
 
 - **Why a wiki, not one file:** `CLAUDE.md` imports only `index.md`, so per-session
@@ -262,8 +274,14 @@ status, a fact headed for the wiki — gets a typed verdict and an append-only r
 pnpm trace query --latest          # what has been adjudicated, and what is still deferred
 pnpm trace show TR-…               # one record + its consumer actions + revision chain
 pnpm trace lint                    # replay the store against the contract (also in pnpm test)
-pnpm trace reaudit                 # wiki facts whose evidence changed since they were committed
+pnpm trace reaudit                 # wiki facts whose evidence changed since they were committed (or whose commit is gone)
 pnpm trace metrics                 # consumer coverage, defer quality, repeated-error rate
+pnpm trace plan-ready              # the loop plan's ready nodes, computed (table order; --max N)
+pnpm trace plan-lint               # the loop plan vs its contract and the records (consistency, not truth)
+pnpm trace plan-items LP-002 …     # loop-iteration args.items for ready nodes (refuses a non-ready id)
+pnpm trace story-lint              # the story map vs itself and the records (consistency, not truth)
+pnpm trace wiki-check              # the memory wiki vs the records: rec: comments, quarantine rows, page sizes
+pnpm trace l3-check                # the L3 measured-checker item, computed: latest bench record vs the current verifier
 ```
 
 Policy, verdict semantics and what was deliberately *not* adopted:

@@ -49,9 +49,9 @@ instructions — the self-modification guard below still applies to everything e
    *Budget & limits*) before doing anything; stop and escalate if it is already
    exhausted. **If no per-run cap was declared, default to 25 turns and record that you
    used the default** in the run-log entry.
-2. **Orient on the plan:** note its current ready nodes (shorthand: `status` not
-   done/dropped/escalated/in-progress/deferred AND all `after:` deps `done` — illustrative only;
-   always defer to the plan's ready-node rule for the exact formula). Node *selection*
+2. **Orient on the plan:** run `pnpm -s trace plan-ready` for its current ready nodes
+   (the plan's ready-node rule, computed — never derived by hand; exit 1 means the plan
+   table does not parse: repair it in step 9 before any dispatch). Node *selection*
    is deferred to step 10
    (after re-plan) so dispatch always consults the freshest DAG — never act on a raw
    finding here.
@@ -63,12 +63,21 @@ instructions — the self-modification guard below still applies to everything e
    (`.claude/workflows/critic-panel.js`, `args.focus` = the current task/flow,
    `args.priorRecords` = `pnpm -s trace query --latest --writer critic-panel --brief`,
    `args.treeId` = `pnpm -s trace tree-id`): critics fan out as parallel
-   subagents, each finding gets a typed verdict from a separate skeptic, and unchanged
-   prior verdicts are reused instead of re-verified. Render the returned `confirmed`
-   matrix (with each verdict + qualifier) and list `deferred`/`revised` with their
-   `missing`/`repair` (and any `failedReviewers` — an incomplete round). Record the
-   round per the consumer protocol (scratchpad file → `pnpm trace write <file>` →
-   `pnpm trace act --from <file>`) before using any finding.
+   subagents; every blocker, and each important finding up to the verifier cap, gets a
+   typed verdict from a separate skeptic; the rest are recorded as defers. Unchanged
+   prior verdicts are reused instead of re-verified. When UI or perf lenses are in scope
+   (a UI flow, or a change that can move the client bundle), first run `pnpm test:e2e`
+   (including `e2e/a11y.spec.ts`) and `pnpm build && pnpm check:bundle` yourself and pass
+   their output as `args.priorEvidence`: the critics and skeptics never run E2E, and never
+   build or test in the shared checkout (their SAFETY rules), so a result you did not
+   supply is reported as missing evidence. Print `error` first if present
+   (every lens failed: no review happened), then `completion` (the claim next to
+   `completion.verdict`, and its `missing`; `notRechecked` lists the prior records of
+   lenses this round did not review, which its evidence can never clear, drop or
+   resolve). Render the returned `confirmed` matrix (with each verdict + qualifier) and
+   list `deferred`/`revised` with their `missing`/`repair` (and any `failedReviewers` —
+   an incomplete round). Record the round per the consumer protocol (scratchpad file →
+   `pnpm trace write <file>` → `pnpm trace act --from <file>`) before using any finding.
 8. **Maker/checker:** the pass that verifies a fix must be *separate* from the one
    that made it — the implementer never marks its own work "done".
 9. **Re-evaluate & re-plan** (a first-class step, not an afterthought) — run this
@@ -78,44 +87,107 @@ instructions — the self-modification guard below still applies to everything e
    confirmed findings (with `after:` deps + `origin` citing the finding's record id) and,
    for a critic finding the round `deferred`, a `deferred` node carrying its `missing`
    (only if the loop can supply it; a human-decision defer or a `revise` becomes an
-   `escalated` node with the `missing`/`repair` as the human ask); re-order by priority;
-   `drop` obsolete nodes; **re-check every `deferred` node's `missing`** — reset it to
+   `escalated` node with the `missing`/`repair` as the human ask) — a node created
+   `deferred` or `escalated` from a critic finding cites that critic record in its `record`,
+   and you HOLD it for the node: `pnpm trace act <critic record> loop HOLD --ref <node id>`;
+   re-order by priority;
+   `drop` obsolete nodes — never one whose `origin` record is in the latest round's
+   `completion.notRechecked` (its lens was not reviewed, so nothing shows it obsolete);
+   **re-check every `deferred` node's `missing`** — reset it to
    `ready` only when you can cite the evidence that arrived (a record id or check output,
-   in the node's notes); a fourth defer escalates it; never reset an `escalated` node —
-   only the human it waits on can; and recompute which nodes are `ready`. New evidence may re-shape the DAG here
-   — that is the point. Also **repair broken states** (see the plan's rules): reset any
+   in the node's notes); a node deferred by a record whose `failed_gates` include
+   `agent-failed` (an infra failure, not a verdict) may be reset citing that record's id,
+   and so may one deferred by your own `git apply --check` record (writer_id
+   `loop/apply-check:<node>`, step 10; never by another defer whose `missing` reads the
+   same), or by a record whose `failed_gates` include `base-mismatch` (set only by the
+   workflow's base check) once the worktree base can match HEAD (the user has set
+   `worktree.baseRef`, step 10; until then a re-dispatch defers again, so report it as
+   the human ask instead); each such reset counts as an attempt like any
+   defer, and so does a node that step 10 reset to `ready` because loop-iteration
+   returned its whole-phase infra `error` (every implementer failed, so no record exists:
+   cite the run-log entry that noted the error); a fourth defer, or a fourth attempt of
+   any kind, escalates it (`plan-lint` counts the node's `loop:<id>` defers);
+   never reset an `escalated` node — only the human it waits on can; and recompute
+   which nodes are `ready`. New evidence may re-shape the DAG here — that is the point.
+   Also **repair broken states** (see the plan's rules): reset any
    stale `in-progress` node left by an interrupted prior run, and **cascade-resolve** any
-   node whose `after:` dep became `dropped`/`escalated` (drop, re-point, or escalate it)
+   node whose `after:` dep became `dropped`/`escalated` (drop, re-point, or escalate it —
+   an escalated one cites the ancestor's HOLDed record, `origin: cascade from <id>`)
    so nothing is left silently `blocked`. Node creation is the *only* loop action exempt
    from "no action without a node"; it is the sanctioned bootstrap, so an
    empty/first-iteration plan is populated here rather than deadlocking. Record the
-   re-plan delta in the run-log entry.
+   re-plan delta in the run-log entry. Finish with `pnpm -s trace plan-lint --pre-dispatch`:
+   it checks the rewritten plan against its contract and the record store (consistency,
+   not truth — exit 1 names each broken rule, exit 2 means the store does not replay).
+   **Never dispatch from a plan that fails it:** repair the plan and re-run it, or stop
+   and report the rule that needs a human.
 10. **Select & act — only within the trust level** (**if no level was explicitly
     declared for this run, treat it as L1 — never infer L2/L3 from context**). Pick the
     highest-priority **ready node(s)** from the just-updated plan:
     - L1: record findings only (no dispatch).
-    - L2/L3: set the selected nodes `in-progress` in the plan, then fix them via the
-      **loop-iteration Workflow** (`.claude/workflows/loop-iteration.js`, `args.level` =
-      the declared level, `args.treeId` = `pnpm -s trace tree-id`, `args.items` = those
-      **ready plan nodes**, each `id` = the node `id`, plus `priorRecordId`/`missing` for a
-      re-dispatched node; **no action without a node**): an implementer subagent fixes
-      each in an isolated worktree and a *separate* verifier reviews the real diff and
-      returns a typed verdict (a hard denylist gate also forces escalation — readiness
-      does not bypass it). If the workflow returns `error` or `budgetStopped`, no verdict
-      exists: reset the nodes to `ready`, write no records, log it, and stop (budget
-      exhausted → escalate). Otherwise record its `traceRecords` per the consumer
+    - L2/L3: list the candidates with `pnpm -s trace plan-ready --max <maxItems>`
+      (`<maxItems>` = the `args.maxItems` you pass loop-iteration, default 5, its own
+      default): at most that many ready nodes, highest priority first — never pick ready
+      nodes by hand. Of those, never select two
+      expected to touch the same file (the file of their origin finding's file:line): the
+      second waits for a later call. This is a dispatch-time exclusion, never an `after:`
+      edge — an artificial edge would cascade-escalate an unrelated node (`loop-plan.md`,
+      *Cascading drop / escalation*). Skip, and note, a node whose expected files have
+      uncommitted changes in the main checkout (`git status --porcelain -- <files>`): its
+      worktree branches from HEAD, which lacks them. If that leaves no node to dispatch,
+      stop and report "needs a commit of <files>". Then, in this order: write the items
+      with `pnpm -s trace plan-items <selected ids> > <scratchpad>/loop-items.json` (exit 1
+      = an id is not ready: dispatch nothing and re-plan; exit 2 = the store does not
+      replay: dispatch nothing and stop, as for plan-lint); set the selected nodes
+      `in-progress` in the plan (only now: an `in-progress` node is never ready, so
+      plan-items would refuse it); then fix them via the **loop-iteration Workflow**
+      (`.claude/workflows/loop-iteration.js`, `args.level` = the declared level,
+      `args.treeId` = `pnpm -s trace tree-id`, `args.headSha` = `git rev-parse HEAD`,
+      `args.items` = the array in that file, unedited — each `id` is the node `id`, and a
+      re-dispatched node carries `missing` from its `missing` column and, only when its
+      `record` is its own `loop:<id>` record, `priorRecordId` (the new verdict revises it;
+      a critic record is never passed on, so the still-open finding stays visible to the
+      next critic round): the item shape the bench measured; **no action without a node**):
+      an implementer subagent fixes each in a fresh isolated worktree (it installs the
+      dependencies and reports the commit it started from) and a *separate* verifier
+      reviews the real diff and returns a typed verdict (a hard denylist gate also forces
+      escalation — readiness does not bypass it — and a diff based on another commit than
+      `headSha` is deferred `base-mismatch`, unverified). Loop worktrees branch from local
+      HEAD only when the user has set `worktree.baseRef` to `"head"` in their Claude Code
+      settings. That is a human change: the loop never edits its own settings. Until it is
+      set, the base check defers every item whose worktree base differs; report that as
+      the human ask instead of re-dispatching. If the
+      workflow returns `error` or `budgetStopped`, no verdict exists: reset the nodes to
+      `ready`, write no records, log it, and stop (budget exhausted → escalate). An infra
+      `error` (`failed (infra)`: every implementer failed) also counts one attempt per
+      dispatched node (step 9): note the error in the run-log entry. An `argument error`
+      (no valid `headSha`, more than `maxItems` items) started no agent and counts no
+      attempt: correct the call. Otherwise record its `traceRecords` per the consumer
       protocol — **before** moving any node. Then, per item:
       - **`applied`** (accept, or qualify at L2): save the `diff` to a scratch file and,
         **before applying it**, run `pnpm trace denylist-check --patch <file>` (the
         production denylist, read from HEAD, over every path git's own parser finds in the
         patch — catches anything the patch-text parser missed); exit 1 (a hit) or 2 (could
-        not verify) → do not apply, `HOLD`, escalate. Exit 0 → `git apply <file>`, then
+        not verify) → do not apply, `HOLD`, escalate. Exit 0 → `git apply --check <file>`;
+        if it fails (the patch does not apply to the current tree), do not apply: `HOLD`
+        the record, write your own `defer` record that `revises` it (same `claim_id`, writer_id
+        `loop/apply-check:<node>`, `missing` = "a diff based on the current tree",
+        `reason` = the check's error), `HOLD` that one too, and set the node `deferred`
+        with it — it is re-dispatchable (step 9). If it passes → `git apply <file>`, then
         re-run the smallest relevant check. If it passes, `pnpm trace act <that node's loop-iteration record> loop CLEAR
         --ref <node> --note "<check that passed; qualifier if any>"` and mark the node
         `done` with that `record` (copy a qualifier into the node's notes). If no relevant
         automated check exists, do not CLEAR: `HOLD` and escalate. If the check fails,
-        revert the patch, write a `revise` record (`revises` the first, `repair` = what
-        failed), `HOLD` it, and leave the node `ready` with the attempt counted.
+        revert the patch, write a `revise` record (same `claim_id`, `revises` the first,
+        `repair` = what failed), `HOLD` it, and leave the node `ready` with that record and
+        the attempt counted.
+        After the CLEAR, remove the item's worktree (its root is in the item's `notes`,
+        self-reported) only if it appears in `git worktree list --porcelain`, lies under
+        `<repo>/.claude/worktrees/`, and its changed and untracked paths
+        (`git -C <root> status --porcelain --untracked-files=all`) are a subset of the
+        applied patch's paths. Then run `git worktree remove --force <root>`, and delete
+        its branch (named in that listing; `git branch -d <branch>`) only if the branch
+        tip equals the item's reported `baseSha`.
       - **`held`** (a `qualify` at L3 — the workflow never auto-applies one unattended):
         `HOLD`, set the node `escalated` with `missing` = "human approval of the qualifier:
         <qualifier>".
@@ -126,6 +198,11 @@ instructions — the self-modification guard below still applies to everything e
       - **`rejected`** (reject/revise/denylist): `HOLD`, set the node `escalated`; its
         `missing` = the record's `missing`, else its `repair`, else "a human decision on:
         <the record's reason>" — never empty.
+      Keep the worktrees of deferred, held and escalated items (and of any applied item
+      that was not CLEARed), and list them in the run-log entry. Before that entry, run
+      `pnpm -s trace plan-lint` again: a node this step escalated may strand its dependents
+      (cascade-resolve them now, as in step 9), and a fourth `loop:<id>` defer escalates
+      its node — an iteration never ends on a plan that fails it.
       Never fix nice-to-haves automatically; never start unrelated refactors.
     - **If no node is ready** after re-plan, do not invent work — **self-stop** (per
       *Stop when*).
@@ -142,7 +219,11 @@ explicitly allowed it for this loop (CLAUDE.md: commit/push only when asked). **
 agent's own configuration and
 prompt surface — `.claude/` (commands, workflows, `loop.md`, `loop-checklist.md`,
 the memory wiki's topic pages) and `CLAUDE.md`, plus the TRACE gate code in
-`scripts/trace/`: a loop never self-modifies its own instructions or gates
+`scripts/trace/` and the gate runner (every path under the root `scripts/` directory,
+the root `package.json`, and the `vitest.config.*`, `playwright.config.*`,
+`eslint.config.*` and `tsconfig.json` runner configs, since a one-line change to the
+`test` script or to vitest's include could make `pnpm test` skip every `scripts/**`
+gate): a loop never self-modifies its own instructions or gates
 autonomously, even at L3 — propose and escalate instead** (this is enforced
 deterministically by the `loop-iteration.js` denylist regex; the sanctioned path to
 change the prompt surface is the manual, confirmation-gated `/improve-skills`). The
@@ -174,14 +255,17 @@ Notify only when action is needed — do not ping on a no-op run.
 - A loop with an empty watchlist **MUST** self-stop, not spin.
 
 ## Stop when
-- No blockers remain, browser verification passes, relevant tests pass, and the
-  current task has clear evidence of completion — or a stop condition above fires.
+- The latest round's `completion.verdict` is `accept` (no blocker open, no lens failed),
+  browser verification passes, relevant tests pass, and the current task has clear
+  evidence of completion — or a stop condition above fires.
 - Or every remaining claim has a terminal TRACE outcome (paper §5.4): **(1)** accepted/
   qualified and acted on, **(2)** rejected, **(3)** deferred with a named `missing` the loop
   cannot supply this run — report those `missing` lists as the human ask, or **(4)
   diminishing returns** — this iteration changed nothing that matters (no node changed
   status and no verdict changed versus the previous iteration — new records that merely
-  repeat old verdicts do not count): stop and report rather than spin.
+  repeat old verdicts do not count): stop and report rather than spin. An iteration whose
+  critic round was incomplete (`error` set, or a failed lens) is never diminishing
+  returns: re-run the round (infra re-runs count toward the budget).
 
 ## Run-log entry (append to `.claude/memory/loop-run-log.md`)
 ```
@@ -191,6 +275,7 @@ Notify only when action is needed — do not ping on a no-op run.
 - actions: <fixes applied, or "report only">
 - re-plan: <nodes added / marked done / deferred→ready / dropped, or "none">
 - records: <record ids written + actions (CLEAR/HOLD/REUSE), or "none">
+- worktrees: kept <paths> | removed <n>
 - budget: <used>/<cap> (turns or tokens)
 - escalations: <none | reason>
 - evidence: <tests/browser>

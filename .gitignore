@@ -147,3 +147,8 @@ vite.config.ts.timestamp-*
 /test-results/
 /blob-report/
 /playwright/.cache/
+
+# Claude Code: personal settings (team rules live in the committed .claude/settings.json)
+# and the checkouts of worktree-isolated agents
+.claude/settings.local.json
+.claude/worktrees/

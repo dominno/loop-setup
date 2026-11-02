@@ -26,11 +26,16 @@ CLAUDE.md                     Project rules, critic roster, completion gates
 .claude/workflows/*           Multi-agent orchestration scripts (critic-panel, scan-docs, ...)
 .claude/loop.md  loop-checklist.md   Recurring watchdog loop + readiness rubric (used by /loop)
 .claude/memory/               Knowledge wiki (index.md + topics/ + log.md + loop-run-log.md + loop-plan.md)
-.claude/memory/trace/  quarantine.md   TRACE-lite record store (start it EMPTY) + /dream quarantine
+.claude/memory/trace/  quarantine.md   TRACE-lite record store (start it EMPTY) + /dream quarantine;
+                              with an empty store, strip the topic pages' <!-- rec:TR-… --> comments
+                              (pnpm trace wiki-check lists them) and keep those facts as legacy bullets
 .claude/trace/                TRACE-lite schema + bench fixtures (rewrite the fixtures for your app)
 scripts/trace/                `pnpm trace` CLI + its tests (add "trace": "node scripts/trace/cli.mjs"
                               to package.json and scripts/**/*.test.mjs to your unit-test globs)
-.claude/settings.local.json   Allowed commands (adapt to your tools)
+.claude/skills-index.md       Command catalog: which slash command fits which task
+.claude/settings.json         Shared permissions (merge into yours; adapt the allow-list)
+.claude/hooks/stop-gate.mjs   Optional: the opt-in advisory Stop hook, enabled by no settings file (see
+                              "Optional hooks"); its tests are scripts/hooks/stop-gate.test.mjs
 docs/*.md  docs/stories/      Story-map scaffolds (user-stories index, stories/ per-story files, ...)
 ```
 
@@ -83,9 +88,9 @@ something real to run against until your own flows exist.
    re-seed with `/dream`).
 5. **Start the story map empty** — clear the US-001/US-002 example content from
    `docs/*.md`, keep the formats, then run `/scan-project-docs` against your docs.
-6. **Adjust `.claude/settings.local.json`** — see “Permissions” below: allow only
-   your real commands, and decide whether to keep the `git add`/`git commit`
-   auto-allow.
+6. **Merge `.claude/settings.json`** — see “Permissions” below: allow only your
+   real commands, keep the force-push/hard-reset denies, and put any personal
+   `git add`/`git commit` auto-allow in your own `.claude/settings.local.json`.
 7. **Already have a wiki in `docs/`?** Read “Reconciling with an existing `docs/`
    wiki” before you start the story map (step 5) — you’ll likely namespace the
    story map and bridge the two memory systems.
@@ -132,22 +137,116 @@ Notes:
 
 ---
 
-## Permissions (`settings.local.json`)
+## Permissions (`settings.json`)
 
-The template ships `.claude/settings.local.json` with an allow-list for the
-verification commands **and `git add` / `git commit`**. Two things to decide before
-copying it:
+The template ships a committed **`.claude/settings.json`**, so every clone gets the
+same rules:
 
-- **Shared vs. personal.** `*.local.json` is conventionally personal and often
-  git-ignored — but this template *tracks* it. If your repo’s `.gitignore` excludes
-  `.claude/settings.local.json`, the permissions you copy won’t be shared with the
-  team. Put team-wide permissions in **`.claude/settings.json`** (committed) and keep
-  `settings.local.json` for personal overrides.
-- **Git auto-allow is opt-in, not a default to inherit.** The allow-list lets the
-  agent run `git add`/`git commit` **without a prompt**. That suited this template’s
-  workflow; it may not suit yours. Remove those two entries if you want to approve
-  commits yourself, and only allow the commands your tooling actually uses (swap the
-  `pnpm …` entries for your real ones).
+- **allow** — the verification commands (`pnpm dev`, `typecheck`, `lint`, `test`,
+  `test:e2e`, `build`, `verify`, `check:bundle`), an exact `pnpm install` (plus
+  `pnpm install --frozen-lockfile`, never `pnpm install <pkg>`), `git status`,
+  `git diff`, and the read-only TRACE calls (`pnpm -s trace query`/`tree-id`,
+  `pnpm trace show`/`lint`/`metrics`). The bench commands keep their prompt, and so do
+  TRACE record writes (`pnpm trace write`/`act`), except inside a `/dream` turn, whose
+  `allowed-tools` pre-approves the `write`, `act`, `reaudit` and `rotate` subcommands
+  it runs.
+- **deny** — force-pushes (`--force`, `--force-with-lease`, `-f`, a `+` refspec) and
+  `git reset --hard`. A plain `git push` is never denied: no allow rule can override a
+  deny, and the loop and commit flows still have to push.
+- **`worktree.baseRef: "head"`** — worktree-isolated agents (the `/loop` implementer)
+  branch from your local `HEAD`, so they see unpushed commits. It also sets the base
+  of your own `claude --worktree` sessions in this repo.
+
+Before you copy it:
+
+- **Merge, don't overwrite.** If your repo already has a `.claude/settings.json`,
+  merge these rules into it, and swap the `pnpm …` entries for your real commands.
+- **Git auto-allow is a personal opt-in.** Nothing shared lets the agent run
+  `git add`/`git commit` without a prompt. To allow it for yourself, put the rules in
+  your own `.claude/settings.local.json`; Claude Code combines its `allow` list with
+  the shared one. Keep that file git-ignored (Claude Code also saves your “don’t ask
+  again” approvals there):
+
+  ```json
+  {
+    "permissions": {
+      "allow": ["Bash(git add:*)", "Bash(git commit:*)"]
+    }
+  }
+  ```
+
+  An allow rule is a convenience, not a license: `CLAUDE.md` still says to commit
+  only when asked.
+- **Allow rules wait for workspace trust; deny rules apply at once.** A teammate gets
+  the shared `allow` rules only after accepting the trust dialog for the folder (a
+  `claude -p` or SDK run in a folder nobody trusted ignores them), while `deny` and
+  `ask` rules apply immediately. A deny rule is a speed bump, not a security boundary:
+  it matches the command text, so `git -C . push --force` or a `bash -c '…'` wrapper
+  slips past it.
+- **Cloud sessions.** A single-repository cloud session reads the committed
+  `.claude/settings.json` (never `settings.local.json`, which is not in the clone).
+  Cloud threads in a claude.ai Project apply none of a repository's permission rules,
+  hooks or `env`.
+- **`allowed-tools` pre-approves; it never restricts.** A command's `allowed-tools`
+  frontmatter lets the listed tools run without a prompt until your next message, and
+  workspace trust does not gate it, so keep it narrow (`/dream` lists only the
+  `pnpm trace` subcommands it runs). This template never pre-approves `Workflow`:
+  every multi-agent fan-out keeps your approval.
+- **Keep agent leftovers out of git and lint.** Git-ignore `.claude/settings.local.json`
+  and `.claude/worktrees/` (where worktree-isolated agents check out), and add
+  `.claude/worktrees/**` to your linter's ignores. ESLint's flat config does not read
+  `.gitignore`, so a leftover worktree would otherwise turn `lint` red.
+
+### Optional hooks
+
+The template enables **no hooks**. It ships one tested, opt-in Stop hook,
+`.claude/hooks/stop-gate.mjs` (tests in `scripts/hooks/stop-gate.test.mjs`; it imports
+`scripts/trace/lib.mjs`). At the end of a turn it runs the unit suite once per
+working-tree state and, when tests fail, shows you one line:
+`stop-gate: N unit test file(s) failing — advisory; run pnpm test`. It is advisory: it
+never blocks the turn, always exits 0, and is never evidence that work is done (your own
+check run is).
+
+To try it, add this to your own `.claude/settings.local.json` (git-ignored, so it stays
+personal), next to its `permissions`:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/stop-gate.mjs\"", "timeout": 120 }
+        ]
+      }
+    ]
+  }
+}
+```
+
+- **A sync hook delays every turn end.** A run costs about one `pnpm test`; the gate kills
+  it after 90 s and reports "timed out … no result" (keep `timeout` at 120 so the hook can
+  stop itself first). It skips an unchanged tree, a tree it already reported, a turn that a
+  Stop hook is already continuing, a worktree where another session's gate is running, any
+  background workflow, subagent, teammate or cloud session, and any background task that
+  mentions a test, bench or trace run. It acts only on `Stop`: registered under any other
+  event (`SubagentStop`, say, or a tool event), it does nothing.
+  `STOP_GATE=0` turns it off. `STOP_GATE_MODE=related` runs only `vitest related` on
+  changed `src/` files plus `GLOBAL_GATES`, the tests that read files by path (add yours to
+  that list); any other change runs the full suite.
+- **It never runs E2E**, a build or a dev server.
+- **Its message reaches you, not Claude.** A sync hook's `systemMessage` is shown to the
+  user only. The `asyncRewake` hook option would wake the model instead (on exit code 2),
+  at a token cost each time it wakes the model; the gate does not use it.
+- **Committed hooks run in every session.** A hook in a committed settings file runs for
+  every adopter and in this repo's single-repo cloud sessions, which is why this one is
+  opt-in.
+- **Never add a `PreToolUse` or `PostToolUse` hook that prints.** Tool events fire inside
+  workflow subagents too, the measured loop verifier included, so its output would change
+  what the verifier sees. `scripts/trace/config.test.mjs` fails on any tool-event hook in
+  the committed `.claude/settings.json`.
+- Its manifest, lock and log live under `git rev-parse --git-path` (per worktree), never
+  in the tree; the log holds counts and exit codes only.
 
 ---
 
@@ -243,6 +342,10 @@ Then update the paths in `CLAUDE.md` (the “Documentation Scanner” file list)
 point at `docs/delivery/…`, and add `docs/delivery/` to your wiki’s ignore/exclude
 list (or register it in the wiki index as a single “Delivery / story status”
 section rather than per-file pages).
+
+Also set `STORY_MAP` in `scripts/trace/story-map.mjs` to the new directory (e.g.
+`"docs/delivery"`): `pnpm trace story-lint` reads the story map there, and an absent
+story map passes vacuously, so a stale path would check nothing.
 
 > Prefer not to touch `docs/` at all? Move the audit out entirely, e.g.
 > `delivery/` at the repo root or `.claude/delivery/`, and repoint the same files.
@@ -359,12 +462,20 @@ first-class:
    sets first; rename or merge conflicts deliberately, don’t clobber.
 2. **Add a `description`** (and `argument-hint` if it takes input) to each — this
    is what Claude routes on. Without it, selection falls back to the filename.
-3. **Decide what may auto-fire.** A `description` doesn’t just help *you* choose —
-   Claude can **auto-invoke** the command from a matching request. That’s fine for
-   read-only commands, but a heavy or code-changing one (`/multi-agent-dev`,
-   `/qa-pass`, `/fix-localhost`) firing unprompted is surprising. Add
-   `disable-model-invocation: true` to any command that should be **manual-only**
-   (you still type `/name`); leave it off for ones Claude may pick on its own.
+3. **Decide what may auto-fire — the manual-only rule.** A `description` doesn’t just
+   help *you* choose — Claude can **auto-invoke** the command from a matching request.
+   `disable-model-invocation: true` stops that (you still type `/name`), but it also
+   blocks Claude’s Skill call and hides the command, so Claude can no longer run it
+   even where `CLAUDE.md` tells it to. Make a command **manual-only** only if it
+   rewrites the governing prompt surface (as `/improve-skills` does) or runs a measured
+   fan-out that `CLAUDE.md` never tells Claude to run (as `/bench-checkers` does), and
+   mark its `.claude/skills-index.md` row `(manual-only)`. Any command `CLAUDE.md` tells
+   Claude to run (here `/dream`, `/multi-agent-dev` and the doc-scanner commands) stays
+   model-invocable. Cost is bounded elsewhere: the engine workflows stay model-invocable
+   skills, so the bound is their own per-call caps and token-budget floor checks (*Cost
+   is real*, under Multi-agent orchestration below); in Auto mode, the Workflow approval
+   appears only on the first launch. `pnpm test` fails when a command’s flag and its
+   index row disagree.
 4. **Add a row to `.claude/skills-index.md`** under the right group, with a
    one-line “when to use”.
 5. **Resolve overlaps.** If your command duplicates a template one (e.g. your
@@ -400,7 +511,8 @@ Don’t bulk-paste them into the wiki. Triage each item by destination:
 ```txt
 [ ] Checked for command NAME collisions before copying (no silent clobber)
 [ ] Existing commands kept; each given a description (+ argument-hint)
-[ ] Heavy/code-changing commands set disable-model-invocation: true (manual-only)
+[ ] disable-model-invocation: true only per the manual-only rule (.claude/skills-index.md),
+    with (manual-only) in its index row; never on a command CLAUDE.md tells Claude to run
 [ ] Each existing command added to .claude/skills-index.md, grouped
 [ ] Duplicate commands merged (one canonical per job)
 [ ] Old notes triaged: facts → memory topics, rules → CLAUDE.md,
@@ -493,6 +605,10 @@ Adapt it to your stack:
   to match your project (or add a `packageManager` field to `package.json`).
 - **Required checks.** In *Settings → Branches → branch protection*, add
   `typecheck`, `lint`, `test`, `build`, `e2e` as required status checks.
+- **Merge method.** Squash-merging a PR that appends TRACE records orphans their provenance
+  commits: in a fresh clone, or locally once the deleted branch's commits have been pruned
+  (deleting the branch alone keeps them), `pnpm trace reaudit` reports those records as
+  unreachable. Prefer a merge commit for such PRs.
 
 ---
 
@@ -501,20 +617,46 @@ Adapt it to your stack:
 The critic-bearing commands don't simulate critics in one context — they invoke
 deterministic **`Workflow`-tool scripts** under `.claude/workflows/` that fan out
 parallel subagents (own context each) with adversarial / maker-checker verification:
-`critic-panel`, `scan-docs`, `gap-analysis`, `e2e-design`, and `loop-iteration`.
+`critic-panel`, `scan-docs`, `gap-analysis`, `e2e-design`, `loop-iteration`,
+`improve-skills` and `trace-bench`. Each registers as a skill under its `meta.name`, which
+is its file name except for `improve-skills.js`: its skill name is `prompt-meta-critic`,
+because a skill named like the `/improve-skills` command would be listed twice.
 
 To adapt them:
 
 - **They're project-aware via prompts, not config** — the agents read `CLAUDE.md`,
   the memory wiki, and your `src/`/`e2e/`/`docs/` paths. Adjust those paths in the
   scripts if your layout differs (e.g. a monorepo package dir).
-- **Cost is real.** A critic round spawns ~10 critic agents + a verifier per
-  blocker/important finding; `/multi-agent-dev` runs that twice (pre + post). That's
-  the price of genuine independent review — scale the roster down if you want it
-  lighter, or reserve the workflows for substantive changes.
+- **Cost is real.** A critic round spawns ~10 critic agents + a verifier per blocker and
+  per important finding up to a cap; `/multi-agent-dev` runs that twice (pre + post).
+  That's the price of genuine independent review — scale the roster down if you want it
+  lighter, or reserve the workflows for substantive changes. Hooks are not where the
+  budget goes: a non-blocking command hook (such as the opt-in stop gate under *Optional
+  hooks*) spends no model tokens, only local CPU and wall-clock time per firing, while one
+  critic round or bench run spends millions of subagent tokens (the measured runs are in
+  `.claude/memory/topics/workflow.md`). A hook that blocks, continues the turn or injects
+  context does spend tokens, on every firing. Built-in bounds: a round
+  verifies every blocker and fills the rest of its verifier cap (`args.maxVerifiers`,
+  default 30) with important findings, round-robin across lenses, and records any beyond
+  it as a `defer` (`counts.capDeferred`) instead of dropping it; `scan-docs` refuses more
+  than `args.maxStories` (default 30) stories per call before any agent starts, so pass
+  them in batches; `loop-iteration` likewise refuses more than `args.maxItems` (default 5)
+  items per call; `improve-skills` is uncapped unless you pass `args.maxVerifiers`. With
+  a `+Nk` token target, the workflows also stop at budget floors (output tokens left)
+  instead of failing mid-run: `critic-panel` 80k before Review and 60k before Verify
+  (and before the opt-in Coverage phase), `scan-docs` 60k, `gap-analysis` 40k, then 20k
+  before each dimension's skeptic and before synthesis, `e2e-design` 20k before the
+  judge, `improve-skills` 60k before Verify, `loop-iteration` 80k, `trace-bench` 60k.
+  A round stopped at its start floor returns `error` and `budgetStopped`: it is
+  incomplete, never clean.
 - **Name workflows distinctly from commands** — a workflow whose `meta.name`
   matches a command shows up as a duplicate in the skills list (that's why the
-  critic workflow is `critic-panel`, not `critic-round`).
+  critic workflow is `critic-panel`, not `critic-round`, and `improve-skills.js`
+  registers as `prompt-meta-critic`); `pnpm test` fails on a shared name.
+- **Adding a workflow, or watching and resuming a run** — see `docs/workflow-graphs.md`:
+  *Adding a workflow* is the checklist (when to promote a prototype, every registry entry
+  `pnpm test` checks, the conventions the scripts share), and *Running, watching and
+  resuming* covers the run journal and resuming after a limit or a kill with the saved args.
 - **Requires a Claude Code build with the `Workflow` tool.** If yours lacks it, the
   commands still work as a single Lead agent simulating the panel — just without the
   independent contexts.
@@ -541,19 +683,27 @@ issues; record nice-to-haves; avoid unrelated refactors.
 
 ```txt
 [ ] Copied CLAUDE.md (merged with any existing one)
-[ ] Copied .claude/commands/, .claude/loop.md, .claude/memory/, settings.local.json
-[ ] Copied docs/ story-map scaffolds (content cleared, formats kept)
+[ ] Copied .claude/commands/, .claude/workflows/, .claude/loop.md, loop-checklist.md,
+    .claude/memory/, .claude/trace/, .claude/skills-index.md and scripts/trace/
+[ ] Started .claude/memory/trace/ and quarantine.md EMPTY (no template records, no quarantine rows)
+    and stripped the topic pages' <!-- rec:TR-… --> comments (pnpm trace wiki-check exits 0)
+[ ] package.json has "trace": "node scripts/trace/cli.mjs"; unit-test globs include scripts/**/*.test.mjs
+[ ] Copied docs/*.md and docs/stories/ story-map scaffolds (content cleared, formats kept)
 [ ] CLAUDE.md "Main commands" point at my real scripts
 [ ] verify trimmed to the scripts I actually have (no missing-script failure)
 [ ] Package-manager + localhost URL/port updated to match my project
 [ ] Monorepo: src/ , e2e/ , and port paths adjusted to my package layout
-[ ] settings.local.json allows only my real commands; git auto-allow kept or removed deliberately
+[ ] Merged .claude/settings.json into mine: allows only my real commands, denies kept;
+    any git add/commit auto-allow lives only in my own .claude/settings.local.json
+[ ] Optional: copied the opt-in Stop hook .claude/hooks/stop-gate.mjs + scripts/hooks/stop-gate.test.mjs
+    (off until I add its snippet, see "Optional hooks"), or left both out
+[ ] .gitignore covers .claude/settings.local.json and .claude/worktrees/; my linter ignores .claude/worktrees/**
 [ ] CLAUDE.md memory @import path resolves from where my CLAUDE.md lives
 [ ] Memory wiki: removed stack facts that don't apply (BEFORE first task); will re-seed via /dream
 [ ] If a docs/ wiki already exists: namespaced the story map + picked ONE canonical
     memory home (see "Reconciling with an existing docs/ wiki")
 [ ] Checked command name collisions; existing commands given descriptions + skills-index rows;
-    heavy commands set disable-model-invocation; old notes triaged (no secrets)
+    disable-model-invocation only per the manual-only rule; old notes triaged (no secrets)
 [ ] Playwright/browser setup chosen (local install vs. web pre-provisioned)
 [ ] Ran my own `verify` chain green once
 [ ] Ran /scan-project-docs against my real docs
@@ -588,8 +738,10 @@ console errors, and the current critical flow.
   template. Delete the inapplicable ones and run `/dream` to seed your own.
 - **A slash command isn’t found.** Commands live in `.claude/commands/*.md`;
   confirm the file exists and you’re in the project root.
-- **Permission prompts on every command.** Add the commands you trust to
-  `.claude/settings.local.json` (or a shared `.claude/settings.json` for the team).
+- **Permission prompts on every command.** The shared `.claude/settings.json` allow
+  rules apply only after you accept the workspace trust dialog for the folder. Add the
+  commands you trust: team-wide ones to `.claude/settings.json`, personal ones to your
+  own `.claude/settings.local.json`.
 - **The starter app fails after I changed the stack.** Remove the starter
   (`src/`, `e2e/`, build configs) once your own app and tests exist; it’s only a
   demonstration.

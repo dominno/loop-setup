@@ -4,8 +4,8 @@
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { readdirSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { readdirSync, statSync, writeFileSync } from "node:fs";
+import { join, resolve, sep } from "node:path";
 import {
   appendActions,
   BENCH_BUNDLE,
@@ -24,8 +24,10 @@ import {
   CODE_PATHS,
   readBench,
   DEFAULT_STORE,
+  l3Check,
   latestByClaim,
   loadEntries,
+  loadWiki,
   TREE_ID_EXCLUDES,
   treeFingerprint,
   loadSchema,
@@ -37,8 +39,13 @@ import {
   rotateStore,
   scoreBench,
   storeMetrics,
+  VERIFIER_FILE,
+  verifierBlockHash,
+  wikiViolations,
   writeRecords,
 } from "./lib.mjs";
+import { DEFAULT_PLAN, parsePlan, planItems, planViolations, readyIds } from "./plan.mjs";
+import { STORY_MAP, STORY_MAP_PATHS, storyMapViolations } from "./story-map.mjs";
 
 const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (policy: .claude/memory/topics/trace.md)
 
@@ -50,27 +57,60 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
   pnpm trace act --from <file|->       append consumer actions ([{record_id, consumer, action, ref?, note?}], {actions:[...]}, or a critic-panel result's reuseActions)
   pnpm trace tree-id                   fingerprint of HEAD + uncommitted changes (verdict reuse / provenance.tree)
   pnpm trace show <record_id>          a record, its consumer actions, and its revision chain
-  pnpm trace query [--claim-id ID] [--status S] [--writer PREFIX] [--subject S] [--latest] [--json] [--brief]
+  pnpm trace query [--claim-id ID] [--status S] [--severity S] [--writer PREFIX] [--subject S] [--latest] [--json] [--brief]
+                                       --severity: exact match on a record's severity (blocker|important|nice-to-have; a
+                                       missing or other value exits 2), combinable with the other filters
                                        --brief: compact JSON (newest 40, only the fields critic-panel reads) for args.priorRecords
   pnpm trace denylist-check --patch <file>
                                        BEFORE applying a patch: run the loop's production denylist (read from HEAD) over
                                        every path git's own parser finds in it (git apply --numstat) — exit 1 on a hit,
                                        exit 2 when it cannot be verified (git error, no paths)
   pnpm trace lint                      replay the whole store and check every contract invariant (exit 1 on error)
-  pnpm trace reaudit [--act]           licensing records whose file evidence changed since their commit
+  pnpm trace plan-ready [--max N] [--json] [--plan p]
+                                       the loop plan's ready node ids as a JSON array (loop-plan.md's ready-node rule, in
+                                       table order; --max N keeps the first N; --json prints those rows in full) — exit 1
+                                       and no ids when the plan table does not parse
+  pnpm trace plan-lint [--pre-dispatch] [--plan p]
+                                       check the plan against its contract and the record store (consistency, not truth):
+                                       exit 1 on an error, 2 when the store does not replay; --pre-dispatch also fails on
+                                       an in-progress node (run it before every dispatch)
+  pnpm trace plan-items <ids…> [--plan p]
+                                       loop-iteration args.items for ready nodes: [{id, description, priorRecordId?,
+                                       missing?}]; priorRecordId only for the node's own loop:<id> record, never a
+                                       critic one — exit 1 and no items when any id is not ready, 2 when the store
+                                       does not replay
+  pnpm trace story-lint [--root dir]   the story map (${STORY_MAP}/: story files, index, dashboard, verification log, E2E
+                                       coverage map) against itself and the store (consistency, not truth): one status
+                                       per story everywhere, plus the log row, coverage and licensing Record: line its
+                                       level needs — exit 1 on an error; an absent story map passes
+  pnpm trace wiki-check                the memory wiki (.claude/memory) against the store (consistency, not truth): rec:
+                                       comments, committed facts, quarantine rows, page sizes — JSON {ok, errors,
+                                       warnings}; exit 1 on an error, 2 when the store does not replay
+  pnpm trace l3-check [--json]         the L3 measured-checker item of .claude/loop-checklist.md, computed: the latest
+                                       bench:trace-bench-lite record is accept, from a verifier arm run at repeat ≥ 2
+                                       over every manifest fixture in every repeat (no --only subset), with no F0, F3
+                                       or F4 in its failed_gates, and names the current <loop-verifier> block by its
+                                       sha256 — exit 0 when all hold, else exit 1 listing every unmet condition
+  pnpm trace reaudit [--act]           licensing records whose file evidence changed since their commit; one whose
+                                       commit the repo no longer has (squashed away) is listed apart, as unreachable
   pnpm trace metrics                   store-level consumer-value metrics
   pnpm trace rotate [--max 500] [--keep 200]   lossless move of old lines into <YYYY>.jsonl archives
   pnpm trace bench-args [--arms verifier,single-pass,panel] [--repeat N] [--critics a,b] [--only B01-x,G01-y]
                                        print the args JSON for .claude/workflows/trace-bench.js (no ground truth)
   pnpm trace bench-score <results.json>... --transcripts <dir> [--record]
                                        score trace-bench run(s) (runs concatenated); agent transcripts are scanned for
-                                       leaked ground truth (contaminated runs excluded, F0); --record writes the record
+                                       leaked ground truth (contaminated runs excluded, F0); --record writes the record:
+                                       the fixtures each arm measured next to the manifest's counts, and — for a run
+                                       with a verifier arm — the <loop-verifier> block it measured by its sha256 (read
+                                       when you score)
   pnpm trace bench-unpack <dir>        decode the fixture bundle into <dir> (outside the repo!) for editing
   pnpm trace bench-pack <dir>          re-encode <dir>/fixtures.json (patches inline) into the bundle
   pnpm trace bench-judge [--only ids] [--skip-e2e] [--recover]   verify each fixture's judge.catches by running its
                                        deterministic check; --recover reverses fixture patches left applied by a killed run
 
   --store <path>  use another store (default .claude/memory/trace/records.jsonl; env TRACE_STORE)
+  --plan <path>   use another loop plan (default .claude/memory/loop-plan.md)
+  --root <dir>    story-lint: read the story map of another checkout, e.g. a scratch copy (default: this repo)
   Actions: CLEAR HOLD COMMIT COMMIT_QUALIFIED QUARANTINE REJECT REUSE REAUDIT`;
 
 function parseArgs(argv) {
@@ -118,8 +158,19 @@ function codeText() {
     .join("\n");
 }
 
+// The sha256 of the production <loop-verifier> block as it is in the working tree (the bench
+// Workflow runs trace-bench.js's byte-identical copy, parity-tested), or null when it cannot be
+// read: bench-score records it, l3-check compares the latest bench record against it.
+function currentVerifierHash() {
+  try {
+    return verifierBlockHash(readFileSync(join(ROOT, VERIFIER_FILE), "utf8"));
+  } catch {
+    return null; // no such file: nothing to name or compare
+  }
+}
+
 function changedSince(commit, path) {
-  // Compare the record's commit to the working tree; an unknown commit counts as
+  // Compare the record's commit to the working tree; a diff that fails counts as
   // changed (fail closed: re-audit rather than trust stale evidence).
   try {
     execFileSync("git", ["diff", "--quiet", commit, "--", path], { cwd: ROOT, stdio: "ignore" });
@@ -127,6 +178,12 @@ function changedSince(commit, path) {
   } catch {
     return true;
   }
+}
+
+// Does the repository still have the commit? One squashed away and pruned (or absent from a shallow
+// clone) cannot be diffed against: reaudit lists its record apart instead of as "evidence changed".
+function reachable(commit) {
+  return git(["cat-file", "-e", `${commit}^{commit}`]) !== null;
 }
 
 function out(obj, asJson) {
@@ -158,6 +215,40 @@ async function main() {
       }
     });
     process.stdout.write(treeFingerprint({ head, diff, untracked }) + "\n");
+    return 0;
+  }
+
+  // The loop plan's DAG (.claude/memory/loop-plan.md, or --plan p). Readiness is computed, never
+  // hand-derived, and a table that does not parse fails closed: no ids, exit 1.
+  const planPath = typeof flags.plan === "string" ? resolve(flags.plan) : DEFAULT_PLAN;
+  const readPlan = () => {
+    try {
+      return parsePlan(readFileSync(planPath, "utf8"));
+    } catch (e) {
+      return { nodes: [], errors: [`[table] cannot read the plan ${planPath}: ${e.message}`] };
+    }
+  };
+  // True (after reporting why) when the plan table does not parse: then no ids are printed at all.
+  const unparsed = (plan) => {
+    if (!plan.errors.length) return false;
+    for (const e of plan.errors) process.stderr.write(`error: ${e}\n`);
+    process.stderr.write(`${cmd}: the plan table does not parse — no ids (pnpm trace plan-lint lists every problem)\n`);
+    return true;
+  };
+
+  if (cmd === "plan-ready") {
+    const max = flags.max !== undefined ? (/^[1-9]\d*$/.test(String(flags.max)) ? Number(flags.max) : NaN) : undefined;
+    if (flags.plan === true || Number.isNaN(max)) {
+      out("usage: pnpm trace plan-ready [--max N] [--json] [--plan p]   (N a positive integer)");
+      return 2;
+    }
+    const plan = readPlan();
+    if (unparsed(plan)) return 1;
+    const ids = readyIds(plan.nodes, { max });
+    if (flags.json) {
+      const byId = new Map(plan.nodes.map((n) => [n.id, n]));
+      out(ids.map((id) => byId.get(id)), true);
+    } else process.stdout.write(JSON.stringify(ids) + "\n");
     return 0;
   }
 
@@ -276,6 +367,108 @@ async function main() {
     return state.errors.length ? 1 : 0;
   }
 
+  if (cmd === "plan-lint") {
+    if (flags.plan === true) {
+      out("usage: pnpm trace plan-lint [--pre-dispatch] [--plan p] [--store s]");
+      return 2;
+    }
+    // The cross-checks read the store; one that does not replay cannot vouch for any node.
+    if (state.errors.length) {
+      out({ ok: false, error: `the record store does not replay (${state.errors.length} error(s)) — the plan cannot be checked against it; run pnpm trace lint`, store: storePath }, true);
+      return 2;
+    }
+    const plan = readPlan();
+    const preDispatch = !!flags["pre-dispatch"];
+    const { errors, warnings } = planViolations(plan, state, { preDispatch });
+    for (const w of warnings) process.stderr.write(`warn: ${w}\n`);
+    for (const e of errors) process.stderr.write(`error: ${e}\n`);
+    out({ ok: errors.length === 0, errors: errors.length, warnings: warnings.length, nodes: plan.nodes.length, preDispatch, plan: planPath, store: storePath }, true);
+    return errors.length ? 1 : 0;
+  }
+
+  if (cmd === "plan-items") {
+    if (flags.plan === true || !pos.length) {
+      out("usage: pnpm trace plan-items <id> [<id>…] [--plan p] [--store s]");
+      return 2;
+    }
+    // Whose record a node cites (its own loop:<id> record becomes priorRecordId) only the replayed
+    // store tells, so one that does not replay yields no items. Errors go to stderr: stdout is the items file.
+    if (state.errors.length) {
+      process.stderr.write(`error: the record store does not replay (${state.errors.length} error(s)) — no items; run pnpm trace lint\n`);
+      return 2;
+    }
+    const plan = readPlan();
+    if (unparsed(plan)) return 1;
+    // All or nothing: a batch with any id that is not ready is never half-emitted.
+    const { items, refused } = planItems(plan.nodes, pos, state);
+    for (const r of refused) process.stderr.write(`error: ${r.id}: ${r.reason}\n`);
+    if (refused.length) return 1;
+    out(items, true);
+    return 0;
+  }
+
+  if (cmd === "story-lint") {
+    if (flags.root === true) {
+      out("usage: pnpm trace story-lint [--root <checkout>] [--store s]");
+      return 2;
+    }
+    // The story map of this checkout (or --root's), each file read as text (null when missing). Every
+    // path is joined to that checkout (so even a leading / stays in it) and counts only as a regular
+    // file inside it: a cited spec that climbs out with ../ is not one. Errors go to stderr.
+    const root = typeof flags.root === "string" ? resolve(flags.root) : ROOT;
+    const isFile = (rel) => {
+      const abs = join(root, rel);
+      if (!abs.startsWith(root + sep)) return false;
+      try {
+        return statSync(abs).isFile();
+      } catch {
+        return false;
+      }
+    };
+    const file = (rel) => ({ path: rel, text: isFile(rel) ? readFileSync(join(root, rel), "utf8") : null });
+    let names = [];
+    try {
+      names = readdirSync(join(root, STORY_MAP_PATHS.stories)).filter((f) => /^US-.*\.md$/.test(f)).sort();
+    } catch {
+      // no stories/ directory: no story files
+    }
+    const map = {
+      stories: names.map((f) => `${STORY_MAP_PATHS.stories}/${f}`).filter(isFile).map(file),
+      ...Object.fromEntries(["index", "dashboard", "log", "coverage"].map((k) => [k, file(STORY_MAP_PATHS[k])])),
+    };
+    const { errors, warnings, stories, absent } = storyMapViolations(map, state, { specExists: isFile });
+    for (const w of warnings) process.stderr.write(`warn: ${w}\n`);
+    for (const e of errors) process.stderr.write(`error: ${e}\n`);
+    out({ ok: errors.length === 0, errors: errors.length, warnings: warnings.length, stories, ...(absent ? { absent } : {}), storyMap: join(root, STORY_MAP), store: storePath }, true);
+    return errors.length ? 1 : 0;
+  }
+
+  if (cmd === "wiki-check") {
+    // Every cited fact must be on record and every committed fact still cited; a store that does not
+    // replay can vouch for neither (its broken lines would read as "names no record").
+    if (state.errors.length) {
+      out({ ok: false, errors: [`the record store does not replay (${state.errors.length} error(s)) — the wiki cannot be checked against it; run pnpm trace lint`], warnings: [], store: storePath }, true);
+      return 2;
+    }
+    const wiki = loadWiki();
+    const { errors, warnings } = wikiViolations({ ...wiki, state });
+    out({ ok: errors.length === 0, errors, warnings, pages: wiki.pages.length, store: storePath }, true);
+    return errors.length ? 1 : 0;
+  }
+
+  if (cmd === "l3-check") {
+    // The L3 measured-checker item, computed (l3Check): a store that does not replay, or a block that
+    // cannot be read, is an unmet condition too — exit 1 unless every condition holds.
+    const res = l3Check(state, currentVerifierHash());
+    if (flags.json) out({ ...res, store: storePath }, true);
+    else if (res.ok) {
+      out(`l3-check: met — ${res.record_id} is accept from ${res.repeats} repeat(s) over the full manifest, with no F0, F3 or F4, and measured the current <loop-verifier> block (sha256 ${res.currentHash.slice(0, 12)}…)`);
+    } else {
+      out(`l3-check: NOT met — ${res.unmet.length} unmet condition(s); latest bench:trace-bench-lite record: ${res.record_id || "none"}\n${res.unmet.map((u) => `  - ${u}`).join("\n")}`);
+    }
+    return res.ok ? 0 : 1;
+  }
+
   if (cmd === "show") {
     const id = pos[0];
     const rec = state.records.get(id);
@@ -295,13 +488,21 @@ async function main() {
   }
 
   if (cmd === "query") {
+    // --severity answers the whole-store open-blocker check (critic-round.md, multi-agent-dev.md), so a missing or
+    // unknown value (the schema's enum) is a usage error, never an empty list that would read as "no open blocker".
+    const severities = schema.$defs.record.properties.severity.enum;
+    if (flags.severity !== undefined && !severities.includes(flags.severity)) {
+      out(`usage: pnpm trace query … --severity ${severities.join("|")}   (an exact match on a record's severity)`);
+      return 2;
+    }
     let recs = flags.latest ? [...latestByClaim(state.records, state.superseded).values()] : [...state.records.values()];
     if (flags["claim-id"]) recs = recs.filter((r) => r.claim_id === flags["claim-id"]);
     if (flags.status) recs = recs.filter((r) => r.final_status === flags.status);
+    if (flags.severity) recs = recs.filter((r) => r.severity === flags.severity);
     if (flags.writer) recs = recs.filter((r) => r.writer_id.startsWith(flags.writer));
     if (flags.subject) recs = recs.filter((r) => r.subject === flags.subject);
     if (flags.brief) {
-      process.stdout.write(JSON.stringify(briefRecords(recs)) + "\n");
+      process.stdout.write(JSON.stringify(briefRecords(recs, [...state.actions.values()].flat())) + "\n");
       return 0;
     }
     if (flags.json) return out(recs, true), 0;
@@ -314,10 +515,11 @@ async function main() {
   }
 
   if (cmd === "reaudit") {
-    const cands = reauditCandidates(state.records, state.superseded, changedSince);
+    const cands = reauditCandidates(state.records, state.superseded, changedSince, reachable);
     if (flags.act && cands.length) {
+      const note = (c) => (c.unreachable ? `provenance commit ${c.unreachable} is unreachable — re-verify: ${c.paths.join(", ")}` : `evidence changed: ${c.changed.join(", ")}`);
       const res = appendActions(
-        cands.map((c) => ({ record_id: c.record_id, consumer: "dream", action: "REAUDIT", note: `evidence changed: ${c.changed.join(", ")}` })),
+        cands.map((c) => ({ record_id: c.record_id, consumer: "dream", action: "REAUDIT", note: note(c) })),
         { storePath, now, policyVersion, schema, forbidden: benchForbidden() },
       );
       out(res, true);
@@ -401,9 +603,13 @@ async function main() {
     }
     const refs = pos.length ? pos : ["-"];
     const resultsRef = refs.join(" ");
+    // How many agents the workflow(s) started: a started run that never came back is counted
+    // as missing (F0 validity), so a silently shrunken sample is never recorded as an accept.
+    let expectedRuns = 0;
     let runs = refs.flatMap((ref) => {
       const raw = readJsonInput(ref);
       const res = raw && raw.runs ? raw : raw?.result || raw;
+      expectedRuns += Math.max(0, Number(res?.agents) || 0);
       // Each run carries its workflow run's id, so coverage can tie it to its own transcripts.
       return Array.isArray(res?.runs) ? res.runs.map((r) => ({ ...r, runId: res.runId || undefined })) : [];
     });
@@ -435,7 +641,7 @@ async function main() {
     const keys = contaminatedRuns(transcripts, manifest);
     runs = markContaminated(runs, keys);
     if (tdirs.length) runs = markUnscanned(runs, transcripts);
-    const score = scoreBench(manifest, { runs, unattributedLeaks: unmatchedLeaks(runs, keys) });
+    const score = scoreBench(manifest, { runs, unattributedLeaks: unmatchedLeaks(runs, keys), expectedRuns });
     score.transcriptsScanned = transcripts.length;
     if (!tdirs.length) score.flags.push("F0 coverage: no --transcripts given — the contamination scan did not run; these numbers are not a measurement");
     if (flags.record && runs.some((r) => !r.runId)) {
@@ -452,7 +658,7 @@ async function main() {
     );
     if (flags.record && runIds.some((id) => recordedRunIds.has(id))) {
       out(score, true);
-      out("--record refused: this run id is already recorded — run `pnpm trace bench-args` afresh for every Workflow invocation (F0)");
+      out("--record refused: this run id is already recorded — run `pnpm trace bench-args` afresh for every new run; only a resume of a cut-off run keeps its args file (F0)");
       return 1;
     }
     if (flags.record && score.unattributedLeaks) {
@@ -470,7 +676,7 @@ async function main() {
       const prior = latestByClaim(state.records, state.superseded).get("bench:trace-bench-lite");
       const commit = git(["rev-parse", "--short=12", "HEAD"]) || undefined;
       const branch = git(["rev-parse", "--abbrev-ref", "HEAD"]) || undefined;
-      const res = writeRecords([benchRecordDraft(score, { resultsRef, priorRecordId: prior && prior.record_id, runIds })], { storePath, now, policyVersion, commit, branch, schema, forbidden: benchForbidden() });
+      const res = writeRecords([benchRecordDraft(score, { resultsRef, priorRecordId: prior && prior.record_id, runIds, verifierHash: currentVerifierHash() })], { storePath, now, policyVersion, commit, branch, schema, forbidden: benchForbidden() });
       out(res, true);
       return res.every((r) => r.stored) ? 0 : 1;
     }

@@ -28,13 +28,30 @@ Procedure:
 9. Record evidence in `docs/story-verification-log.md`. The status itself must not be
    self-adjudicated (maker ≠ checker): run the **scan-docs Workflow** for the in-scope
    stories (`scriptPath: .claude/workflows/scan-docs.js`, `args.stories` = those
-   stories) so a separate status verifier issues the verdicts, then apply them exactly as
-   `/scan-project-docs` step 9 does (accept → COMMIT, qualify → COMMIT_QUALIFIED at the
-   lower status, revise/defer → status unchanged + HOLD; Lead-raised `Browser verified`/
-   `Done` only with its own record citing the browser observation and a no-blocker critic
-   round). No status change without a licensing record (`.claude/memory/topics/trace.md`).
+   stories, at most `maxStories` per call — default 30, two agents each; batch a longer
+   list, since a larger batch is refused with `error` before any agent starts) so a
+   separate status verifier issues the verdicts, then apply them exactly as
+   `/scan-project-docs` step 9 does (an `error` → no status changes and no records: re-run
+   it; accept → COMMIT, qualify → COMMIT_QUALIFIED at the lower status, revise/defer →
+   status unchanged + HOLD; Lead-raised `Browser verified`/`Done` only with its own record
+   — claim_text `Story <id> (<title>) is at status "<S>"`, the form scan-docs writes —
+   citing the browser observation (a `browser` item) and a critic round whose
+   `completion.verdict` is `accept` (its records as `record` items), that completion cited
+   in its evidence; `pnpm trace story-lint` checks that each cited record licenses exactly
+   the story's status with that level's evidence kinds). That critic round runs as
+   `/scan-project-docs` step 15 says: when UI or perf lenses are in scope, first run
+   `pnpm test:e2e` (including `e2e/a11y.spec.ts`) and `pnpm build && pnpm check:bundle`
+   yourself and pass their output as `priorEvidence` (the critics and skeptics never run
+   E2E, and never build or test in the shared checkout). No status change without a
+   licensing record (`.claude/memory/topics/trace.md`).
 10. Update `docs/e2e-coverage-map.md`.
 11. Update `docs/gaps-and-risks.md`.
+12. **Last**, after steps 8-11 (step 8's status writes, which wait for step 9's verdicts;
+    step 9's verification-log rows; step 10's coverage map; step 11's gaps file), run
+    `pnpm -s trace story-lint` and handle it as `/scan-project-docs` step 19 says: it must
+    exit 0; fix the projections (the index, the dashboard) to match each story file's
+    recorded status, add a log or coverage row only for a check that was actually run, and
+    never change a status to satisfy the lint without a licensing record.
 
 Rules:
 

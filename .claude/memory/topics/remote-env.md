@@ -21,5 +21,10 @@
   approve builds in `pnpm-workspace.yaml` (`onlyBuiltDependencies:`), and regenerate the
   lockfile with `CI=true corepack pnpm@10 install` so it matches CI's `--frozen-lockfile`.
   Run local checks with `CI=true corepack pnpm@10 …` to avoid the pnpm-11 strictness.
+- Subagent test runs in scratch copies can outlive their agent: after heavy workflow runs,
+  orphaned vitest workers (PPID 1, cwd a deleted scratch directory) kept 2 of this
+  container's 4 CPUs at ~99% for hours (observed once, 2026-10-31). Find them with
+  `ps -eo pid,ppid,pcpu,args` and `readlink /proc/<pid>/cwd`, and remove them by PID only.
+  <!-- rec:TR-feb3bd831b17 -->
 
 Related: [tooling](./tooling.md) · [testing](./testing.md) · [build-and-verify](./build-and-verify.md)

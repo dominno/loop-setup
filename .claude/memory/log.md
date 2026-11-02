@@ -343,3 +343,30 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
   invariance 1.00, nothing excluded (the old F0 scan also flags 0), F2 only. The L3
   measured-checker item of loop-checklist.md is met; no loop's trust level was changed.
 - Admission: qualified 2 (TR-3ce4efb91999 → trace.md, TR-b3b37a1408f4 → workflow.md).
+
+## [2026-11-01] ingest | improvement-plan implementation: stale wiki facts rewritten, four new facts
+- Task: the improvement report's plan (steps 1–17), the post-implementation round's fixes
+  (18a–18g) and the live workflow runs (e2e-design with a stop and resume, gap-analysis,
+  critic-panel with the completeness critic). Verified by `pnpm verify` and CI on PR #17.
+- Rewrites (U11, approved with the plan; flow 1e): the legacy bullets in workflow.md on
+  verdicts and records, the fan-out workflow stages, and the DSL conventions (its first-stage
+  guard and "no manual limit needed" sentences replaced by the engine rule and the
+  concurrency-vs-cost fact), and trace.md's shared-blocks gotcha (adds `<agent-safety>`).
+  Flow 1e (ii): TR-3ce4efb91999 (L3 item "met") revised by TR-634fa314a7bf — `l3-check`
+  now reports it NOT met until a re-bench.
+- Admission: committed 6 (TR-5f79a159395f, TR-79ad595a532b, TR-53a3ffad47a3,
+  TR-ef509b55013d, TR-85dc794fd165, TR-77dcaddf05c7), qualified 4 (TR-aea448fee314,
+  TR-34466b07a374, TR-634fa314a7bf, TR-feb3bd831b17), quarantined 0, rejected 0.
+- Reported, not changed (needs the user's confirmation): workflow.md's legacy bullet "Add
+  `disable-model-invocation: true` to heavy/code-changing commands" predates the
+  manual-only rule in `.claude/skills-index.md` (only commands that rewrite the governing
+  prompts or run a measured fan-out CLAUDE.md never asks for are manual-only).
+
+## [2026-11-02] ingest | manual-only rule fact; shared settings.json landed
+- Flow 1e (iii), confirmed by the user: workflow.md's legacy bullet "Add
+  `disable-model-invocation: true` to heavy/code-changing commands" rewritten to the
+  manual-only rule of `.claude/skills-index.md` (TR-dc21201014e2, COMMIT).
+- Step 4b approved by the user: the committed `.claude/settings.json` (shared allow-list,
+  force-push/hard-reset denies, worktree.baseRef "head") replaces the tracked
+  `.claude/settings.local.json`, which is now git-ignored and personal.
+- Admission: committed 1, qualified 0, quarantined 0, rejected 0.

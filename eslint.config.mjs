@@ -9,6 +9,9 @@ const eslintConfig = [
       "dist/**",
       "playwright-report/**",
       "test-results/**",
+      // Worktree-isolated agents check out here; flat config does not read .gitignore,
+      // so a leftover worktree would otherwise be linted with the root project.
+      ".claude/worktrees/**",
     ],
   },
   ...next,

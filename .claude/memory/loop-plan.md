@@ -20,7 +20,7 @@ One row per node in the table below:
 | `description` | One line — the bounded unit of work. |
 | `after` | Comma-separated `id`s this node depends on; empty = no deps. |
 | `status` | `ready` · `blocked` · `in-progress` · `deferred` · `done` · `escalated` · `dropped`. |
-| `record` | The TRACE-lite `record_id` behind the node's latest status change (`pnpm trace show <id>`); empty only while `ready`/`blocked` with no verdict yet. |
+| `record` | The TRACE-lite `record_id` behind the node's latest status change (`pnpm trace show <id>`): the node's own `loop:<id>` record; for a node created `deferred`/`escalated` from a critic finding, that critic record, HOLDed for the node (`pnpm trace act <record> loop HOLD --ref <id>`); for a cascade-escalated node, its escalated ancestor's HOLDed record. Empty only while `ready`/`blocked` with no verdict yet. |
 | `missing` | For `deferred`/`escalated`: the evidence or decision that would unblock it — the record's `missing`, else its `repair`, else "a human decision on: <its reason>". Never empty. |
 | `origin` | Where it came from: a confirmed critic finding (cite its record id), a re-plan, or a human. |
 | `notes` | Evidence / decision trail (attempt count, escalation reason). |
@@ -45,11 +45,29 @@ One row per node in the table below:
   decision needed.
 - `dropped` — obsoleted by re-plan; kept as a row for the decision trail.
 
+**Pruning:** a `done` or `dropped` row may later be pruned from the table (its trail stays in
+`loop-run-log.md` and the record store). Pruning it also deletes its id from every remaining
+`after:` — a dangling id fails `plan-lint`, because its dependent could never become ready.
+Deleting a `done` id changes no readiness, but deleting a `dropped` one would make its live
+dependents ready with no cascade decision: prune a `dropped` row only once no live node lists
+it in `after:`, so cascade-resolve those nodes first (`plan-lint`'s `[stranded]` rule names them).
+A pruned id is never reused: number a new node above the highest `LP` id ever used, in the
+table and in the store's `loop:<id>` claims (`pnpm trace query --writer loop` lists them),
+because `plan-lint` ties records to the id — a reused id inherits the old node's defers and its
+CLEARed verdict (`plan-lint` warns `[reused-id]` while such a node is not `done`).
+
 ## Ready-node rule (what the loop dispatches next)
 A node is **ready** iff `status ∉ {done, dropped, escalated, in-progress, deferred}` **and**
 every `id` in its `after:` is `done`. The loop picks the highest-priority ready node (topmost
 first). Denylist and trust-level gates still apply **on top** of readiness — a ready node
 whose fix would touch a denylist path is escalated, never auto-applied.
+
+**Computed, not hand-derived:** `pnpm trace plan-ready` prints the ready ids in table order
+(`--max N` keeps the first N), and `pnpm trace plan-lint` checks the rest of this contract
+against the record store: statuses, `after:` edges, cycles, stranded nodes, and each node's
+record and consumer actions. It checks consistency, not truth: it shows that the table and
+the records agree, not that a fix is right or that a `missing` was really supplied. A table
+that does not parse fails closed (exit 1, no ids).
 
 **Stale `in-progress` recovery:** `in-progress` means "dispatched this iteration" and
 normally resolves to `done`/`escalated` in the same iteration. A node still `in-progress`
@@ -62,17 +80,28 @@ never dispatch a leftover `in-progress` node as-is (it may be mid-flight or orph
 dispatchable, but it is not a dead end either. In each re-plan step, check its `missing`
 against the new evidence (fresh records, a dependency now `done`, a check that now runs):
 if satisfied, reset it to `ready` and cite the evidence that arrived (a record id or check
-output) in its notes — no citation, no reset; if not, leave it. A defer whose `missing` is
+output) in its notes — no citation, no reset; if not, leave it. One reset needs no new
+evidence: a node deferred by a record whose `failed_gates` include `agent-failed` (an infra
+failure: the agent died, so nothing was weighed) may be reset citing that defer record's own
+id (`loop.md` step 9 lists the other record-cited resets). A reset keeps the node's `record`
+and `missing` columns. `pnpm trace plan-items` passes `missing` on as the item's `missing`,
+and the `record` as its `priorRecordId` only when it is the node's own `loop:<id>` record (the
+new verdict revises it, so the claim keeps one chain). A critic record is never passed on:
+revising it across claims would supersede a finding that is still open and drop it from the
+next critic round's priors, so it stays HOLDed for the node until a critic round re-reviews
+it. A defer whose `missing` is
 a human decision (approval, product call) is never reset by the loop: such a node is
 `escalated`, and only that human's answer moves it. Each
-defer counts as one attempt toward the >3-attempts red flag — a node deferred for the
-fourth time becomes `escalated`. A `deferred` dependency keeps its dependents computed
-`blocked` (not dropped, not escalated — the dependency is resolvable); if the deferred
-node later escalates or drops, the cascade rules below apply.
+defer counts as one attempt toward the >3-attempts red flag, an agent-failed one included —
+a node deferred for the fourth time becomes `escalated` (`plan-lint` counts the node's
+`loop:<id>` defers and fails on a fourth that is not). A `deferred` dependency keeps its
+dependents computed `blocked` (not dropped, not escalated — the dependency is resolvable);
+if the deferred node later escalates or drops, the cascade rules below apply.
 
 ## No action without a node
 Every L2/L3 dispatch (`loop-iteration.js` `args.items`) MUST be ready nodes from this
-table — each item's `id` is its node `id`. An action with no backing node is **not
+table — each item's `id` is its node `id` (`pnpm trace plan-items <ids>` builds the items and
+refuses an id that is not ready). An action with no backing node is **not
 taken**; instead the re-plan step creates the node first (see below). Node creation is
 the *only* loop action not itself gated by an existing node — it is the sanctioned way
 to bootstrap, so an empty plan never deadlocks:
@@ -88,7 +117,8 @@ to bootstrap, so an empty plan never deadlocks:
   - dependency **`dropped`** → drop the dependent too (`origin: cascade from <id>`) if now
     obsolete, or re-point its `after:` to a live node;
   - dependency **`escalated`** → do **not** re-wire to un-block it (its prerequisite work
-    is unresolved) — set the dependent `escalated` too, with a note.
+    is unresolved) — set the dependent `escalated` too, with a note. It cites the escalated
+    ancestor's HOLDed record in `record`, with `origin: cascade from <id>`.
   - dependency **`deferred`** → leave the dependent computed `blocked` (see *Deferred nodes*).
 
 ## Example (illustrative — not a live row)

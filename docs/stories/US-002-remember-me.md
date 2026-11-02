@@ -45,6 +45,7 @@ I don't have to retype it on every visit.
 
 **Final status:**
 E2E tested
+Record: (pre-TRACE)
 
 **Next action:**
 Manual MCP browser verification + a recorded post-implementation critic round

@@ -46,7 +46,7 @@ this repo from the "loop engineering" loop-design checklist
       bootstraps a node rather than deadlocking
 - [ ] **No durable state change without a record:** every node status change cites a
       TRACE-lite record (`done` = accept/qualify + `CLEAR`); `deferred`/`escalated` nodes
-      name their `missing`; `pnpm trace lint` passes
+      name their `missing`; `pnpm trace lint` passes; `pnpm trace plan-lint` passes
 
 **6. Human handoff**
 - [ ] Escalation triggers explicit (max attempts, risk paths, ambiguity)
@@ -76,8 +76,13 @@ this repo from the "loop engineering" loop-design checklist
       (`pnpm trace query --latest --claim-id bench:trace-bench-lite`) is `accept` (not
       `qualify` — no excluded runs), was written after the last change to the
       `<loop-verifier>` block in `.claude/workflows/loop-iteration.js`, came from a
-      `/bench-checkers` run with `repeat ≥ 2`, and its `failed_gates` contain no F0, F3 or
-      F4 — see `.claude/memory/topics/trace.md`
+      `/bench-checkers` run with `repeat ≥ 2` whose verifier arm measured every manifest
+      fixture in every repeat (not an `--only` subset, even when scored together with a
+      full-manifest run at fewer repeats), and its `failed_gates` contain no F0, F3 or
+      F4. **The check is `pnpm trace l3-check`:** exit 0 only when all of that holds, else
+      exit 1 listing every unmet condition. The record names the block it measured by its
+      sha256, which must equal the current block's, so any later edit to the block needs a
+      re-bench — see `.claude/memory/topics/trace.md`
 
 ## Red flags (stop & fix before raising the level)
 - Same PR/issue with >3 automated fix attempts without progress.

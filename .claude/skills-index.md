@@ -32,6 +32,11 @@ catalog so both you and Claude can route to the right command.
   `.claude/memory/loop-plan.md` (current plan/DAG — every L2/L3 action traces to a ready
   node here) and `.claude/memory/loop-run-log.md` (append-only history))
 
+**A task's lifecycle:** `/story-gap-analysis` → `/write-goal` → `/multi-agent-dev` (with
+`/multi-agent-e2e` when a flow needs coverage) → `/qa-pass` → `/sync-story-status` →
+`/dream`. **Periodic:** `/scan-project-docs`, `/memory-audit`, `/improve-skills`,
+`/bench-checkers`, `/loop`.
+
 ## Development loop
 
 > Fan-out commands run as real multi-agent **Workflows** under `.claude/workflows/`
@@ -39,10 +44,13 @@ catalog so both you and Claude can route to the right command.
 > Workflow tool — not one agent simulating critics: `critic-panel` (critic rounds),
 > `scan-docs` (`/scan-project-docs`), `gap-analysis` (`/story-gap-analysis`),
 > `e2e-design` (`/multi-agent-e2e`), `loop-iteration` (`/loop` L2/L3),
-> `improve-skills` (`/improve-skills` — meta-critic over our own prompts/workflows),
-> `trace-bench` (`/bench-checkers` — measures the checkers on seeded defects).
-> Verdict-producing workflows return typed TRACE verdicts plus `traceRecords` drafts that
-> the caller appends with `pnpm trace write` (no durable state change without a record).
+> `prompt-meta-critic` (file `improve-skills.js`; `/improve-skills` — meta-critic over our
+> own prompts/workflows), `trace-bench` (`/bench-checkers` — measures the checkers on
+> seeded defects).
+> The record-writing workflows (`critic-panel`, `scan-docs`, `loop-iteration`,
+> `improve-skills`) return typed TRACE verdicts plus `traceRecords` drafts that the caller
+> appends with `pnpm trace write` (no durable state change without a record); `e2e-design`
+> and `gap-analysis` return typed verdicts that are advisory and write no records.
 > Pass `args.models = { fanout, judge }` when invoking any of these to override the
 > default `sonnet`/`opus` model tiering (e.g. for cost control on a large fan-out).
 
@@ -76,3 +84,15 @@ catalog so both you and Claude can route to the right command.
 - Add a row to the right group above. `/dream lint` flags commands missing a
   description or an index row.
 - Prefer extending an existing command over adding a near-duplicate.
+- Name it apart from every workflow's skill name (`meta.name` in `.claude/workflows/*.js`):
+  commands and workflows share the skills list, so a shared name shows up twice there.
+- **The manual-only rule.** A command is manual-only (`disable-model-invocation: true` in
+  its frontmatter, plus `(manual-only)` in its index row) only if it rewrites the
+  governing prompt surface, or runs a measured fan-out that `CLAUDE.md` never tells Claude
+  to run. Today that is `/improve-skills` and `/bench-checkers`. Any command `CLAUDE.md`
+  tells Claude to run stays model-invocable: the flag blocks Claude's Skill call and hides
+  the command, so that instruction could not be followed. The engine workflows stay
+  model-invocable skills, so their cost bounds are the per-call caps and budget floors
+  (Cost bounds in `docs/workflow-graphs.md`); in Auto mode, the Workflow approval appears
+  only on the first launch. `pnpm test` fails when a command's flag and its index row
+  disagree, or when a workflow's skill name is also a command's name.

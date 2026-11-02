@@ -10,9 +10,11 @@ repair; consumers act only on records. We adopt that **contract** for our own ma
 declared policy, **not** objective truth: gates verify field consistency, not field
 truth (paper §7.2).
 
-<!-- trace-policy-version: 2 -->
+<!-- trace-policy-version: 3 -->
 (machine-readable; `scripts/trace/lib.mjs` stamps it on every record and refuses records
-written under a newer policy — bump it whenever the tables below change.)
+written under a newer policy — bump it whenever a table below or a record rule changes.)
+v3 adds the memory write boundary for `wiki:` records (**Record guarantees**); records
+written under v1/v2 replay unchanged.
 
 - Schema: `.claude/trace/schema-v1.json` · Store: `.claude/memory/trace/records.jsonl`
   (append-only JSONL, archives `<YYYY>.jsonl`) · Writer/linter: `pnpm trace …`
@@ -66,7 +68,7 @@ fails on drift — including drift between this table and the code.
 | HOLD | any | loop (node deferred/escalated), critic-round (review-only), any consumer withholding |
 | REJECT | any | dream (not filed), improve-skills (edit declined) |
 | REUSE | any | critic-panel (prior verdict reused on an identical working tree — `pnpm trace tree-id`) |
-| REAUDIT | any | dream lint (evidence file changed since the record's commit) |
+| REAUDIT | any | dream lint (evidence file changed since the record's commit, or that commit is unreachable) |
 
 **Fail closed:** CLEAR/COMMIT/COMMIT_QUALIFIED are refused on a non-licensing verdict, on
 a superseded record, and on any record that is no longer the newest for its `claim_id`
@@ -90,6 +92,16 @@ denylist path still needs a human).
   the evidence as `priorEvidence`); the new verdict is a new record that `revises` the
   defer, and you act on that. A defer whose `missing` is a human decision (denylist,
   ambiguity) is resolved only by that human.
+- **`defer` with `agent-failed` in `failed_gates`** → an infra failure, not a verdict: the
+  agent threw or returned nothing (token budget spent, a terminal API error, a skip), so
+  nothing was weighed. Re-run the workflow that produced it; never wait for evidence and
+  never count it as refuted. Many of them in one run is an outage: report it, and re-run
+  once its cause is fixed.
+- **`defer` with `base-mismatch` in `failed_gates`** → set only by `loop-iteration`'s base
+  check: the implementer's worktree started from another commit than the Lead's HEAD, so
+  nothing was verified. Re-dispatch only once the worktree base can match HEAD (the user
+  set `worktree.baseRef` to `"head"`); until then report it as the human ask. Each
+  re-dispatch counts as an attempt.
 - **`revise`** → the claim as stated is not licensed; its `repair` is a *new* claim —
   adjudicate it (new record that `revises`) before acting, or HOLD.
 - **`reject`** → nothing to fix; HOLD/REJECT. In a plan node, `missing` becomes
@@ -100,6 +112,22 @@ denylist path still needs a human).
 - **Completion:** a blocker that is confirmed, deferred or revised keeps the task open
   until it is fixed, re-adjudicated, or the user explicitly accepts the risk. Diminishing
   returns ends the *re-running*, not the task — report the open blockers and ask.
+- **Round integrity:** `critic-panel` returns `completion`, computed in code: the claim "no
+  open blocker in: <focus>", its `verdict`, `missing`, and `notRechecked` (the prior records
+  of every lens the round did not review: failed, out of scope, or opt-in and off). `reject`
+  = a blocker is confirmed; `defer` = a lens failed, a finding went unassigned, a blocker is
+  deferred or revised, or an open prior blocker (latest for its claim, not refuted, no CLEAR)
+  sits in an unreviewed lens; otherwise `accept`. It sees only the priors passed in (`--brief`
+  = the newest 40). A critic round is **clean only when `completion.verdict` is `accept`**. A
+  round with `error` (every lens failed) or a failed in-scope lens is **incomplete**: it
+  never satisfies a completion or Done gate, never counts as diminishing returns, and shows
+  nothing fixed — never CLEAR, drop or resolve a record listed in `completion.notRechecked`.
+  Re-run it; infra re-runs count toward the round cap, and at the cap report the failed
+  lenses and ask. A `defer` caused only by open deferred or revised blockers follows the
+  blocker rule under **Completion**. Every workflow fails the same way: when every agent of
+  its first phase (reviewers, finders, category or evidence agents, implementers) failed, it
+  returns `error` and writes no records; a partial failure, and any dead checker, stays per
+  item (a named failed lens, category or dimension, or an `agent-failed` defer).
 
 ## The discipline — no durable state change without a record
 | boundary | record writer | consumer action |
@@ -112,8 +140,11 @@ denylist path still needs a human).
 
 Read-only rounds (`/critic-round`) still write their verdict records (memory, not code) —
 that is what verdict reuse reads — and record their decision not to act (`HOLD`, note
-"review-only round"). `gap-analysis` and `e2e-design` write no records: they propose,
-they do not adjudicate, and no durable state changes on their output.
+"review-only round"). `e2e-design` and `gap-analysis` return advisory typed verdicts but
+write no records: a separate checker types each proposal under the evidence gate
+(`e2e-design`: one judge over every proposed case; `gap-analysis`: one skeptic per non-empty
+dimension over its gaps), only `accept`/`qualify` proposals go on (cases returned for
+implementation, gaps into the synthesized order), and no durable state changes on their output.
 
 ## Record guarantees ↔ how this repo enforces them
 - **Immutability** — append-only store; ids are content hashes, so `pnpm trace lint` detects
@@ -122,6 +153,38 @@ they do not adjudicate, and no durable state changes on their output.
 - **No secrets, no bench answers** — the writer refuses drafts that look like they carry a
   key/token/private key, or a bench fixture id/defect text. If a secret ever lands anyway:
   rotate it — removing it means rewriting git history, a human decision.
+- **Memory write boundary (policy v3)** — external content (a web page, a search result, a PR
+  or issue comment, an outside MCP result, another agent's or a report's text) never licenses
+  a wiki fact. For a `wiki:` claim the writer refuses an `accept` or `qualify` whose only
+  evidence is `reading` (the evidence gate alone would let a causal or predictive claim
+  qualify on it), a `file_line`, `command`, `browser`, `measurement` or `diff` item whose ref
+  holds a URL that does not parse or whose host is not `localhost`, `127.0.0.1`, `[::1]`,
+  `0.0.0.0` or `*.localhost`, and a `file_line` and a `diff` ref (each comma-separated part)
+  that is not repo-relative (`pnpm trace reaudit` diffs repo paths only). `rule`, `human`,
+  `record` and `reading` are exempt from the URL check: a WCAG URL stays citable as a rule,
+  and external content is cited as `reading` (`external:<source>`) beside the local check
+  that licenses the fact (`/dream` step 3b). The boundary follows the commit, not the claim
+  id: only a `wiki:` record can be COMMITted to a topic page (a `--ref` under `topics/`,
+  however written), QUARANTINEd, or cited by a rec comment — the writer refuses the first two
+  for any other record (a story status's `COMMIT --ref US-001` is untouched), and `wiki-check`
+  (below) errs on a rec comment or a `quarantine.md` row naming one, a replayed line included;
+  the fix is to re-admit the fact through `/dream` as `wiki:<topic>:<slug>`. Partial: a page
+  saved into the repo and cited as `file_line` still passes, a `rule`, `human` or `record` item
+  is trusted by its kind (a blog cited as a rule, a PR comment as a human decision, or any id
+  cited as a record passes — a record ref is not checked to name an existing record), and only
+  a `scheme://` URL is recognized (a scheme-less `example.com/x` or an `http:/…` form is not).
+- **Wiki ↔ store agreement** — `pnpm trace wiki-check` (and a contracts test in `pnpm test`):
+  each `<!-- rec:TR-… -->` comment in a topic page names the latest record for its claim, a
+  licensing `wiki:` one, with a `COMMIT`/`COMMIT_QUALIFIED` whose `--ref` is that page, and a
+  malformed one is an error, never a legacy bullet; each latest licensing `wiki:` record
+  committed to a `topics/` page is still cited, since a fact leaves the wiki only through a
+  revising record (`/dream` lint 1e), never a silent delete (a ref outside `topics/`, such as
+  a bridged domain wiki, is not checked); `quarantine.md`'s rows are exactly the latest
+  `wiki:` records whose last decision is `QUARANTINE` (`HOLD` and `REAUDIT` decide nothing);
+  `index.md` stays within 150 lines (a topic page over 200 lines, or this page over 400, is a
+  warning; this page over 400 also fails the contracts test). Partial: a legacy bullet without
+  a rec comment is not checked, and whether a cited fact still holds is `pnpm trace reaudit`'s
+  queue (a record whose commit the repository no longer has is listed apart, as `unreachable`).
 - **Merges** — `.gitattributes` merges `records.jsonl` as a union (both branches' appends
   survive); `pnpm trace lint` (in `pnpm test`) is the post-merge check. Replay errors only
   on merge-invariant violations (schema, content-hash ids, unknown targets, verdict vs
@@ -131,9 +194,10 @@ they do not adjudicate, and no durable state changes on their output.
   records).
 - **Idempotent decisions, repeatable events** — re-recording an identical decision is a
   no-op (reported `noop`), never a batch failure; `REUSE` is an event and is stored each
-  time it happens. A `REAUDIT` is a decision: its note names the changed evidence, so
-  re-auditing an unchanged queue is a no-op rather than a line per stale record per pass.
-  Action notes/refs are screened for secrets and bench ground truth exactly like records.
+  time it happens. A `REAUDIT` is a decision: its note names the changed evidence (or the
+  unreachable commit and the paths to re-verify), so re-auditing an unchanged queue is a no-op
+  rather than a line per stale record per pass. Action notes/refs are screened for secrets
+  and bench ground truth exactly like records.
 - **Version legibility** — `schema_version` const + `policy_version` stamp; a reader refuses
   records from a newer policy (`pnpm trace lint`).
 - **Self-containment** — verdict, failed gates, missing, repair live in the record.
@@ -154,15 +218,19 @@ passes that evidence to the verifier; agreement alone never upgrades a finding.
 one all-lens reviewer as good as the critic panel at ~5x lower cost (record
 TR-34201765532f — qualified: one run on the 19-fixture bench, 5 of the 10 critics, measured as diff-level block/no-block with the bench's own single-pass prompt — not this round's production prompt). So a code-only round (`uiInScope: false`) runs the Review
 stage as ONE reviewer (`reviewMode: 'single-pass'`); rounds that drive the app keep one critic
-per lens until the bench measures them. The skeptic per finding (D2) is unchanged in both
-modes; D1 (separate contexts) then holds between the reviewer and the skeptics only, so one
-reviewer's cross-lens duplicates never count as independent corroboration.
+per lens until the bench measures them. Both modes keep the skeptic per finding (D2), up to the
+verifier cap; the rest are explicit defers (every blocker is verified; important findings past
+`args.maxVerifiers`, default 30, are recorded as `defer` with `not-verified:verifier-cap`, never
+dropped, and re-verified next round). In single-pass mode D1 (separate contexts) holds between
+the reviewer and the skeptics only, so one reviewer's cross-lens duplicates never count as
+independent corroboration.
 
 ## Stop conditions (paper §5.4) — used by `/loop` and `/multi-agent-dev`
 Stop *re-running* when every claim is (1) a qualified proposal (accept/qualify, acted on),
 (2) rejected, (3) deferred with named `missing`, or (4) **diminishing returns**: a re-run
-left the set of open blockers (by `claim_id`) and their verdicts unchanged — report them
-and ask instead of spinning. Stopping is not completing (see the consumer protocol).
+left the set of open blockers (by `claim_id`) and their verdicts unchanged (compared only
+between complete rounds) — report them and ask instead of spinning. Stopping is not
+completing (see the consumer protocol).
 
 ## Verdict reuse (critic-panel)
 A finding that re-raises a prior claim reuses the prior verdict without a new skeptic only
@@ -186,9 +254,35 @@ the live store. Pre-registered — results that count **against** our design:
   an instrument; cut fields (emitted by `pnpm trace metrics`; only decision actions count —
   REUSE/REAUDIT are bookkeeping).
 - **F0** (validity precondition) ground truth reached a bench agent — a marker in what it
-  *received* (prompt, tool results, injected context) — or an agent returned no verdict →
-  those runs are excluded, and the measurement record is `qualify`, not `accept`. F1 needs
-  the `panel` arm; F3 needs `repeat ≥ 2`.
+  *received* (prompt, tool results, injected context) — or an agent returned no verdict, or
+  a run the workflow started never came back (`missingRuns`) → those runs are excluded, and
+  the measurement record is `qualify`, not `accept`. F1 needs the `panel` arm; F3 needs
+  `repeat ≥ 2`.
+
+**L3 freshness (`pnpm trace l3-check`):** a bench record names the verifier it measured — a
+`file_line` item on `.claude/workflows/loop-iteration.js` whose result is `<loop-verifier>
+sha256=<hex>`, the hash of that block (marker lines included) as `bench-score --record` reads
+it from the working tree (a run without a verifier arm names none). `pnpm trace l3-check` is
+the measured-checker item of `.claude/loop-checklist.md`, computed: the latest
+`bench:trace-bench-lite` record, licensing or not, must be `accept`, from a verifier arm run at
+`repeat ≥ 2` over every manifest fixture in every repeat (its measurement item's
+`arms.verifier.measured` bad/good counts, taken over the fixtures measured in every repeat
+index present, never the union over repeats, equal the manifest's `fixtures` counts — a record
+without them, or from a run over part of the manifest, e.g. with `bench-args --only`, never
+passes, even when scored with a full-manifest run at fewer repeats; each `perRepeat` entry
+carries its own counts, to show where coverage fell short), with no F0, F3 or F4 in its
+`failed_gates`, and its hash must equal the current block's; exit 0 only when all hold, else
+exit 1 listing every unmet condition (a store that does not replay, or a block that cannot be
+read, is one too). Any edit inside the block needs a re-bench before L3, and a record scored
+before this check carries no hash, so it never passes. Partial: the hash is read when you
+score, so it cannot see an edit made between the run and the score, or a `trace-bench.js` copy
+(the one the Workflow runs) that drifted from the production block — `pnpm test`'s parity check
+fails then; score a run before editing either copy. The hash item is file evidence, so
+`pnpm trace reaudit` also lists the bench record when `loop-iteration.js` changes (path-level;
+`l3-check` is the block-level answer). The verifier's scratch-copy instruction (verify in its
+own scratch copy, never in the shared checkout; no exit status piped through `head` or `tail`)
+is an edit inside the block: every bench record scored before it measured the verifier without
+it, so L3 needs a re-bench after it.
 
 **Contamination rule (learned the hard way — the first bench run was contaminated):**
 bench agents run inside this repo and grep it, so fixture ground truth must never be
@@ -217,10 +311,16 @@ debate stage (critic panel + skeptic already is one).
 
 ## Gotchas
 - Workflow scripts cannot `import`; shared deterministic blocks (`<trace-evidence-gate>`,
-  `<loop-denylist>`, `<loop-verifier>`, `<critic-roster>`) are duplicated byte-for-byte
-  and parity-tested — edit the canonical copy, paste into every marked block, run
-  `pnpm test`. `scripts/trace/workflows.test.mjs` also runs the real workflow bodies with
-  stub agents, so a deleted gate call or a broken reuse key fails a test.
+  `<loop-denylist>`, `<loop-verifier>`, `<critic-roster>`, and `<agent-safety>` in exactly
+  the five read-only workflows) are duplicated byte-for-byte and parity-tested — edit the
+  canonical copy, paste into every marked block, run `pnpm test`.
+  `scripts/trace/workflows.test.mjs` also runs the real workflow bodies with stub agents, so
+  a deleted gate call or a broken reuse key fails a test. <!-- rec:TR-85dc794fd165 -->
+- The writer refuses any record or action whose text holds a bench leak marker, and a
+  patch-only token can be an ordinary word: a critic-panel draft whose prose happened to
+  contain one was refused (2026-10-31). The write is atomic, so nothing of that round lands
+  until the refused draft is left out; a workflow draft is never hand-edited to get past the
+  screen (`/critic-round` step 5). <!-- rec:TR-77dcaddf05c7 -->
 - The store lives under `.claude/`, and the TRACE gate code under `scripts/trace/`; the
   `loop-iteration` denylist blocks both for implementer diffs — records are written only by
   checkers/the Lead via `pnpm trace`.
@@ -282,11 +382,11 @@ debate stage (critic panel + skeptic already is one).
   excluded by F0, so the full-bench record is `qualify` and does not meet the L3 gate.
   <!-- rec:TR-00fe5f1e955b -->
 - Measured (confirmatory run after both instrument fixes; 29 fixtures incl. the 10 held-out,
-  3 repeats, nothing excluded): WrongAcceptRate 0, FalseHoldRate 0, invariance 1.00, only F2
-  → the latest bench record is `accept` and the L3 measured-checker item is met. Qualified:
-  two runs on the same fixtures; FalseHold 0 relies on the leak-guard fix made after the
-  previous run (WrongAccept 0 does not); ~30% of verdicts are `defer`, so an L3 loop would
-  still escalate often; it is one item of `loop-checklist.md`, not a license to run
-  unattended. <!-- rec:TR-3ce4efb91999 -->
+  3 repeats, nothing excluded): WrongAcceptRate 0, FalseHoldRate 0, invariance 1.00, only F2.
+  Qualified: two runs on the same fixtures; FalseHold 0 relies on the leak-guard fix made
+  after the previous run (WrongAccept 0 does not); ~30% of verdicts are `defer`. Its record
+  (TR-df7ab02dc866) predates L3 freshness — no `<loop-verifier>` hash, no per-repeat fixture
+  counts — and the verifier block changed after it, so `pnpm trace l3-check` reports the L3
+  measured-checker item NOT met until `/bench-checkers` is re-run. <!-- rec:TR-634fa314a7bf -->
 
 Related: [workflow](./workflow.md) · [quality-bar](./quality-bar.md) · [testing](./testing.md)

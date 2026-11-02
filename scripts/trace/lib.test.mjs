@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -17,6 +18,7 @@ import {
   contaminatedRuns,
   effectivePanelSize,
   insideRepo,
+  l3Check,
   loadWorkflowBlock,
   markUnscanned,
   opaqueFixtureId,
@@ -33,6 +35,7 @@ import {
   readPolicyVersion,
   reauditCandidates,
   replay,
+  ROOT,
   rotateStore,
   schemaKeywordViolations,
   scoreBench,
@@ -40,6 +43,8 @@ import {
   storeMetrics,
   treeFingerprint,
   validate,
+  VERIFIER_FILE,
+  verifierBlockHash,
   writeRecords,
 } from "./lib.mjs";
 
@@ -459,6 +464,191 @@ describe("checker-round hardening (policy v2)", () => {
   });
 });
 
+// Policy v3, the memory write boundary: external content is attribution, never licensing
+// evidence for a wiki fact. Only the deterministic part; evidence kinds stay the writer's word.
+describe("memory write boundary (policy v3)", () => {
+  const v3 = () => ({ ...ctx(), policyVersion: 3 });
+  const fact = (evidence, over = {}) =>
+    draft({ writer_id: "dream", claim_id: "wiki:testing:vitest-parallel", claim_text: "Vitest runs test files in parallel", evidence, provenance: { workflow: "dream" }, ...over });
+  const why = (res) => (res.validation === "pass" ? "" : res.validation.fail.join("\n"));
+  // A defer has no evidence floor, so only the boundary can fire on it.
+  const wikiDefer = (evidence) => ({ claim_id: "wiki:testing:x", policy_version: "3", final_status: "defer", missing: ["a local reproduction"], evidence });
+
+  it("the policy page declares v3 or later, so `pnpm trace write` stamps new records under the boundary", () => {
+    expect(POLICY).toBeGreaterThanOrEqual(3);
+  });
+
+  it("refuses a wiki record whose observation evidence is an external URL or a path outside the repo", () => {
+    const refused = [
+      [{ kind: "file_line", ref: "https://example.com/x" }, /URL/],
+      [{ kind: "browser", ref: "http://localhost:3000@evil.example/" }, /URL/], // userinfo: the host is evil.example
+      [{ kind: "file_line", ref: "/tmp/page.html:3" }, /repo-relative/],
+      [{ kind: "file_line", ref: "../x.md" }, /repo-relative/],
+    ];
+    for (const [i, [item, reason]] of refused.entries()) {
+      const [res] = writeRecords([fact([item], { claim_id: `wiki:testing:refused-${i}` })], v3());
+      expect(res.stored, item.ref).toBe(false);
+      expect(why(res), item.ref).toMatch(reason);
+    }
+    expect(existsSync(store)).toBe(false);
+  });
+
+  it("stores external content cited as reading, an external-only defer, localhost observations, a WCAG rule URL and non-wiki records", () => {
+    const external = { kind: "reading", ref: "external:https://example.com/blog/vitest-parallelism" };
+    const drafts = [
+      fact([external, { kind: "command", ref: "pnpm exec vitest --help | grep fileParallelism" }]),
+      fact([external], { claim_id: "wiki:testing:external-only", final_status: "defer", missing: ["a local reproduction"] }),
+      fact([{ kind: "browser", ref: "http://localhost:3000/settings renders the form" }], { claim_id: "wiki:testing:localhost" }),
+      fact([{ kind: "browser", ref: "http://0.0.0.0:3000" }], { claim_id: "wiki:testing:all-interfaces" }),
+      fact([{ kind: "browser", ref: "http://myapp.localhost:3000" }], { claim_id: "wiki:testing:dot-localhost" }),
+      fact([{ kind: "rule", ref: "https://www.w3.org/TR/WCAG22/#contrast-minimum" }], { claim_id: "wiki:quality-bar:contrast", claim_type: "normative" }),
+      draft({ evidence: [{ kind: "file_line", ref: "https://example.com/x" }] }), // a critic record: out of scope
+    ];
+    const res = writeRecords(drafts, v3());
+    expect(res.map(why)).toEqual(drafts.map(() => ""));
+    expect(res.every((r) => r.stored)).toBe(true);
+  });
+
+  it("is version-gated: a v2 record with a URL ref still replays clean", () => {
+    const [res] = writeRecords([fact([{ kind: "file_line", ref: "https://example.com/x" }])], { ...ctx(), policyVersion: 2 });
+    expect(res.stored).toBe(true);
+    expect(replay(loadEntries(store), schema, POLICY).errors).toEqual([]);
+    const rec = loadEntries(store)[0].value;
+    expect(semanticViolations(rec)).toEqual([]);
+    expect(semanticViolations({ ...rec, policy_version: "3" }).join()).toMatch(/URL/);
+  });
+
+  it("reading alone never licenses a wiki fact: a causal or predictive qualify on external content is refused, though the gate falls back to qualify for those types", () => {
+    const external = { kind: "reading", ref: "external:https://example.com/blog/vitest-parallelism" };
+    const qualified = (claim_type, evidence) =>
+      fact(evidence, { claim_id: `wiki:testing:${claim_type}-${evidence.length}`, claim_type, final_status: "qualify", qualifier: "reported by one blog post" });
+    for (const claimType of ["causal", "predictive"]) {
+      const [res] = writeRecords([qualified(claimType, [external])], v3());
+      expect(res.stored, claimType).toBe(false);
+      expect(why(res), claimType).toMatch(/needs evidence other than reading/);
+    }
+    expect(existsSync(store)).toBe(false);
+    // The same attribution beside a local check run this session is stored.
+    const [res] = writeRecords([qualified("causal", [external, { kind: "command", ref: "pnpm exec vitest run scripts/trace/lib.test.mjs" }])], v3());
+    expect(why(res)).toBe("");
+    expect(res.stored).toBe(true);
+  });
+
+  it("the reading rule binds licensing verdicts on wiki claims only, and older records replay unchanged", () => {
+    const external = { kind: "reading", ref: "external:https://example.com/blog/vitest-parallelism" };
+    const rec = { claim_id: "wiki:testing:x", policy_version: "3", claim_type: "causal", final_status: "qualify", qualifier: "weaker", evidence: [external], missing: [] };
+    expect(semanticViolations(rec).join()).toMatch(/needs evidence other than reading/);
+    expect(semanticViolations({ ...rec, final_status: "accept" }).join()).toMatch(/needs evidence other than reading/);
+    // A defer on reading alone is the quarantine path; revise and reject license nothing.
+    for (const withheld of [{ final_status: "defer", missing: ["a local reproduction"] }, { final_status: "revise", repair: "restate it" }, { final_status: "reject" }]) {
+      expect(semanticViolations({ ...rec, ...withheld }), withheld.final_status).toEqual([]);
+    }
+    // Out of scope: a critic record keeps the gate's "code reading only" qualify fallback.
+    expect(semanticViolations({ ...rec, claim_id: "critic:qa-e2e:x" })).toEqual([]);
+    const [old] = writeRecords([fact([external], { claim_id: "wiki:testing:v2-causal", claim_type: "causal", final_status: "qualify", qualifier: "weaker" })], { ...ctx(), policyVersion: 2 });
+    expect(old.stored).toBe(true);
+    expect(replay(loadEntries(store), schema, POLICY).errors).toEqual([]);
+  });
+
+  it("checks every evidence kind except rule, human, record and reading, whatever the verdict", () => {
+    const kinds = schema.$defs.evidenceItem.properties.kind.enum;
+    const refused = kinds.filter((kind) => semanticViolations(wikiDefer([{ kind, ref: "https://example.com/x" }])).length > 0);
+    expect(refused).toEqual(["file_line", "command", "browser", "measurement", "diff"]);
+  });
+
+  it("reads each URL as the URL parser does: to the next space, every URL in the ref, unparsable fails closed", () => {
+    const urlViolations = (ref, kind = "browser") => semanticViolations(wikiDefer([{ kind, ref }]));
+    for (const ref of [
+      "http://localhost'@evil.example/", // a quote or bracket does not end the URL: the parser reads it as userinfo
+      "http://localhost(@evil.example/",
+      "http://localhost:3000/login?next=https://evil.example/", // a URL inside a local one
+      "http://localhost:99999/", // unparsable
+      "file:///tmp/page.html", // a saved page, not a repo file
+      "http://localhost.evil.example/", // a host under evil.example, not under .localhost
+      "http://evillocalhost/", // *.localhost means a whole "localhost" label after a dot
+      "HTTPS://EVIL.EXAMPLE/x", // the scheme is case-insensitive
+      "(http://[::1]@evil.example)", // dropping trailing punctuation never drops the "@": the host stays evil.example
+    ]) {
+      expect(urlViolations(ref).join(), ref).toMatch(/URL/);
+    }
+    // Local: prose punctuation after the URL is not part of it (typographic closing quotes
+    // too), but a bare IPv6 host keeps its "]".
+    for (const ref of [
+      "http://localhost:3000, then /about",
+      "(http://localhost:3000)",
+      "http://[::1]:3000/",
+      "http://[::1]",
+      "(http://[::1])", // the ")" goes, the "]" the IPv6 host needs stays
+      "see http://127.0.0.1:3000/api/health.",
+      "open http://localhost.", // it parses as host "localhost." first; the shorter reading still counts
+      "axe on “http://localhost:3000”: 0 violations",
+      "‘http://localhost:3000’",
+      "«http://localhost:3000»",
+    ]) {
+      expect(urlViolations(ref), ref).toEqual([]);
+    }
+    expect(urlViolations("curl -s http://localhost:3000/api/health", "command")).toEqual([]);
+    expect(urlViolations("curl -s https://registry.npmjs.org/next", "command").join()).toMatch(/URL/); // re-fetching the source is not a reproduction
+  });
+
+  it("a wiki file_line must be a repo path: no leading / or ~, no drive letter, no .. segment", () => {
+    const pathViolations = (ref) => semanticViolations(wikiDefer([{ kind: "file_line", ref }]));
+    // Leading whitespace hides nothing: reaudit reads the path trimmed (pathFromRef), so the guard does too.
+    for (const ref of ["/tmp/page.html:3", "../x.md", "docs/../../x.md", "~/notes.md", "C:\\notes.md", " /tmp/page.html:3", "\t../x.md:3"]) {
+      expect(pathViolations(ref).join(), JSON.stringify(ref)).toMatch(/repo-relative/);
+    }
+    for (const ref of ["scripts/trace/lib.mjs:199-224", "./README.md", ".claude/memory/topics/trace.md", "docs/..notes.md"]) {
+      expect(pathViolations(ref), ref).toEqual([]);
+    }
+    // Only a file_line names repo evidence: a command may run a path anywhere.
+    expect(semanticViolations(wikiDefer([{ kind: "command", ref: "/usr/bin/node /tmp/sigdemo.mjs" }]))).toEqual([]);
+  });
+
+  it("a wiki diff ref names repo paths too: each comma-separated part, trimmed, as reaudit reads it", () => {
+    for (const [i, ref] of ["/tmp/fix.patch", "src/a.ts, ../x.patch", " /tmp/fix.patch"].entries()) {
+      const [res] = writeRecords([fact([{ kind: "diff", ref }], { claim_id: `wiki:testing:diff-refused-${i}` })], v3());
+      expect(res.stored, JSON.stringify(ref)).toBe(false);
+      expect(why(res), JSON.stringify(ref)).toMatch(/repo-relative/);
+    }
+    expect(existsSync(store)).toBe(false);
+    const [res] = writeRecords([fact([{ kind: "diff", ref: "src/a.ts, src/b.ts" }], { claim_id: "wiki:testing:diff-stored" })], v3());
+    expect(why(res)).toBe("");
+    expect(res.stored).toBe(true);
+  });
+
+  // The boundary follows the commit, not the claim id: the checks above screen only a wiki: record, so no other record
+  // is ever COMMITted to a topic page or QUARANTINEd. Append time only — replay is unchanged (wiki.test.mjs).
+  it("follows the commit: a COMMIT or COMMIT_QUALIFIED whose ref is under topics/ (read as wiki-check reads refs) and any QUARANTINE are refused on a non-wiki: record; any other ref, any other action and every wiki: record are stored", () => {
+    const [critic, criticQ, criticD, wiki, wikiQ, wikiD] = writeRecords(
+      [
+        draft(),
+        draft({ claim_id: "critic:ux:q", final_status: "qualify", qualifier: "on one run" }),
+        draft({ claim_id: "critic:ux:d", final_status: "defer", missing: ["a browser repro"], evidence: [] }),
+        fact([{ kind: "file_line", ref: "vitest.config.ts:8" }]),
+        fact([{ kind: "file_line", ref: "vitest.config.ts:8" }], { claim_id: "wiki:testing:q", final_status: "qualify", qualifier: "on one run" }),
+        fact([], { claim_id: "wiki:testing:d", final_status: "defer", missing: ["a local reproduction"] }),
+      ],
+      v3(),
+    ).map((r) => r.record_id);
+    const one = (record_id, action, ref) => appendActions([{ record_id, consumer: "dream", action, ...(ref ? { ref } : {}) }], ctx())[0];
+    const pageRefs = ["topics/x.md", "./topics/x.md", ".claude/memory/topics/x.md", "./.claude/memory/topics/x.md", "topics/sub/x.md"];
+    for (const ref of pageRefs) {
+      const res = one(critic, "COMMIT", ref);
+      expect(res.stored, ref).toBe(false);
+      expect(why(res), ref).toMatch(/is not a wiki: record — .*re-admit the fact through \/dream as wiki:<topic>:<slug>/);
+      expect(one(criticQ, "COMMIT_QUALIFIED", ref).stored, ref).toBe(false);
+    }
+    for (const ref of ["quarantine.md", undefined]) expect(one(criticD, "QUARANTINE", ref).stored, String(ref)).toBe(false);
+    expect(existsSync(store) && readFileSync(store, "utf8").includes('"kind":"action"')).toBe(false);
+    for (const ref of ["US-001", "docs/wiki/billing.md", undefined]) expect(one(critic, "COMMIT", ref).stored, String(ref)).toBe(true);
+    expect(one(criticD, "HOLD").stored).toBe(true);
+    for (const ref of pageRefs) expect(one(wiki, "COMMIT", ref).stored, ref).toBe(true);
+    expect(one(wikiQ, "COMMIT_QUALIFIED", "topics/x.md").stored).toBe(true);
+    expect(one(wikiD, "QUARANTINE", "quarantine.md").stored).toBe(true);
+    expect(replay(loadEntries(store), schema, POLICY).errors).toEqual([]);
+  });
+});
+
 describe("secrets never enter the store", () => {
   it("the writer refuses a draft that looks like it carries a secret", () => {
     const [res] = writeRecords([draft({ claim_text: "key is sk-ant-abcdefghijklmnopqrstuvwx" })], ctx());
@@ -471,6 +661,30 @@ describe("bench scoring fails closed on unattributable leaks", () => {
   it("raises F0 when a leak cannot be tied to a run", () => {
     const s = scoreBench({ fixtures: [{ id: "B1", kind: "bad" }, { id: "G1", kind: "good" }] }, { runs: [], unattributedLeaks: 1 });
     expect(s.flags.some((f) => f.startsWith("F0 contamination") && f.includes("could not be tied"))).toBe(true);
+  });
+});
+
+describe("bench run accounting (a run that never came back still counts)", () => {
+  const manifest = { fixtures: [{ id: "B1", kind: "bad" }, { id: "G1", kind: "good" }] };
+  const runs = [
+    { arm: "verifier", repeat: 0, fixtureId: "B1", verdict: "reject", preGateVerdict: "reject" },
+    { arm: "verifier", repeat: 0, fixtureId: "G1", verdict: "accept", preGateVerdict: "accept" },
+  ];
+
+  it("runs the workflow started but never returned are missingRuns: F0 validity, and the record is a qualify", () => {
+    const s = scoreBench(manifest, { runs, expectedRuns: 3 });
+    expect(s.missingRuns).toBe(1);
+    expect(s.flags.some((f) => f.startsWith("F0 validity: 1 run(s) missing"))).toBe(true);
+    const rec = benchRecordDraft(s, { resultsRef: "r.json" });
+    expect(rec.final_status).toBe("qualify");
+    expect(rec.qualifier).toMatch(/1 run\(s\) missing/);
+  });
+
+  it("when every started run came back nothing is missing, and a clean bench still records an accept", () => {
+    const s = scoreBench(manifest, { runs, expectedRuns: 2 });
+    expect(s.missingRuns).toBe(0);
+    expect(s.flags.some((f) => f.startsWith("F0"))).toBe(false);
+    expect(benchRecordDraft(s, { resultsRef: "r.json" }).final_status).toBe("accept");
   });
 });
 
@@ -625,5 +839,269 @@ describe("bench instrument: leak guard and F0 scan", () => {
     expect(contaminatedRuns([{ label, text: injected }], synth)).toHaveLength(1);
     // A line that does not parse counts as received (fail closed).
     expect(contaminatedRuns([{ label, text: `{"type":"assistant", ${defect}` }], synth)).toHaveLength(1);
+  });
+});
+
+// L3 freshness: a bench record names the <loop-verifier> block it measured by its sha256, so a
+// verifier edited after the bench no longer passes as measured. `pnpm trace l3-check` is
+// loop-checklist.md's measured-checker item, computed from the latest bench record.
+describe("L3 freshness: bench records name the verifier they measured", () => {
+  const block = "// <loop-verifier>\nfunction verifierPrompt() { return 'v1' }\n// </loop-verifier>\n";
+  const source = `const before = 1\n${block}const after = 2\n`;
+  const sha = (text) => createHash("sha256").update(text).digest("hex");
+
+  it("verifierBlockHash is the sha256 of the <loop-verifier> block, marker lines included: only an edit inside the block changes it", () => {
+    expect(verifierBlockHash(source)).toBe(sha(block));
+    expect(verifierBlockHash(source.replace("const after = 2", "const after = 3"))).toBe(sha(block));
+    expect(verifierBlockHash(source.replace("'v1'", "'v2'"))).not.toBe(sha(block));
+    expect(verifierBlockHash("const noBlock = 1\n")).toBeNull();
+    // The production file carries the block: renamed markers must not quietly strip every bench record's hash.
+    expect(VERIFIER_FILE).toBe(".claude/workflows/loop-iteration.js");
+    expect(verifierBlockHash(readFileSync(join(ROOT, VERIFIER_FILE), "utf8"))).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("benchRecordDraft carries the hash it is given as a file_line item on loop-iteration.js; the writer stores it and l3-check accepts it", () => {
+    const manifest = { fixtures: [{ id: "B1", kind: "bad" }, { id: "G1", kind: "good" }] };
+    const runs = [0, 1].flatMap((repeat) => [
+      { arm: "verifier", repeat, fixtureId: "B1", verdict: "reject", preGateVerdict: "reject" },
+      { arm: "verifier", repeat, fixtureId: "G1", verdict: "accept", preGateVerdict: "accept" },
+    ]);
+    const s = scoreBench(manifest, { runs, expectedRuns: 4 });
+    const hash = sha(block);
+    const rec = benchRecordDraft(s, { resultsRef: "r.json", runIds: ["0a1b2c3d"], verifierHash: hash });
+    expect(rec.evidence).toContainEqual({ kind: "file_line", ref: ".claude/workflows/loop-iteration.js", result: `<loop-verifier> sha256=${hash}` });
+    expect(rec.evidence[0].kind).toBe("measurement");
+    expect(writeRecords([rec], ctx())[0].stored).toBe(true);
+    expect(l3Check(replay(loadEntries(store), schema, POLICY), hash)).toMatchObject({ ok: true, unmet: [], verdict: "accept", repeats: 2, recordHash: hash });
+    // Without a hash (the block could not be read) the draft names no verifier, so l3-check never passes it.
+    expect(benchRecordDraft(s, { resultsRef: "r.json" }).evidence.map((e) => e.kind)).toEqual(["measurement"]);
+  });
+});
+
+describe("l3Check: the L3 measured-checker item, computed from the LATEST bench record", () => {
+  const HASH = "b".repeat(64);
+  // The verifier arm measured the whole (2 bad / 2 good) manifest, as a passing record must show.
+  const FULL = { bad: 2, good: 2 };
+  const bench = ({ status = "accept", repeats = 2, gates = ["F2 (informational)"], hash = HASH, ...over } = {}) => ({
+    writer_id: "trace-bench/score",
+    claim_id: "bench:trace-bench-lite",
+    claim_text: `TRACE-Bench-lite (2 bad / 2 good fixtures): ${status} at ${repeats} repeat(s), flags ${gates.join(", ") || "none"}`,
+    claim_type: "measured",
+    evidence: [
+      { kind: "measurement", ref: "pnpm trace bench-score r.json [runs 0a1b2c3d]", result: JSON.stringify({ fixtures: FULL, arms: { verifier: { repeats, measured: FULL } } }) },
+      ...(hash ? [{ kind: "file_line", ref: VERIFIER_FILE, result: `<loop-verifier> sha256=${hash}` }] : []),
+    ],
+    failed_gates: gates,
+    missing: [],
+    final_status: status,
+    ...(status === "qualify" ? { qualifier: "measured on the clean runs only — 1 contaminated run(s) were excluded" } : {}),
+    reason: "deterministic scoring of the raw bench runs",
+    provenance: { workflow: "trace-bench" },
+    ...over,
+  });
+  const checked = (draft, current = HASH) => {
+    expect(writeRecords([draft], ctx())[0].stored).toBe(true);
+    return l3Check(replay(loadEntries(store), schema, POLICY), current);
+  };
+
+  it("is met by an accept from repeat ≥ 2 that measured the current block (F1 and F2 do not hold it)", () => {
+    const res = checked(bench({ gates: ["F2 (informational)", "F1 decomposition"] }));
+    expect(res).toMatchObject({ ok: true, unmet: [], verdict: "accept", repeats: 2, recordHash: HASH, currentHash: HASH });
+    expect(res.record_id).toMatch(/^TR-[0-9a-f]{12}$/);
+  });
+
+  it("is not met once the verifier changed after the bench (hash mismatch)", () => {
+    const res = checked(bench(), "c".repeat(64));
+    expect(res.ok).toBe(false);
+    expect(res.unmet).toHaveLength(1);
+    expect(res.unmet[0]).toMatch(/another <loop-verifier> block/);
+  });
+
+  it.each([
+    ["a qualify", { status: "qualify" }, /qualify, not accept/],
+    ["a single repeat", { repeats: 1 }, /1 repeat\(s\) — needs repeat ≥ 2/],
+    ["an F3", { gates: ["F2 (informational)", "F3 instability"] }, /F3 instability/],
+    ["an F0", { gates: ["F0 coverage"] }, /F0 coverage/],
+    ["an F4", { gates: ["F4 wrong-accept"] }, /F4 wrong-accept/],
+    ["a record with no hash (scored before L3 freshness)", { hash: null }, /no <loop-verifier> hash/],
+    ["a measurement whose repeat count does not parse", { evidence: [{ kind: "measurement", ref: "pnpm trace bench-score r.json", result: '{"arms":{"verif' }, { kind: "file_line", ref: VERIFIER_FILE, result: `<loop-verifier> sha256=${HASH}` }] }, /repeat count/],
+  ])("is not met by %s, and names exactly that condition", (_what, over, re) => {
+    const res = checked(bench(over));
+    expect(res.ok).toBe(false);
+    expect(res.unmet).toHaveLength(1);
+    expect(res.unmet[0]).toMatch(re);
+  });
+
+  it("reads the latest bench record, licensing or not: an older accept never stands in for a newer qualify", () => {
+    const [first] = writeRecords([bench()], ctx());
+    const [second] = writeRecords([bench({ status: "qualify", revises: first.record_id })], { ...ctx(), now: "2026-10-08T12:00:00.000Z" });
+    expect(second.stored).toBe(true);
+    const res = l3Check(replay(loadEntries(store), schema, POLICY), HASH);
+    expect(res.record_id).toBe(second.record_id);
+    expect(res.unmet).toEqual([expect.stringMatching(/qualify, not accept/)]);
+  });
+
+  it("lists every unmet condition at once, and fails closed without a record, a readable current block or a store that replays", () => {
+    const all = checked(bench({ status: "qualify", repeats: 1, gates: ["F3 instability"], hash: "d".repeat(64) }));
+    expect(all.ok).toBe(false);
+    expect(all.unmet).toHaveLength(4);
+    const unreadable = l3Check(replay(loadEntries(store), schema, POLICY), null);
+    expect(unreadable.ok).toBe(false);
+    expect(unreadable.unmet.some((u) => /current <loop-verifier> block .* cannot be read/.test(u))).toBe(true);
+    expect(l3Check(replay([], schema, POLICY), HASH)).toMatchObject({ ok: false, record_id: null, unmet: [expect.stringMatching(/no bench:trace-bench-lite record/)] });
+    const broken = l3Check(replay(parseLines("{not json\n", "records.jsonl"), schema, POLICY), HASH);
+    expect(broken.ok).toBe(false);
+    expect(broken.unmet.some((u) => /does not replay/.test(u))).toBe(true);
+  });
+});
+
+// L3 needs a full verifier bench: a run over part of the manifest (bench-args --only) measured less
+// than the manifest counts say, so each scored arm carries the fixtures it measured, the record
+// states both, and l3Check needs the verifier arm over every fixture. A run without a verifier arm
+// names no verifier. Synthetic manifests and runs only — never real fixture ids or patches.
+describe("L3 needs a full verifier bench: measured fixture counts", () => {
+  const HASH = "e".repeat(64);
+  const manifest = { fixtures: [{ id: "B1", kind: "bad" }, { id: "B2", kind: "bad" }, { id: "G1", kind: "good" }, { id: "G2", kind: "good" }] };
+  // Verifier runs on `ids` at `repeats` (default 0 and 1): bad diffs held, good ones licensed — no F0, F3 or F4.
+  const verifierRuns = (ids, repeats = [0, 1]) =>
+    repeats.flatMap((repeat) =>
+      ids.map((id) => {
+        const verdict = manifest.fixtures.find((f) => f.id === id).kind === "bad" ? "reject" : "accept";
+        return { arm: "verifier", repeat, fixtureId: id, verdict, preGateVerdict: verdict };
+      }),
+    );
+  const scored = (ids) => scoreBench(manifest, { runs: verifierRuns(ids), expectedRuns: ids.length * 2 });
+  const l3 = (draft) => {
+    expect(writeRecords([draft], ctx())[0].stored).toBe(true);
+    return l3Check(replay(loadEntries(store), schema, POLICY), HASH);
+  };
+
+  it("scoreBench: each scored arm carries the manifest fixtures it measured — distinct ids among its scored runs", () => {
+    const runs = [
+      ...verifierRuns(["G1", "G2"]),
+      { arm: "verifier", repeat: 0, fixtureId: "B1", verdict: "defer", noVerdict: true }, // excluded: it measured nothing
+      { arm: "verifier", repeat: 0, fixtureId: "X9", verdict: "reject" }, // not a manifest fixture
+      { arm: "single-pass", fixtureId: "B1", block: true },
+      { arm: "single-pass", fixtureId: "G1", block: false },
+      { arm: "panel", critic: "a", fixtureId: "B1", block: true },
+      { arm: "panel", critic: "a", fixtureId: "B2", block: false },
+      { arm: "panel", critic: "b", fixtureId: "B1", block: true },
+    ];
+    const s = scoreBench(manifest, { runs });
+    expect(s.fixtures).toEqual({ bad: 2, good: 2 });
+    expect(s.arms.verifier.measured).toEqual({ bad: 0, good: 2 });
+    expect(s.arms.singlePass.measured).toEqual({ bad: 1, good: 1 });
+    expect(s.arms.panel.measured).toEqual({ bad: 2, good: 0 });
+  });
+
+  it.each([
+    ["only the good fixtures (bench-args --only)", ["G1", "G2"], /measured 0\/2 bad and 2\/2 good manifest fixtures/],
+    ["all but one bad fixture", ["B1", "G1", "G2"], /measured 1\/2 bad and 2\/2 good manifest fixtures/],
+    ["all but one good fixture", ["B1", "B2", "G1"], /measured 2\/2 bad and 1\/2 good manifest fixtures/],
+  ])("l3Check is unmet when the verifier arm benched %s at repeat 2 with no F0, F3 or F4 — exactly the full-manifest condition", (_what, ids, re) => {
+    const s = scored(ids);
+    expect(s.arms.verifier.repeats).toBe(2);
+    expect(s.flags.filter((f) => /^F[034]/.test(f))).toEqual([]);
+    const res = l3(benchRecordDraft(s, { resultsRef: "r.json", runIds: ["0a1b2c3d"], verifierHash: HASH }));
+    expect(res.ok).toBe(false);
+    expect(res.unmet).toHaveLength(1);
+    expect(res.unmet[0]).toMatch(re);
+    expect(res.unmet[0]).toMatch(/re-bench the full manifest/);
+  });
+
+  it("the same bench with every manifest fixture measured meets l3Check", () => {
+    const s = scored(["B1", "B2", "G1", "G2"]);
+    expect(s.arms.verifier.measured).toEqual({ bad: 2, good: 2 });
+    const res = l3(benchRecordDraft(s, { resultsRef: "r.json", runIds: ["0a1b2c3d"], verifierHash: HASH }));
+    expect(res).toMatchObject({ ok: true, unmet: [], verdict: "accept", repeats: 2, recordHash: HASH });
+  });
+
+  it.each([
+    ["a record scored before the counts (no fixtures, no measured)", { arms: { verifier: { repeats: 2 } } }],
+    ["manifest counts without the verifier arm's measured counts", { fixtures: { bad: 2, good: 2 }, arms: { verifier: { repeats: 2 } } }],
+    ["measured counts without the manifest's", { arms: { verifier: { repeats: 2, measured: { bad: 2, good: 2 } } } }],
+    ["counts that are not integers", { fixtures: { bad: "2", good: 2 }, arms: { verifier: { repeats: 2, measured: { bad: "2", good: 2 } } } }],
+    ["a manifest with no bad fixture (a verifier that never saw a bad diff)", { fixtures: { bad: 0, good: 2 }, arms: { verifier: { repeats: 2, measured: { bad: 0, good: 2 } } } }],
+  ])("l3Check fails closed on %s, saying to re-bench the full manifest", (_what, metrics) => {
+    const draft = benchRecordDraft(scored(["B1", "B2", "G1", "G2"]), { resultsRef: "r.json", runIds: ["0a1b2c3d"], verifierHash: HASH });
+    draft.evidence = draft.evidence.map((e) => (e.kind === "measurement" ? { ...e, result: JSON.stringify(metrics) } : e));
+    const res = l3(draft);
+    expect(res.ok).toBe(false);
+    expect(res.unmet).toHaveLength(1);
+    expect(res.unmet[0]).toMatch(/re-bench the full manifest/);
+  });
+
+  it("benchRecordDraft names a <loop-verifier> block only when the score has a verifier arm, and states each arm's measured counts next to the manifest's", () => {
+    const named = (rec) => rec.evidence.some((e) => e.kind === "file_line" && e.ref === VERIFIER_FILE);
+    // Single-pass only: no verifier was measured, so the hash it is handed names none.
+    const single = scoreBench(manifest, { runs: manifest.fixtures.map((f) => ({ arm: "single-pass", fixtureId: f.id, block: f.kind === "bad" })) });
+    expect(single.arms.verifier).toBeUndefined();
+    const noVerifier = benchRecordDraft(single, { resultsRef: "r.json", verifierHash: HASH });
+    expect(named(noVerifier)).toBe(false);
+    expect(noVerifier.evidence.map((e) => e.kind)).toEqual(["measurement"]);
+    expect(noVerifier.claim_text).toMatch(/manifest: 2 bad \/ 2 good fixtures/);
+    expect(noVerifier.claim_text).toMatch(/verifier measured 0\/2 bad and 0\/2 good fixtures/);
+    expect(noVerifier.claim_text).toMatch(/single-pass measured 2\/2 bad and 2\/2 good fixtures/);
+    // With a verifier arm (over part of the manifest): the hash is named, and the counts show the gap.
+    const partial = benchRecordDraft(scored(["G1", "G2"]), { resultsRef: "r.json", verifierHash: HASH });
+    expect(partial.evidence).toContainEqual({ kind: "file_line", ref: VERIFIER_FILE, result: `<loop-verifier> sha256=${HASH}` });
+    expect(partial.claim_text).toMatch(/verifier measured 0\/2 bad and 2\/2 good fixtures/);
+    // The measurement item carries the manifest counts beside the arms (what l3Check reads).
+    const metrics = JSON.parse(partial.evidence.find((e) => e.kind === "measurement").result);
+    expect(metrics.fixtures).toEqual({ bad: 2, good: 2 });
+    expect(metrics.arms.verifier.measured).toEqual({ bad: 0, good: 2 });
+  });
+
+  // L3 counts only the fixtures the verifier measured in EVERY repeat: bench-score concatenates
+  // results files, so a part-manifest run (bench-args --only) at repeat 2 scored together with a
+  // full-manifest run at repeat 1 has two repeat indices and touches every fixture, yet each bad
+  // fixture was measured once — F3 (procedural invariance) could never fire for it.
+  describe("only the fixtures measured in every repeat count", () => {
+    // The good fixtures at repeats 0 and 1, plus the whole manifest at repeat 0 (two results files).
+    const mixedRuns = () => [...verifierRuns(["G1", "G2"]), ...verifierRuns(["B1", "B2", "G1", "G2"], [0])];
+    const counts = (s) => s.arms.verifier.perRepeat.map((p) => [p.repeat, p.measured]);
+
+    it("scoreBench: the verifier arm's measured counts are the fixtures measured in every repeat index present, and each perRepeat entry carries its own", () => {
+      const mixed = scoreBench(manifest, { runs: mixedRuns() });
+      expect(mixed.arms.verifier.repeats).toBe(2);
+      expect(mixed.flags.filter((f) => /^F[034]/.test(f))).toEqual([]);
+      expect(mixed.arms.verifier.measured).toEqual({ bad: 0, good: 2 });
+      expect(counts(mixed)).toEqual([[0, { bad: 2, good: 2 }], [1, { bad: 0, good: 2 }]]);
+      // Every fixture at repeats 0 and 1: the counts equal the manifest's, in each repeat too.
+      const full = scored(["B1", "B2", "G1", "G2"]);
+      expect(full.arms.verifier.measured).toEqual({ bad: 2, good: 2 });
+      expect(counts(full)).toEqual([[0, { bad: 2, good: 2 }], [1, { bad: 2, good: 2 }]]);
+    });
+
+    it("l3Check is unmet on that mixed bench (repeat 2, accept, no F0, F3 or F4) with the full-manifest message alone; the record shows where coverage fell short", () => {
+      const draft = benchRecordDraft(scoreBench(manifest, { runs: mixedRuns() }), { resultsRef: "part.json full.json", runIds: ["0a1b2c3d", "4e5f6a7b"], verifierHash: HASH });
+      expect(draft.final_status).toBe("accept");
+      expect(draft.claim_text).toMatch(/verifier measured 0\/2 bad and 2\/2 good fixtures in every repeat/);
+      const metrics = JSON.parse(draft.evidence.find((e) => e.kind === "measurement").result);
+      expect(metrics.arms.verifier.perRepeat.map((p) => p.measured)).toEqual([{ bad: 2, good: 2 }, { bad: 0, good: 2 }]);
+      const res = l3(draft);
+      expect(res.ok).toBe(false);
+      expect(res.unmet).toHaveLength(1);
+      expect(res.unmet[0]).toMatch(/measured 0\/2 bad and 2\/2 good manifest fixtures in every repeat/);
+      expect(res.unmet[0]).toMatch(/L3 needs every fixture in every repeat/);
+      expect(res.unmet[0]).toMatch(/re-bench the full manifest/);
+    });
+
+    it("the same manifest with every fixture at repeats 0 and 1 meets l3Check, and its claim says the counts hold in every repeat", () => {
+      const draft = benchRecordDraft(scored(["B1", "B2", "G1", "G2"]), { resultsRef: "r.json", runIds: ["0a1b2c3d"], verifierHash: HASH });
+      expect(draft.claim_text).toMatch(/verifier measured 2\/2 bad and 2\/2 good fixtures in every repeat/);
+      expect(l3(draft)).toMatchObject({ ok: true, unmet: [], verdict: "accept", repeats: 2, recordHash: HASH });
+      // A run without a verifier arm had no repeats: its claim never says "in every repeat".
+      const single = scoreBench(manifest, { runs: manifest.fixtures.map((f) => ({ arm: "single-pass", fixtureId: f.id, block: f.kind === "bad" })) });
+      expect(benchRecordDraft(single, { resultsRef: "r.json" }).claim_text).not.toMatch(/in every repeat/);
+    });
+
+    it("l3Check's fail-closed message (a record without the counts) also asks for every fixture in every repeat", () => {
+      const draft = benchRecordDraft(scored(["B1", "B2", "G1", "G2"]), { resultsRef: "r.json", runIds: ["0a1b2c3d"], verifierHash: HASH });
+      draft.evidence = draft.evidence.map((e) => (e.kind === "measurement" ? { ...e, result: JSON.stringify({ arms: { verifier: { repeats: 2 } } }) } : e));
+      const res = l3(draft);
+      expect(res.unmet).toHaveLength(1);
+      expect(res.unmet[0]).toMatch(/every fixture in every repeat: re-bench the full manifest/);
+    });
   });
 });

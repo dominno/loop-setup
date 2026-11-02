@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(pnpm dev:*)",
+      "Bash(pnpm typecheck:*)",
+      "Bash(pnpm lint:*)",
+      "Bash(pnpm test:*)",
+      "Bash(pnpm test:e2e:*)",
+      "Bash(pnpm build:*)",
+      "Bash(pnpm verify:*)",
+      "Bash(pnpm check:bundle:*)",
+      "Bash(pnpm install)",
+      "Bash(pnpm install --frozen-lockfile:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(pnpm -s trace query:*)",
+      "Bash(pnpm -s trace tree-id)",
+      "Bash(pnpm trace show:*)",
+      "Bash(pnpm trace lint)",
+      "Bash(pnpm trace metrics)",
+      "Bash(pnpm -s trace plan-ready:*)",
+      "Bash(pnpm -s trace plan-lint:*)",
+      "Bash(pnpm -s trace plan-items:*)",
+      "Bash(pnpm -s trace story-lint)",
+      "Bash(pnpm trace story-lint)",
+      "Bash(pnpm trace wiki-check)"
+    ],
+    "deny": [
+      "Bash(git push *--force*)",
+      "Bash(git push -f*)",
+      "Bash(git push * -f)",
+      "Bash(git push * -f *)",
+      "Bash(git push * +*)",
+      "Bash(git reset --hard*)",
+      "Bash(git reset *--hard*)"
+    ]
+  },
+  "worktree": {
+    "baseRef": "head"
+  }
+}

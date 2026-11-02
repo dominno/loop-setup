@@ -22,9 +22,15 @@ layer on top.
 .claude/loop-checklist.md          Readiness rubric to promote a loop's trust level (L0→L3)
 .claude/memory/loop-run-log.md     Durable, append-only loop run state
 .claude/memory/loop-plan.md        The plan/DAG every L2/L3 action traces to (incl. the `deferred` status)
-.claude/memory/trace/records.jsonl TRACE-lite record store — start it empty; written only via `pnpm trace`
+.claude/memory/trace/records.jsonl TRACE-lite record store — start it empty and strip topics/trace.md's
+                                   <!-- rec:TR-… --> comments (pnpm trace wiki-check exits 0); written
+                                   only via `pnpm trace`
 .claude/memory/topics/trace.md     The record policy: typed verdicts, evidence gate, consumer actions
 scripts/trace/  .claude/trace/     The `pnpm trace` CLI/tests + schema (and bench fixtures for /bench-checkers)
+.claude/workflows/loop-iteration.js
+                                   The maker/checker Workflow that loop.md step 10 runs at L2/L3
+.claude/workflows/critic-panel.js  The critic-round Workflow that loop.md step 7 runs (both are part
+                                   of the base workflow's .claude/workflows/)
 ```
 
 A node only becomes `done` with an `accept`/`qualify` record and a `CLEAR` action; a
@@ -50,7 +56,7 @@ self-approve).
 
 ## 3. Step-by-step
 
-1. **Copy the three files** above; merge the `CLAUDE.md` loop guidance.
+1. **Copy the files above**; merge the `CLAUDE.md` loop guidance.
 2. **Define purpose & scope** for the loop: one-sentence goal, explicit non-goals,
    and the watched scope (which repos, branches, PRs, tickets, paths). Fill §1 of
    `.claude/loop-checklist.md`.
@@ -58,7 +64,11 @@ self-approve).
    restart behavior, off-hours behavior, and **self-stop when the watchlist empties**.
 4. **Adapt the denylist to your repo:** keep auth, payments, secrets/`.env`,
    infra/deploy, CI config, and DB migrations off-limits; add anything
-   project-specific. Adjust the localhost/command references to your stack.
+   project-specific. Keep the loop's own gates off-limits too: `.claude/`, `CLAUDE.md`,
+   the root `scripts/` directory, the root `package.json` and the test/lint/type/E2E
+   runner configs (a one-line change to the `test` script or to vitest's include would
+   make `pnpm test` skip every `scripts/**` gate). If your gate tests or runner configs
+   live elsewhere, add those paths. Adjust the localhost/command references to your stack.
 5. **Set the budget & limits:** a **per-run cap** (turn budget, e.g. 25 turns, or a
    token ceiling), max iterations per item, max auto-PRs/day, and a kill switch.
    Record remaining budget in each run-log entry.
@@ -93,8 +103,39 @@ Common recurring loops — each is a `/loop` with its own scope, cadence, and bu
 ## 5. Parallel / file-mutating loops → worktrees
 
 If a loop (or its sub-agents) mutates files in parallel, run the **implementer via
-`Agent` with `isolation: worktree`** so concurrent work can't clobber a shared tree,
-and have the **verifier** run tests in its own isolation before approving.
+`Agent` with `isolation: worktree`** so concurrent work can't clobber a shared tree
+(`loop-iteration` does). The worktree is a fresh checkout without dependencies: the
+implementer records the commit it started from (`git rev-parse HEAD`), installs from the
+lockfile (`pnpm install --frozen-lockfile --prefer-offline`), and edits and runs
+typecheck, lint and unit tests only there. **Implementers never run dev, build or E2E**:
+a build rewrites tracked files into the diff, and the dev server's port belongs to the
+user. The Lead runs those after applying the diff.
+
+- **Base.** The Lead passes `args.headSha` (`git rev-parse HEAD`), and `loop-iteration`
+  defers any item whose worktree started from another commit (`base-mismatch`), before
+  verification. Set `worktree.baseRef` to `"head"` in your Claude Code settings so loop
+  worktrees branch from your local HEAD; without it, the base check defers every item
+  whose base differs (a safe stall: those items are neither verified nor applied).
+- **The verifier is instructed, not isolated.** It gets no worktree of its own, so it
+  starts in the shared checkout. Its prompt tells it to verify in its own scratch copy of
+  the working tree, never to apply the diff to or edit files in the shared checkout, and
+  not to pipe a check through `head` or `tail` when its exit status is the evidence. That
+  is a prompt instruction, not enforced. The Lead applies a licensed diff only after
+  `git apply --check` passes.
+- **Zero-install alternative.** `worktree.symlinkDirectories: ["node_modules"]` links
+  the main checkout's `node_modules` into each worktree, so a worktree starts with
+  dependencies. The trade-offs: every worktree shares one install and its caches, and an
+  item that changes the lockfile runs against stale dependencies. The implementer's
+  `pnpm install` still runs, and through the link it writes into the main checkout's
+  shared install, once per item and concurrently: an item that changes dependencies and
+  reinstalls rewrites your own `node_modules`.
+- **Cleanup.** The built-in sweep keeps any worktree with changes, so implementer
+  worktrees outlive their run. `/loop` removes an applied item's worktree after its
+  `CLEAR`, and only after validating it (listed by `git worktree list --porcelain`, under
+  `.claude/worktrees/`, nothing in it beyond the applied patch); it keeps deferred, held
+  and escalated ones. To clean up by hand: `git worktree list`, then
+  `git worktree remove --force <path>` for each one you no longer need, then
+  `git worktree prune`.
 
 ## 6. Red flags — stop and fix before raising a level
 

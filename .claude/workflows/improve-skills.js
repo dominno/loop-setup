@@ -1,28 +1,38 @@
 export const meta = {
-  name: 'improve-skills',
+  name: 'prompt-meta-critic',
   description:
-    "Deterministic meta-critic over the project's OWN prompts and orchestration: fan out one reviewer per quality lens across the command/workflow/instruction surface (.claude/commands/*.md, .claude/workflows/*.js, CLAUDE.md, skills-index, loop files), adversarially verify each blocker/important finding with a separate skeptic, and return PROPOSED edits. The caller applies them only on confirmation — this workflow never writes files.",
+    "Deterministic meta-critic over the project's OWN prompts and orchestration: fan out one reviewer per quality lens across the command/workflow/instruction surface (.claude/commands/*.md, .claude/workflows/*.js, CLAUDE.md, skills-index, loop files), adversarially verify each blocker and important finding with a separate skeptic (important findings are uncapped by default; args.maxVerifiers caps them, and the rest are recorded as defers), and return PROPOSED edits. The caller applies them only on confirmation — this workflow never writes files. Engine of the manual-only /improve-skills — run only when the user invoked that command.",
   phases: [
     { title: 'Review', detail: 'one meta-critic per lens reviews the prompt/workflow surface' },
-    { title: 'Verify', detail: 'a separate skeptic refutes each finding AND its proposed edit' },
+    { title: 'Verify', detail: 'a separate skeptic refutes each blocker and important finding AND its proposed edit; important findings are uncapped by default, args.maxVerifiers caps them, and the rest are recorded as defers' },
   ],
 }
 
-// Normalize args: a command may pass `args` as an object, a plain string, or a
-// JSON-encoded string (e.g. '{"scope":"..."}'). Parse the JSON-string case so
-// `a.scope`/`a.targets` resolve instead of leaking the raw JSON into `scope`.
+// The skill name is not 'improve-skills': a workflow named like a command shows up twice in the
+// skills list. The file name, writer_id and provenance keep 'improve-skills', so records continue.
+
+// Normalize args: an object, or a JSON-encoded string (e.g. '{"scope":"..."}'), parsed
+// so `a.scope`/`a.targets` resolve. Anything else is refused just below.
 let a = args
 if (typeof a === 'string') {
   const s = a.trim()
   if (s.startsWith('{') || s.startsWith('[')) {
-    try { a = JSON.parse(s) } catch { /* keep the string as a plain scope note */ }
+    try { a = JSON.parse(s) } catch { /* not JSON: refused below */ }
   }
 }
 
+// Only /improve-skills starts a pass, and it always passes { scope } ({ scope: '' } runs the
+// default full-surface pass); a caller may pass { targets } instead. No args, a plain string, or
+// an object with neither key is refused before any agent starts: a bare invocation of this skill
+// must not fan out the full pass (six reviewers plus a skeptic per blocker and important finding).
+if (!a || typeof a !== 'object' || Array.isArray(a) || !('scope' in a || 'targets' in a)) {
+  const error = `argument error: pass args = { scope } (and optionally targets), as /improve-skills does; got ${(JSON.stringify(a) || String(a)).slice(0, 80)} — no agent started`
+  log(`ERROR: ${error}`)
+  return { error, failedReviewers: [], applyReady: [], needsDesign: [], deferred: [], niceToHaves: [], refuted: [], traceRecords: [] }
+}
+
 // Optional focus note + explicit target list, passed via the Workflow `args`.
-const scope =
-  (a && (a.scope || (typeof a === 'string' ? a : null))) ||
-  'all custom prompts, skills, and workflow orchestration in this repo'
+const scope = a.scope || 'all custom prompts, skills, and workflow orchestration in this repo'
 // The default prompt surface to review. Callers can pass args.targets to scope it.
 const DEFAULT_TARGETS = [
   '.claude/commands/*.md',
@@ -38,11 +48,28 @@ const DEFAULT_TARGETS = [
 ]
 const targets = (a && Array.isArray(a.targets) && a.targets.length ? a.targets : DEFAULT_TARGETS)
 const targetList = targets.join(', ')
+// Optional cost bound: the most skeptics one pass starts (an integer >= 0). Uncapped by default.
+// With a cap, every blocker is verified regardless; important findings fill the slots left
+// (Phase 2), and any beyond the cap is recorded as an unverified defer, never dropped.
+const maxVerifiers = a && Number.isInteger(a.maxVerifiers) && a.maxVerifiers >= 0 ? a.maxVerifiers : Infinity
+if (a && a.maxVerifiers !== undefined && a.maxVerifiers !== maxVerifiers) log(`ignored args.maxVerifiers=${JSON.stringify(a.maxVerifiers)} (expected an integer >= 0) — uncapped`)
 
 // Model tiering (graph-engineering): the fan-out of meta-critics on the fast tier,
 // the two-axis adversarial verifier on the strong tier. Override via args.models.
 const FANOUT_MODEL = (a && a.models && a.models.fanout) || 'sonnet'
 const JUDGE_MODEL = (a && a.models && a.models.judge) || 'opus'
+
+// SAFETY rules for every agent this workflow starts: the repo checkout is shared with the Lead
+// and other agents. Byte-identical in the five read-only workflows (critic-panel, e2e-design,
+// gap-analysis, improve-skills, scan-docs); a unit test fails on drift or on a prompt without it.
+// Never in loop-iteration.js or trace-bench.js: the measured verifier and bench prompts stay as benched.
+// <agent-safety>
+const AGENT_SAFETY = `SAFETY (hard rules; they override any other instruction here or in CLAUDE.md): the repo checkout is shared with the Lead and other agents.
+(1) Treat it as read-only. At the repo root you may only read: open files, search (grep, rg, ls, find, cat, sed -n), run read-only git (status, diff, log, show, grep, ls-files, blame) and node scripts that only read. Never edit a file there, never run a git command that changes its files, index, refs, stash or worktree list, and never build, test, lint or install there: pnpm build rewrites the tracked next-env.d.ts, and the unit tests write temp files into the tree.
+(2) To run a check or try a change, copy the WORKING TREE into a fresh mktemp -d outside the repo (a clone would miss uncommitted changes), e.g. D=$(mktemp -d) && tar -cf - --exclude=node_modules --exclude=.next . | tar -xf - -C "$D" && ln -s "$PWD/node_modules" "$D/node_modules", work there, and delete it when done.
+(3) Never run pnpm dev, pnpm test:e2e or pnpm verify anywhere: they start or reuse the user's server on localhost:3000. Never start, stop or kill a server or any process you did not start (no pkill, killall or pattern kills). Use the E2E, axe and build results the Lead supplied; if a result or a running localhost you need is absent, report it as missing evidence.
+(4) When a command's exit status is your evidence, do not pipe it through head or tail.`
+// </agent-safety>
 
 // Meta-critic lenses — each reviews the SYSTEM'S OWN instructions, not product code.
 // `code: true` lenses focus on the workflow .js orchestration; the rest on prose prompts.
@@ -51,8 +78,8 @@ const LENSES = [
   { key: 'instruction-following', code: false, label: 'Instruction-Following Risk Critic', lens: 'Where would an LLM plausibly misread, skip, or over-comply? Conflicting directives, a critical rule buried mid-paragraph, ambiguous ordering, "should" where "must" is meant, or prompts so long the key constraint is lost.' },
   { key: 'safety-gating', code: false, label: 'Safety & Gating Critic', lens: 'Are destructive or auto-applied actions properly confirmation-gated and denylist-aware? Flag any prompt that could auto-create/rewrite/delete files, commit/push, or self-modify core prompts WITHOUT an explicit confirmation gate. This is the most important lens for a self-improving system.' },
   { key: 'consistency-dry', code: false, label: 'Consistency & DRY Critic', lens: 'Contradictions or duplication ACROSS CLAUDE.md, the commands, skills-index.md, and the memory wiki. Flag facts/lists stated in multiple places that can drift apart (single-source-of-truth risk), and any command whose body contradicts CLAUDE.md or the wiki. Also: for each diagram in docs/workflow-graphs.md, verify its node list, model-tier annotations (🟢/🔵/⚪/▫️), and edges match the actual agent() calls (CRITICS/LENSES/DIMENSIONS/CATEGORIES arrays and FANOUT_MODEL/JUDGE_MODEL usage) in the corresponding .claude/workflows/*.js — flag any diagram that has drifted from its script.' },
-  { key: 'workflow-dsl', code: true, label: 'Workflow DSL & Schema Critic', lens: 'For .claude/workflows/*.js only: fail-safe verifiers (a null/failed verdict must NOT confirm), unique agent labels that include the map index, guarded first pipeline stage before deref, fail-closed defaults, maker/checker given the REAL artifact (not a self-report), valid JSON Schemas, and a meta block that is a pure literal. Also check the graph-engineering conventions: correct FANOUT_MODEL/JUDGE_MODEL tiering (fan-out nodes on the fast tier; gates/judgment/synthesis on the strong tier; any code-writing node explicitly exempted rather than silently downgraded); and, where a budget guard exists, that it fails safe (skips or escalates on a floor breach and never auto-approves unverified work). For verdict-producing workflows also check the TRACE-lite contract (.claude/memory/topics/trace.md): typed verdicts (accept/qualify/revise/defer/reject), a null/failed verdict becomes defer (never confirmed, never counted as refuted), defer carries missing and revise carries repair, and the returned record drafts match what the workflow actually decided. Flag deviations.' },
-  { key: 'routing', code: false, label: 'Routing & Discoverability Critic', lens: 'Does each command have a one-line description (for model routing) and a matching skills-index row? Flag near-duplicate commands, dead index rows, missing argument-hints, and heavy/code-changing commands that lack disable-model-invocation where they should be manual-only.' },
+  { key: 'workflow-dsl', code: true, label: 'Workflow DSL & Schema Critic', lens: 'For .claude/workflows/*.js only: fail-safe verifiers (a null/failed verdict must NOT confirm), unique agent labels that include the map index, a pipeline first stage that never resolves to null (the engine ends an item at the first stage that resolves to null, so wrap its result) and no dropped null slot (a null pipeline or parallel slot is filled or read as a failure, never filtered away), a catch before mapping a missing verdict to defer (an agent() that throws must reach the same defer as one that returns nothing), fail-closed defaults, maker/checker given the REAL artifact (not a self-report), valid JSON Schemas, and a meta block that is a pure literal. Also check the graph-engineering conventions: correct FANOUT_MODEL/JUDGE_MODEL tiering (fan-out nodes on the fast tier; gates/judgment/synthesis on the strong tier; any code-writing node explicitly exempted rather than silently downgraded); and, where a budget guard exists, that it fails safe (skips or escalates on a floor breach and never auto-approves unverified work). For verdict-producing workflows also check the TRACE-lite contract (.claude/memory/topics/trace.md): typed verdicts (accept/qualify/revise/defer/reject), a null/failed verdict becomes defer (never confirmed, never counted as refuted), defer carries missing and revise carries repair, and the returned record drafts match what the workflow actually decided. Flag deviations.' },
+  { key: 'routing', code: false, label: 'Routing & Discoverability Critic', lens: 'Does each command have a one-line description (for model routing) and a matching skills-index row? Flag near-duplicate commands, dead index rows, missing argument-hints, and commands whose disable-model-invocation contradicts the manual-only rule in .claude/skills-index.md — or propose a change to that rule when a new heavy command falls outside it.' },
 ]
 
 const FINDINGS_SCHEMA = {
@@ -178,20 +205,40 @@ function traceVerdict(v) {
   return v.editSafe === true ? 'accept' : 'revise'
 }
 
+// An agent() that throws (token budget spent, harness error) is a FAILED agent, not a crashed
+// pass: log it and hand the next stage the same null a dead agent returns, so that stage's
+// fail-safe null path runs. Every agent() starts inside a then(), so one that throws before it
+// returns a promise takes this .catch too; uncaught, parallel() would turn its thunk into a null
+// slot. A slot a thunk's own code still loses is filled after Verify, never filtered out.
+const agentFailed = (label) => (e) => {
+  log(`agent failed: ${label}: ${String((e && e.message) || e).slice(0, 200)}`)
+  return null
+}
+
 // Phase 1 — every meta-critic reviews the prompt surface independently, in parallel
 // (a barrier: we want the full set before deduping and verifying).
 phase('Review')
 const reviews = await parallel(
   LENSES.map((c, i) => () =>
-    agent(
-      `You are the **${c.label}** auditing this project's OWN Claude Code configuration — its custom prompts, skills, and multi-agent orchestration. This is a READ-ONLY review: do not create, edit or delete any file in the repo. You are NOT reviewing product/application code; you are reviewing the instructions that drive the agent.\n\nRead these files (the prompt surface): ${targetList}\n${c.code ? 'Focus on the workflow orchestration scripts (.claude/workflows/*.js).' : 'Focus on the prose prompts (commands, CLAUDE.md, skills-index, loop files).'}\n\nReview strictly through your lens:\n${c.lens}\n\nScope: ${scope}\n\nFor each issue return concrete evidence (a quote or file:line) AND a specific proposedEdit (what to change to what). Propose improvements to the prompts/workflows themselves — do not propose product-code changes. An empty list is a valid, honest answer.`,
-      { label: `meta:${c.key}-${i}`, phase: 'Review', schema: FINDINGS_SCHEMA, model: FANOUT_MODEL },
-    ).then((r) => ({ critic: c.key, label: c.label, findings: (r && r.findings) || [], failed: !r })),
+    Promise.resolve()
+      .then(() =>
+        agent(
+          `You are the **${c.label}** auditing this project's OWN Claude Code configuration — its custom prompts, skills, and multi-agent orchestration. This is a READ-ONLY review: do not create, edit or delete any file in the repo. You are NOT reviewing product/application code; you are reviewing the instructions that drive the agent.\n\n${AGENT_SAFETY}\n\nRead these files (the prompt surface): ${targetList}\n${c.code ? 'Focus on the workflow orchestration scripts (.claude/workflows/*.js).' : 'Focus on the prose prompts (commands, CLAUDE.md, skills-index, loop files).'}\n\nReview strictly through your lens:\n${c.lens}\n\nScope: ${scope}\n\nFor each issue return concrete evidence (a quote or file:line) AND a specific proposedEdit (what to change to what). Propose improvements to the prompts/workflows themselves — do not propose product-code changes. An empty list is a valid, honest answer.`,
+          { label: `meta:${c.key}-${i}`, phase: 'Review', schema: FINDINGS_SCHEMA, model: FANOUT_MODEL },
+        ),
+      )
+      .catch(agentFailed(`meta:${c.key}-${i}`))
+      .then((r) => ({ critic: c.key, label: c.label, findings: (r && r.findings) || [], failed: !r })),
   ),
 )
-// A meta-critic that died is not "no findings" — surface it.
-const failedReviewers = reviews.filter((r) => !r || r.failed).map((r, i) => (r ? r.critic : `lens-${i}`))
+// A meta-critic that died is not "no findings" — surface it. `reviews` is index-aligned with
+// LENSES (a dead parallel() thunk is a null slot), so each is named by its key.
+const failedReviewers = reviews.map((r, i) => (!r || r.failed ? LENSES[i].key : null)).filter(Boolean)
 if (failedReviewers.length) log(`WARNING: ${failedReviewers.length} lens(es) returned no result: ${failedReviewers.join(', ')} — the pass is incomplete`)
+// Every lens failed: nothing was reviewed, so the pass is an error and Verify is skipped.
+// The rest still runs on no findings, so every key stays (empty).
+const error = failedReviewers.length === LENSES.length ? `all ${LENSES.length} lens(es) failed (infra) — no review happened; re-run` : null
+if (error) log(`ERROR: ${error}`)
 
 // Flatten, then dedup on (severity + file + exact normalized title). On a collision,
 // MERGE (keep the corroborating critic + evidence) rather than dropping — two critics
@@ -216,7 +263,7 @@ log(`${deduped.length} findings from ${LENSES.length} meta-critics (${all.length
 // Phase 2 — adversarially verify each blocker/important finding with a SEPARATE
 // skeptic. It must refute BOTH that the problem is real AND that the proposed edit is
 // a safe improvement (so we never "improve" a prompt into being weaker or less safe).
-phase('Verify')
+if (!error) phase('Verify')
 const toVerify = deduped.filter((f) => f.severity === 'blocker' || f.severity === 'important')
 
 // Budget as a HARD stop (soft + hard controls, graph-engineering): if the turn's token
@@ -224,61 +271,105 @@ const toVerify = deduped.filter((f) => f.severity === 'blocker' || f.severity ==
 // (TRACE defer — missing: the adversarial verification), so nothing unverified is ever
 // apply-ready or mistaken for a refutation.
 const VERIFY_FLOOR = 60_000 // tokens to leave for the verify phase
-const budgetStop = !!(budget.total && budget.remaining() < VERIFY_FLOOR)
-let verified
-if (budgetStop) {
-  log(`budget floor reached (${Math.round(budget.remaining() / 1000)}k left) — skipping adversarial verify; ${toVerify.length} findings deferred (unverified, never auto-applied)`)
-  verified = toVerify.map((f) => ({
+const budgetStop = !error && !!(budget.total && budget.remaining() < VERIFY_FLOOR)
+// A finding no skeptic adjudicated: defer (unverified is evidence of nothing), never apply-ready.
+const unverified = (f, gate, missing, reason) => ({
+  ...f,
+  real: null, // unknown — not checked
+  editSafe: false, // unverified ⇒ never apply-ready
+  verdict: 'defer',
+  missing: [missing],
+  repair: '',
+  failedGates: [gate],
+  evidenceChecked: [],
+  verifyReason: reason,
+})
+// Verifier cap (opt-in, args.maxVerifiers): every blocker gets its skeptic; important findings
+// fill the slots left, one per lens in turn (LENSES order), so review order never starves a lens.
+// The rest are deferred below with no agent (logged here; a later pass verifies them).
+const roundRobin = (queues, slots) => {
+  const out = []
+  for (let r = 0; out.length < slots && queues.some((q) => r < q.length); r += 1) {
+    for (const q of queues) if (r < q.length && out.length < slots) out.push(q[r])
+  }
+  return out
+}
+const blockerCount = toVerify.filter((f) => f.severity === 'blocker').length
+const granted = new Set(roundRobin(
+  LENSES.map((l) => toVerify.map((f, i) => i).filter((i) => toVerify[i].severity === 'important' && toVerify[i].critic === l.key)),
+  Math.max(0, maxVerifiers - blockerCount),
+))
+const getsSkeptic = (f, i) => f.severity === 'blocker' || granted.has(i)
+const overCap = error || budgetStop ? [] : toVerify.filter((f, i) => !getsSkeptic(f, i))
+if (!error) log(`Verify: ${budgetStop ? 0 : toVerify.length - overCap.length} skeptic(s) planned for ${toVerify.length} blocker/important finding(s)${overCap.length ? `; ${overCap.length} important finding(s) over maxVerifiers ${maxVerifiers} are cap-deferred, unverified` : ''}`)
+// A skeptic's outcome for finding `f` from its reply `v` (null: it threw or returned nothing).
+const skepticOutcome = (f, v) => {
+  // Fail safe: a missing/failed verdict must NOT confirm the finding or its edit —
+  // and must not count as a refutation either: it is deferred.
+  const derived = traceVerdict(v)
+  // The two-axis verdict then faces the same evidence gate as every other checker
+  // (normative claim: a licensing verdict needs a cited rule or a human decision).
+  const g = applyEvidenceGate({
+    verdict: derived,
+    claimType: 'normative',
+    evidenceChecked: (v && v.evidenceChecked) || [],
+    // A dead skeptic (threw, or returned nothing) gave no verdict, and that is an infra
+    // failure ('agent-failed'): re-run it, never wait for evidence.
+    failedGates: v ? [] : ['verdict-missing', 'agent-failed'],
+    missing: derived === 'defer'
+      ? ((v && Array.isArray(v.missing) && v.missing.filter(Boolean).length) ? v.missing : ['a verdict from the verifier (none was returned)'])
+      : [],
+    repair: derived === 'revise' ? ((v && v.saferEdit) || 'design a safer edit — the proposed one could weaken a gate or break a workflow') : '',
+  })
+  return {
     ...f,
-    real: null, // unknown — not checked
-    editSafe: false, // unverified ⇒ never apply-ready
-    verdict: 'defer',
-    missing: ['adversarial verification (skipped: token budget floor reached before the verify phase)'],
-    repair: '',
-    failedGates: ['not-verified'],
-    evidenceChecked: [],
-    verifyReason: 'unverified — token budget floor reached before the verify phase',
-  }))
+    real: v ? v.real : null,
+    editSafe: v ? v.editSafe === true && g.verdict === 'accept' : false,
+    verdict: g.verdict,
+    preGateVerdict: derived,
+    missing: g.missing,
+    repair: g.repair,
+    failedGates: g.failedGates,
+    evidenceChecked: g.evidenceChecked,
+    verifyReason: (v && v.reason) || 'verifier returned no verdict — deferred, not confirmed',
+  }
+}
+let verified
+if (error) {
+  verified = [] // every lens failed: nothing reached Verify (`error` says so)
+} else if (budgetStop) {
+  log(`budget floor reached (${Math.round(budget.remaining() / 1000)}k left) — skipping adversarial verify; ${toVerify.length} findings deferred (unverified, never auto-applied)`)
+  verified = toVerify.map((f) => unverified(f, 'not-verified', 'adversarial verification (skipped: token budget floor reached before the verify phase)', 'unverified — token budget floor reached before the verify phase'))
 } else {
-  verified = await parallel(
-    toVerify.map((f, i) => () =>
-      agent(
-        `You are a SEPARATE skeptic (not the critic who raised this). Read the actual file and try to REFUTE this ${f.severity} finding about the project's own prompts/workflows.\n\nJudge two things independently:\n1. real — is the problem genuine? Default real:false if the evidence does not hold up.\n2. editSafe — would the proposed edit be a real improvement that does NOT weaken instruction-following, remove a safety/confirmation gate, or break a workflow? Default editSafe:false if you cannot confirm it is safe.\nIf the problem is real but the edit is not safe, propose a saferEdit. If you cannot decide from the files, list what is missing instead of guessing. In evidenceChecked cite what you actually checked: the file:line you read (kind "file_line") and the rule or standard you judged it against (kind "rule": a CLAUDE.md rule, a trace.md / loop.md policy line, or this lens's standard) — a finding accepted without a cited rule is deferred by the evidence gate.\n\nFile: ${f.file}\nTitle: ${f.title}\nEvidence: ${f.evidence}\nProposed edit: ${f.proposedEdit}`,
-        { label: `verify:${f.critic}:${i}`, phase: 'Verify', schema: VERDICT_SCHEMA, model: JUDGE_MODEL },
-      ).then((v) => {
-        // Fail safe: a missing/failed verdict must NOT confirm the finding or its edit —
-        // and must not count as a refutation either: it is deferred.
-        const derived = traceVerdict(v)
-        // The two-axis verdict then faces the same evidence gate as every other checker
-        // (normative claim: a licensing verdict needs a cited rule or a human decision).
-        const g = applyEvidenceGate({
-          verdict: derived,
-          claimType: 'normative',
-          evidenceChecked: (v && v.evidenceChecked) || [],
-          missing: derived === 'defer'
-            ? ((v && Array.isArray(v.missing) && v.missing.filter(Boolean).length) ? v.missing : ['a verdict from the verifier (none was returned)'])
-            : [],
-          repair: derived === 'revise' ? ((v && v.saferEdit) || 'design a safer edit — the proposed one could weaken a gate or break a workflow') : '',
-        })
-        return {
-          ...f,
-          real: v ? v.real : null,
-          editSafe: v ? v.editSafe === true && g.verdict === 'accept' : false,
-          verdict: g.verdict,
-          preGateVerdict: derived,
-          missing: g.missing,
-          repair: g.repair,
-          failedGates: g.failedGates,
-          evidenceChecked: g.evidenceChecked,
-          verifyReason: (v && v.reason) || 'verifier returned no verdict — deferred, not confirmed',
-        }
-      }),
-    ),
-  )
+  verified = (
+    await parallel(
+      toVerify.map((f, i) => () =>
+        // Over the cap: an explicit, unverified defer with no agent. Otherwise the skeptic starts inside
+        // then(), so an agent() that throws synchronously takes the same .catch as one that rejects.
+        !getsSkeptic(f, i)
+          ? Promise.resolve(unverified(f, 'not-verified:verifier-cap', `adversarial verification — skipped: verifier cap ${maxVerifiers} reached; re-run focused on this finding or raise args.maxVerifiers`, `unverified — verifier cap ${maxVerifiers} reached`))
+          : Promise.resolve()
+              .then(() =>
+                agent(
+                  `You are a SEPARATE skeptic (not the critic who raised this). Read the actual file and try to REFUTE this ${f.severity} finding about the project's own prompts/workflows.\n\n${AGENT_SAFETY}\n\nJudge two things independently:\n1. real — is the problem genuine? Default real:false if the evidence does not hold up.\n2. editSafe — would the proposed edit be a real improvement that does NOT weaken instruction-following, remove a safety/confirmation gate, or break a workflow? Default editSafe:false if you cannot confirm it is safe.\nIf the problem is real but the edit is not safe, propose a saferEdit. If you cannot decide from the files, list what is missing instead of guessing. In evidenceChecked cite what you actually checked: the file:line you read (kind "file_line") and the rule or standard you judged it against (kind "rule": a CLAUDE.md rule, a trace.md / loop.md policy line, or this lens's standard) — a finding accepted without a cited rule is deferred by the evidence gate.\n\nFile: ${f.file}\nTitle: ${f.title}\nEvidence: ${f.evidence}\nProposed edit: ${f.proposedEdit}`,
+                  { label: `verify:${f.critic}:${i}`, phase: 'Verify', schema: VERDICT_SCHEMA, model: JUDGE_MODEL },
+                ),
+              )
+              .catch(agentFailed(`verify:${f.critic}:${i}`))
+              .then((v) => skepticOutcome(f, v)),
+      ),
+    )
+  ).map((o, i) => {
+    if (o) return o
+    // A slot that is still null lost its finding: the thunk's own code threw past the skeptic's
+    // .catch. It takes the dead-skeptic outcome (agent-failed: re-run), never filtered away.
+    log(`WARNING: Verify slot ${i} (${toVerify[i].critic}: ${JSON.stringify(String(toVerify[i].title || 'untitled'))}) came back null: its code threw, so no verdict survived — deferred as agent-failed (re-run)`)
+    return skepticOutcome(toVerify[i], null)
+  })
 }
 
 const niceToHaves = deduped.filter((f) => f.severity === 'nice-to-have')
-const settled = verified.filter(Boolean)
+const settled = verified // one outcome per blocker/important finding: a null Verify slot was filled above
 // applyReady = accept (real problem + verified-safe edit) — the caller proposes these
 // for confirmation. needsDesign = revise (real problem, edit not safe — `repair` is a
 // safer edit to design from). deferred = could not be adjudicated. refuted = reject.
@@ -315,6 +406,7 @@ const traceRecords = settled.map((f, i) => ({
 }))
 
 return {
+  ...(error ? { error } : {}), // every lens failed: no review happened — re-run
   scope,
   targets,
   budgetStop, // true ⇒ verify was skipped for budget; every blocker/important finding is in `deferred`
@@ -327,12 +419,13 @@ return {
     applyReady: applyReady.length,
     needsDesign: needsDesign.length,
     deferred: deferred.length,
+    capDeferred: overCap.length, // important findings over args.maxVerifiers: in `deferred`, UNVERIFIED
     niceToHave: niceToHaves.length,
     refuted: refuted.length,
   },
   applyReady, // accept: real problem + verified-safe edit → caller proposes these for confirmation
   needsDesign, // revise: real problem, edit not confirmed safe → `repair` holds a safer edit to design from
-  deferred, // defer: not adjudicated (no verdict, or verification skipped) — UNVERIFIED, never applied
+  deferred, // defer: not adjudicated (no verdict, verification skipped, or over the verifier cap) — UNVERIFIED, never applied
   niceToHaves, // recorded only, not verified
   refuted, // reject: a skeptic refuted these
   traceRecords, // TRACE-lite record drafts → `pnpm trace write`

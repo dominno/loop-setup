@@ -10,6 +10,10 @@
   (copy `docs/stories/_TEMPLATE.md`); `docs/user-stories.md` is the index and
   `docs/implementation-status.md` is the evidence dashboard. Don't pile stories into
   one file — same scaling reason as the memory wiki and log.
+- A `scan-docs` story record's `claim_text` names the PROPOSED status (`is at status "<S>"`);
+  when the status verifier held it lower, the record is `qualify` and its qualifier names the
+  status it licenses (`holds only at "<S>"`). `pnpm trace story-lint` rule (7) reads those two
+  phrases, so a story cites a qualify record at the lower status. <!-- rec:TR-ef509b55013d -->
 - **Loops are hardened ("loop engineering"):** every `/loop` declares a trust level
   (L1 report → L2 assisted → L3 unattended), reads/writes
   `.claude/memory/loop-run-log.md`, and obeys the denylist + red-flag stop
@@ -29,13 +33,15 @@
   status (exclude `in-progress`, or a crash-orphaned node re-reads as ready → duplicate
   dispatch) and resolve *every* non-`done` terminal dep-state (a `dropped`/`escalated`
   dependency must cascade-resolve, else its dependents strand silently `blocked`).
-- **Verdicts are typed and recorded (TRACE-lite):** every verdict-producing workflow
-  (`critic-panel`, `loop-iteration`, `improve-skills`, `scan-docs`) returns
-  accept/qualify/revise/defer/reject plus `traceRecords` drafts; the caller appends them
-  with `pnpm trace write`, and a node/fact/story status changes only with a licensing
-  record + consumer action. Shared deterministic blocks (evidence gate, denylist, loop
-  verifier prompt, critic roster) are byte-identical copies across workflows, enforced by
-  `scripts/trace/contracts.test.mjs`. Details: [trace](./trace.md).
+- **Verdicts are typed and recorded (TRACE-lite):** `critic-panel`, `loop-iteration`,
+  `improve-skills` and `scan-docs` return accept/qualify/revise/defer/reject plus
+  `traceRecords` drafts that the caller appends with `pnpm trace write`; `e2e-design` and
+  `gap-analysis` type every case or gap with the same verdicts but return no records (their
+  verdicts are advisory), and a `trace-bench` run becomes one record only through
+  `pnpm trace bench-score --record`. A node/fact/story status changes only with a licensing
+  record + consumer action; the shared deterministic blocks (evidence gate, denylist, loop
+  verifier prompt, critic roster, agent safety) are byte-identical copies, enforced by
+  `scripts/trace/contracts.test.mjs`. Details: [trace](./trace.md). <!-- rec:TR-5f79a159395f -->
 - Custom commands live in `.claude/commands/` (each with a `description` for
   routing); the grouped "when to use" catalog is `.claude/skills-index.md`. A
   catalog file must NOT live in `.claude/commands/` — anything there auto-registers
@@ -43,15 +49,16 @@
 - **Fan-out commands run as deterministic multi-agent Workflows** under
   `.claude/workflows/`, not one agent simulating critics: `critic-panel` (critics →
   adversarial verify → matrix), `scan-docs` (per-story evidence → status verifier),
-  `gap-analysis` (per-dimension gaps → synth order), `e2e-design` (per-category
-  cases → dedup), `loop-iteration` (worktree implementer → separate verifier),
-  `improve-skills` (per-lens meta-critic over our OWN prompts/workflows → proposed
-  edits, confirmation-gated), `trace-bench` (measures the checkers on seeded-defect
-  fixtures, `/bench-checkers`). Commands invoke them via the Workflow tool (the
-  sanctioned opt-in). Name a workflow
-  distinctly from any command (e.g. `critic-panel` vs the `/critic-round` command) to
-  avoid a duplicate skills-list entry. Don't force non-fan-out commands
-  (`/fix-localhost`, `/write-goal`, `/dream`, `/memory-audit`) into workflows.
+  `gap-analysis` (per-dimension finders → a separate skeptic per dimension → an order over
+  the licensed gaps only), `e2e-design` (per-category cases → dedup → a separate judge;
+  only licensed cases are returned), `loop-iteration` (worktree implementer → separate
+  verifier), `improve-skills.js` (skill `prompt-meta-critic`: per-lens meta-critic over our
+  OWN prompts/workflows → proposed edits, confirmation-gated) and `trace-bench` (measures
+  the checkers on seeded-defect fixtures, `/bench-checkers`). Commands invoke them via the
+  Workflow tool (the sanctioned opt-in). A workflow's `meta.name` differs from every
+  command's name (e.g. `critic-panel` vs `/critic-round`): workflows and commands share the
+  skills list. Don't force non-fan-out commands (`/fix-localhost`, `/write-goal`, `/dream`,
+  `/memory-audit`) into workflows. <!-- rec:TR-79ad595a532b -->
 - **Self-improvement vs self-learning (two axes).** `/dream` improves what the system
   *knows* (curates the memory wiki — facts); `/improve-skills` improves the *machinery*
   (a meta-critic Workflow that reviews the project's OWN command/workflow prompts and
@@ -73,12 +80,21 @@
   Make verifier agents **fail safe** (a null/failed verdict must NOT confirm), give
   parallel agents **unique labels** that **always include the map index** (so
   duplicate caller-supplied ids can't collide — `${id || 'x'}-${i}`, not `${id||i}`),
-  and provide **fallback strings** for schema-required fields. Also guard the
-  *first* pipeline stage's result before deref (`const ev = stage1 || {}`), fail
-  **closed** (don't accept a maker's self-proposed value when the checker is
-  missing), and give a maker/checker checker the **real artifact** (the diff), not
-  the maker's self-report. The DSL auto-caps concurrency (~min(16, cores-2)), so a
-  large fan-out won't spawn unbounded agents — no manual limit needed.
+  provide **fallback strings** for schema-required fields, fail **closed** (don't accept
+  a maker's self-proposed value when the checker is missing), and give a maker/checker
+  checker the **real artifact** (the diff), not the maker's self-report.
+  <!-- rec:TR-53a3ffad47a3 -->
+- In the Workflow engine a `pipeline()` stage that resolves to `null` (or throws) ends that
+  item: its later stages never run and its slot is `null` (Claude Code 2.1.316; not a
+  documented API). So every `agent()` starts inside `then()` with
+  `.catch(agentFailed(label))`, a first stage whose agent may die wraps its result, and a
+  `null` slot is filled or read as a failure — never dropped with `filter(Boolean)`
+  (*Adding a workflow* in `docs/workflow-graphs.md`). <!-- rec:TR-aea448fee314 -->
+- A workflow runs at most 2 agents at once in this 4-CPU cloud container (consistent with
+  min(16, CPUs − 2)); three workflows launched together ran 6 at once (2026-10-31). That
+  bounds parallelism, not cost — the cost bounds are the per-call caps (`critic-panel`
+  maxVerifiers 30, `scan-docs` maxStories 30, `loop-iteration` maxItems 5) and the budget
+  floors. <!-- rec:TR-34466b07a374 -->
 - **Model tiering (graph-engineering): fan-out → fast tier, gate → strong tier.**
   High-volume, individually-low-stakes fan-out nodes (critics, per-story evidence,
   per-dimension gaps, per-category E2E cases) run `model: 'sonnet'`; the high-stakes
@@ -100,9 +116,12 @@
   `docs/workflow-graphs.md` (Mermaid), with the model tier per node. Update the diagram
   when you add a node, edge, or change a tier — `/improve-skills` and `/dream lint`
   flag drift between a diagram and its script.
-- A command's `description` also lets Claude **auto-invoke** it. Add
-  `disable-model-invocation: true` to heavy/code-changing commands that should be
-  manual-only.
+- A command's `description` also lets Claude **auto-invoke** it.
+  `disable-model-invocation: true` stops that but also blocks Claude's Skill call, so a
+  command is manual-only only if it rewrites the governing prompt surface or runs a measured
+  fan-out `CLAUDE.md` never asks for (today `/improve-skills` and `/bench-checkers`), marked
+  `(manual-only)` in its `.claude/skills-index.md` row; `pnpm test` fails when a flag and its
+  row disagree. <!-- rec:TR-dc21201014e2 -->
 - Team-wide permissions belong in committed `.claude/settings.json`;
   `.claude/settings.local.json` is conventionally personal (often git-ignored).
   Auto-allowing `git commit`/`git add` lets the agent commit without a prompt — opt

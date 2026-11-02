@@ -17,7 +17,7 @@ import {
   renameSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -194,6 +194,84 @@ export function validate(schema, value, root = schema, path = "$") {
   return errs;
 }
 
+// Policy v3, the memory write boundary: external content (a web page, a search result, a PR
+// or issue comment, an outside MCP result, another agent's text) is attribution, never
+// licensing evidence for a wiki fact — it is cited as reading ("external:<source>"), and only
+// a local check licenses the fact, so a licensing wiki verdict needs evidence other than
+// reading (the evidence gate alone lets a causal or predictive claim qualify on reading).
+// rule/human/record/reading are exempt from the URL check, so a WCAG URL stays citable as the
+// rule a normative fact invokes; a file_line, and each part of a diff ref, must be a repo path
+// (below). Consistency, not truth: a page saved into the repo and cited as file_line still
+// passes, a rule, human or record item is trusted by its kind (a blog cited as a rule, a PR
+// comment as a human decision, or any id cited as a record passes — a record ref is not
+// checked to name an existing record), and only a scheme:// URL is recognized (a scheme-less
+// example.com/x or an http:/… form is not).
+const URL_EXEMPT_KINDS = ["rule", "human", "record", "reading"];
+const LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]", "0.0.0.0"];
+// A wiki file_line, and each comma-separated part of a wiki diff ref, names a repo file — the
+// paths `pnpm trace reaudit` reads (refPathParts) and diffs: its `git diff <commit> -- <path>`
+// exits 128 outside the repo (the fact never leaves the queue), and a ~ or drive-letter path
+// never shows a change.
+const NOT_REPO_RELATIVE = /^(?:[/\\~]|[a-z]:[/\\])|(?:^|[/\\])\.\.(?:[/\\:]|$)/i;
+
+/** Is the URL's host this machine? Parsed, not pattern-matched: the host of
+ * "http://localhost:3000@evil.example/" is evil.example. Unparsable → no (fail closed). */
+function isLocalUrl(url) {
+  // Prose punctuation after a URL ("http://localhost:3000, then …") is not part of it, and
+  // neither is a typographic closing quote (” ’ »). It goes one character at a time, so
+  // "(http://[::1])" keeps the "]" its host needs; only a trailing run of punctuation goes,
+  // never an "@" or anything before one.
+  const candidates = [url];
+  while (/[.,;:!?)\]}>'"\u201d\u2019\u00bb]$/.test(candidates.at(-1))) candidates.push(candidates.at(-1).slice(0, -1));
+  for (const candidate of candidates) {
+    try {
+      const host = new URL(candidate).hostname;
+      if (LOCAL_HOSTS.includes(host) || host.endsWith(".localhost")) return true;
+    } catch {
+      // this reading does not parse; a shorter one may
+    }
+  }
+  return false;
+}
+
+/** The first URL in a free-text ref whose host is not local, or null. A URL runs from its
+ * scheme to the next whitespace: ending it at a quote or bracket would read
+ * "http://localhost'@evil.example/" as localhost. Every scheme start counts, so a URL
+ * nested in another's query is checked too. */
+function nonLocalUrl(ref) {
+  const text = String(ref);
+  for (const m of text.matchAll(/[a-z][a-z0-9+.-]*:\/\//gi)) {
+    const url = text.slice(m.index).split(/\s/, 1)[0];
+    if (!isLocalUrl(url)) return url;
+  }
+  return null;
+}
+
+function wikiBoundaryViolations(rec) {
+  const v = [];
+  const items = (rec.evidence || []).filter(Boolean);
+  // External content is cited as reading, and the evidence gate lets a causal or predictive
+  // claim qualify on any evidence at all — so reading alone must not license a wiki fact.
+  if (LICENSING.includes(rec.final_status) && items.length && items.every((e) => e.kind === "reading")) {
+    v.push(`a wiki ${rec.final_status} needs evidence other than reading — reading (recollection, or external content cited as "external:<source>") never licenses a wiki fact (policy v3): license it with a local check run this session, or defer it`);
+  }
+  for (const e of items) {
+    if (URL_EXEMPT_KINDS.includes(e.kind)) continue;
+    const ref = String(e.ref || "");
+    const url = nonLocalUrl(ref);
+    if (url) {
+      v.push(`${e.kind} evidence cites a URL whose host is not local or that does not parse (${url.slice(0, 80)}) — external content never licenses a wiki fact (policy v3): cite it as reading "external:<source>" and license the fact with a local check, or defer it`);
+    }
+    // Every part reaudit reads as a path, trimmed as pathFromRef reads it: leading whitespace must not hide a / or ..
+    for (const part of refPathParts(e)) {
+      if (!NOT_REPO_RELATIVE.test(part.trim())) continue;
+      const what = e.kind === "diff" ? "diff ref must name repo-relative paths" : "file_line must be repo-relative";
+      v.push(`a wiki fact's ${what} — no leading / or ~, no drive letter, no .. segment (${part.slice(0, 80)}): pnpm trace reaudit diffs repo paths only (policy v3)`);
+    }
+  }
+  return v;
+}
+
 // Cross-field rules a JSON Schema cannot express. "Gates verify field consistency, not
 // field truth" (TRACE §7.2) — these keep a record internally coherent with the policy.
 export function semanticViolations(rec) {
@@ -220,6 +298,8 @@ export function semanticViolations(rec) {
   if (status === "revise" && !rec.repair) v.push("revise needs a repair (the restated claim or bounded fix)");
   if (rec.revises && rec.revises === rec.record_id) v.push("a record cannot revise itself");
   if (rec.reuses && rec.reuses === rec.record_id) v.push("a record cannot reuse itself");
+  // Policy v3: the memory write boundary, version-gated like v2 so older records still replay.
+  if (Number(rec.policy_version) >= 3 && String(rec.claim_id || "").startsWith("wiki:")) v.push(...wikiBoundaryViolations(rec));
   return v;
 }
 
@@ -470,18 +550,22 @@ export function latestByClaim(records, superseded) {
  * `pnpm trace query --brief` — the compact prior-record shape passed to critic-panel as
  * args.priorRecords (the newest BRIEF_WINDOW records). It must carry every field
  * critic-panel reads from a prior (a contract test enforces this): a reused `qualify`
- * that lost its qualifier would be acted on at full strength.
+ * that lost its qualifier would be acted on at full strength. `severity` and `cleared`
+ * (a CLEAR action names the record) let the round's completion see an open prior blocker
+ * in a lens it did not review. `actions` is the store's consumer actions; without them
+ * nothing reads as cleared (fail closed).
  */
 export const BRIEF_WINDOW = 40;
-export function briefRecords(recs) {
+export function briefRecords(recs, actions = []) {
+  const cleared = new Set(actions.filter((a) => a && a.action === "CLEAR").map((a) => a.record_id));
   return [...recs]
     .sort((x, y) => String(y.created_at).localeCompare(String(x.created_at)))
     .slice(0, BRIEF_WINDOW)
     .map((r) => ({
       record_id: r.record_id, claim_id: r.claim_id, claim_text: r.claim_text, claim_type: r.claim_type,
-      final_status: r.final_status, qualifier: r.qualifier || "", repair: r.repair || "",
+      severity: r.severity || "", final_status: r.final_status, qualifier: r.qualifier || "", repair: r.repair || "",
       failed_gates: r.failed_gates || [], missing: r.missing || [], reason: String(r.reason || "").slice(0, 200),
-      provenance: { tree: r.provenance && r.provenance.tree }, created_at: r.created_at,
+      provenance: { tree: r.provenance && r.provenance.tree }, created_at: r.created_at, cleared: cleared.has(r.record_id),
     }));
 }
 
@@ -491,30 +575,218 @@ export function pathFromRef(ref) {
   return m ? m[1] : null;
 }
 
+/** The parts of an evidence item that reaudit reads as paths (each through pathFromRef): a file_line's whole ref, each comma-separated part of a diff ref. */
+function refPathParts(e) {
+  if (e.kind === "file_line") return [String(e.ref || "")];
+  if (e.kind === "diff") return String(e.ref || "").split(/,\s*/);
+  return [];
+}
+
 /**
  * Re-audit (Mnemosyne reconsolidation): latest licensing records whose file evidence
  * changed since the record's commit. `changedSince(commit, path) → boolean` is injected.
+ * So is `reachable(commit) → boolean`: a record whose commit the repository no longer has
+ * (squashed away and pruned, or a shallow clone) cannot be diffed at all, so it is listed
+ * apart — `unreachable` plus every cited path, each needing a re-check — never as
+ * "evidence changed".
  */
-export function reauditCandidates(records, superseded, changedSince) {
+export function reauditCandidates(records, superseded, changedSince, reachable = () => true) {
   const out = [];
   for (const r of latestByClaim(records, superseded).values()) {
     if (!LICENSING.includes(r.final_status)) continue;
     const paths = new Set();
     for (const e of r.evidence) {
-      if (e.kind === "file_line") {
-        const p = pathFromRef(e.ref);
+      for (const part of refPathParts(e)) {
+        const p = pathFromRef(part);
         if (p) paths.add(p);
-      } else if (e.kind === "diff") {
-        for (const part of String(e.ref).split(/,\s*/)) {
-          const p = pathFromRef(part);
-          if (p) paths.add(p);
-        }
       }
+    }
+    if (!paths.size) continue;
+    if (!reachable(r.provenance.commit)) {
+      out.push({ record_id: r.record_id, claim_id: r.claim_id, claim_text: r.claim_text, unreachable: r.provenance.commit, paths: [...paths] });
+      continue;
     }
     const changed = [...paths].filter((p) => changedSince(r.provenance.commit, p));
     if (changed.length) out.push({ record_id: r.record_id, claim_id: r.claim_id, claim_text: r.claim_text, changed });
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Wiki ↔ store agreement (`pnpm trace wiki-check`): the memory-admission contract of /dream
+// (topics/trace.md) checked mechanically. Consistency, not truth: whether a cited fact still
+// holds is `pnpm trace reaudit`'s queue, and a legacy bullet (one without a rec comment, older
+// than TRACE) is not checked at all.
+
+/** The memory wiki's directory. Pages are named relative to it ("topics/<page>.md"), as action refs are. */
+export const MEMORY_DIR = join(ROOT, ".claude/memory");
+/** The page directory wiki-check scans: every <WIKI_TOPICS>/*.md page in MEMORY_DIR. */
+export const WIKI_TOPICS = "topics";
+/**
+ * Size limits. index.md is imported into every session, so passing its limit is an error; a
+ * topic page is read on demand, so passing its limit is a warning (propose a split). The policy
+ * page (POLICY_PATH) carries the whole TRACE policy and is parsed by tests, so its limit is higher.
+ */
+export const WIKI_LIMITS = {
+  indexMaxLines: 150,
+  pageMaxLines: 200,
+  policyPage: relative(MEMORY_DIR, POLICY_PATH).split(sep).join("/"),
+  policyPageMaxLines: 400,
+};
+// Only the provenance-comment form cites a record (ingest writes `<!-- rec:TR-… -->`); an id in prose does not.
+const REC_COMMENT = /<!--\s*rec:(TR-[0-9a-f]{12})\s*-->/g;
+// A comment that opens like one (`<!--`, optional whitespace, `rec:`) but is not exactly that form is a typo
+// and an error, never a legacy bullet: read as one, it would switch the check off for its fact. Outside code
+// only — the form shown as code (inline or fenced, as the policy page documents it) is not a comment.
+const REC_COMMENT_OPEN = /<!--\s*rec:/g;
+const REC_COMMENT_AT = new RegExp(`^${REC_COMMENT.source}`);
+const QUARANTINE_ROW = /^\|\s*(TR-[0-9a-f]{12})\s*\|/gm;
+const COMMIT_ACTIONS = ["COMMIT", "COMMIT_QUALIFIED"];
+// /dream's decisions on a candidate fact (the discipline table: COMMIT / COMMIT_QUALIFIED / QUARANTINE / REJECT).
+// A HOLD or REAUDIT decides nothing about where a fact lives, so it neither starts nor ends a quarantine.
+const WIKI_DECISIONS = [...COMMIT_ACTIONS, "QUARANTINE", "REJECT"];
+/** Lines as `wc -l` counts them, plus a last line that has no newline. */
+const lineCount = (text) => (text === "" ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0));
+const lineOf = (text, index) => text.slice(0, index).split("\n").length;
+/** An action ref as a page path: refs are relative to .claude/memory, written with or without that prefix (and a leading ./). */
+const pageRef = (ref) => String(ref || "").replace(/^(?:\.\/)?(?:\.claude\/memory\/)?/, "");
+/** A record of the memory wiki: /dream files every fact and candidate under claim_id wiki:<topic>:<slug>. */
+const isWikiClaim = (rec) => String(rec?.claim_id ?? "").startsWith("wiki:");
+// The memory write boundary follows the commit, not the claim id: policy v3 screens only a wiki: record's evidence, so
+// only a wiki: record may be committed to a topic page, quarantined or cited by a rec comment. Every refusal names this fix.
+const READMIT = "re-admit the fact through /dream as wiki:<topic>:<slug>";
+/**
+ * The text with every inline `code` span and ``` / ~~~ fenced line overwritten by "_" (so offsets and line
+ * numbers hold, and code reads as neither a comment nor whitespace). Fences toggle as story-map.mjs reads them.
+ */
+function maskCode(text) {
+  const mask = (s) => "_".repeat(s.length);
+  let fenced = false;
+  return text
+    .split("\n")
+    .map((line) => {
+      if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
+      else if (!fenced) return line.replace(/(`+).*?\1/g, mask);
+      return mask(line);
+    })
+    .join("\n");
+}
+/** A ref to a page in the scanned directory, whether or not that page still exists (a deleted page's facts stay checked). */
+const inWikiPages = (ref) => new RegExp(`^${WIKI_TOPICS}/[^/]+\\.md$`).test(ref);
+
+/**
+ * Where the wiki and the store disagree. pages = [{ path: "topics/<page>.md", text }];
+ * quarantine and index = that file's text, or null when it is missing; state = replay(…).
+ * Errors: a rec comment that names no record, one whose claim is not a wiki: claim, a
+ * superseded, outdated or non-licensing one, or one with no COMMIT/COMMIT_QUALIFIED whose ref is
+ * the citing page; a malformed rec comment; a latest licensing wiki: record committed to a
+ * topics/ page that no page cites (a ref outside topics/, such as a bridged domain wiki, is not
+ * checked); a quarantine.md row naming a record whose claim is not a wiki: claim; quarantine.md
+ * rows and the latest wiki: records whose last decision is QUARANTINE differing either way;
+ * index.md over its limit. Warnings: a page over its limit. A replayed line the writer refuses
+ * today (a non-wiki: COMMIT to a topic page, or QUARANTINE) is an error only where it is read:
+ * a rec comment or a quarantine.md row that names its record.
+ */
+export function wikiViolations({ pages = [], quarantine = null, index = null, state, limits = WIKI_LIMITS }) {
+  const errors = [];
+  const warnings = [];
+  const { records, actions, superseded } = state;
+  const latest = latestByClaim(records, superseded);
+  const actionsOf = (id) => actions.get(id) || [];
+  const committedTo = (id) => [...new Set(actionsOf(id).filter((a) => COMMIT_ACTIONS.includes(a.action)).map((a) => pageRef(a.ref)))];
+  const revisedBy = new Map([...records.values()].filter((r) => r.revises).map((r) => [r.revises, r.record_id]));
+  const cited = new Set();
+
+  for (const { path, text } of pages) {
+    const t = String(text ?? "");
+    const n = lineCount(t);
+    const max = path === limits.policyPage ? limits.policyPageMaxLines : limits.pageMaxLines;
+    if (n > max) warnings.push(`${path}: ${n} lines (> ${max}) — propose a split; moving a fact is a COMMIT with the new --ref (/dream lint 1e)`);
+    for (const m of t.matchAll(REC_COMMENT)) {
+      const id = m[1];
+      const at = `${path}:${lineOf(t, m.index)}: rec:${id}`;
+      cited.add(id);
+      const r = records.get(id);
+      if (!r) {
+        errors.push(`${at} names no record in the store — admit the fact through /dream (its record, then COMMIT --ref ${path}); if you started the store empty (an adopter), strip the comment and keep the fact as a legacy bullet`);
+        continue;
+      }
+      // Whatever its verdict and actions: no action can make such a citation valid (a replayed COMMIT included).
+      if (!isWikiClaim(r)) {
+        errors.push(`${at} (${r.claim_id}) is not a wiki: record — only a wiki: record licenses a wiki fact, whatever its actions (the memory write boundary follows the commit): ${READMIT}, and cite that record`);
+        continue;
+      }
+      if (superseded.has(id)) {
+        errors.push(`${at} is superseded: ${revisedBy.get(id)} revises it — remove the bullet (a retired fact) or cite the claim's latest licensing record (a rewritten fact); /dream lint 1e`);
+        continue;
+      }
+      const cur = latest.get(r.claim_id);
+      if (cur.record_id !== id) {
+        errors.push(`${at} is not the latest record for ${r.claim_id}: ${cur.record_id} is newer — cite the latest licensing record, or retire the bullet; /dream lint 1e`);
+        continue;
+      }
+      if (!LICENSING.includes(r.final_status)) {
+        errors.push(`${at} is a "${r.final_status}" record — only an accept/qualify record licenses a wiki fact (a deferred candidate is a quarantine.md row)`);
+        continue;
+      }
+      const refs = committedTo(id);
+      if (!refs.includes(path)) {
+        const verb = r.final_status === "qualify" ? "COMMIT_QUALIFIED" : "COMMIT";
+        errors.push(
+          `${at} has no COMMIT/COMMIT_QUALIFIED action with --ref ${path}` +
+            (refs.length ? ` (it is committed to ${refs.join(", ")}: moving a fact is a ${verb} with the new --ref)` : ` — once the bullet is written: pnpm trace act ${id} dream ${verb} --ref ${path}`),
+        );
+      }
+    }
+    for (const m of maskCode(t).matchAll(REC_COMMENT_OPEN)) {
+      if (REC_COMMENT_AT.test(t.slice(m.index))) continue;
+      const shown = /^<!--[^\n]*?(?:-->|$)/m.exec(t.slice(m.index))[0].slice(0, 80);
+      errors.push(`${path}:${lineOf(t, m.index)}: malformed rec comment ${shown}: the form is <!-- rec:TR-<12 lowercase hex> --> — correct it to cite the fact's record (a typo is never read as a legacy bullet)`);
+    }
+  }
+
+  for (const r of latest.values()) {
+    if (!String(r.claim_id).startsWith("wiki:") || !LICENSING.includes(r.final_status) || cited.has(r.record_id)) continue;
+    const refs = committedTo(r.record_id).filter(inWikiPages);
+    if (refs.length) {
+      errors.push(`${r.record_id} (${r.claim_id}) is committed to ${refs.join(", ")} but no topic page cites it — a fact leaves the wiki only through a revising record (/dream lint 1e), never a silent delete: restore its bullet ending in <!-- rec:${r.record_id} -->, or retire it`);
+    }
+  }
+
+  // Quarantined while its LAST decision is QUARANTINE: a candidate later rejected or filed directly (REJECT and
+  // COMMIT_QUALIFIED need no revising record) has left it. Last = newest by created_at, as latestByClaim orders
+  // records (a later line wins a tie), so the line order a union merge leaves cannot flip it.
+  const lastDecision = (id) =>
+    actionsOf(id)
+      .filter((a) => WIKI_DECISIONS.includes(a.action))
+      .reduce((last, a) => (!last || a.created_at >= last.created_at ? a : last), null)?.action;
+  const quarantined = (id) => lastDecision(id) === "QUARANTINE";
+  const q = String(quarantine ?? "");
+  const rows = new Set();
+  for (const m of q.matchAll(QUARANTINE_ROW)) {
+    const id = m[1];
+    const at = `quarantine.md:${lineOf(q, m.index)}: ${id}`;
+    rows.add(id);
+    const r = records.get(id);
+    if (!r) errors.push(`${at} names no record in the store — a row lists a candidate /dream deferred (its record, then QUARANTINE --ref quarantine.md)`);
+    else if (!isWikiClaim(r)) errors.push(`${at} (${r.claim_id}) is not a wiki: record — only /dream quarantines, and only a wiki: candidate has a row: remove the row; ${READMIT}`);
+    else if (superseded.has(id) || latest.get(r.claim_id).record_id !== id) errors.push(`${at} was re-adjudicated: ${revisedBy.get(id) || latest.get(r.claim_id).record_id} is newer — remove its row (/dream lint 1d)`);
+    else if (!actionsOf(id).some((a) => a.action === "QUARANTINE")) errors.push(`${at} has no QUARANTINE action — only a candidate /dream quarantined has a row`);
+    else if (!quarantined(id)) errors.push(`${at} is no longer quarantined (its last decision is ${lastDecision(id)}) — remove its row (/dream lint 1d)`);
+  }
+  // A row is asked only of /dream's own candidates, as the reverse rule asks only a wiki: fact for its citation: a row
+  // naming any other record is itself the error above, and the writer refuses a QUARANTINE on one.
+  for (const r of latest.values()) {
+    if (isWikiClaim(r) && quarantined(r.record_id) && !rows.has(r.record_id)) {
+      errors.push(`${r.record_id} (${r.claim_id}) is QUARANTINEd but quarantine.md has no row for it — add its row (record | candidate fact | missing | since)`);
+    }
+  }
+
+  if (index != null) {
+    const n = lineCount(String(index));
+    if (n > limits.indexMaxLines) errors.push(`index.md: ${n} lines (> ${limits.indexMaxLines}) — it is imported into every session: keep it to summaries and links (facts belong in topic pages)`);
+  }
+  return { errors, warnings };
 }
 
 // ---------------------------------------------------------------------------
@@ -628,6 +900,13 @@ export function scoreBench(manifest, results, thresholds = { invariance: 0.8 }) 
   // Validity: a run whose agent returned no verdict measured nothing — scoring it as a
   // hold would let a dead checker look perfect on the bad fixtures.
   const runs = clean.filter((r) => !r.noVerdict);
+  // What an arm actually measured: the manifest fixtures among its scored runs, beside the
+  // manifest's counts (`fixtures`) — a run over part of the manifest (bench-args --only) must not
+  // read as a full bench (l3Check needs the verifier arm over every fixture in every repeat).
+  const measuredOf = (rs) => {
+    const ids = new Set(rs.map((r) => r.fixtureId));
+    return { bad: bad.filter((id) => ids.has(id)).length, good: good.filter((id) => ids.has(id)).length };
+  };
   const out = {
     fixtures: { bad: bad.length, good: good.length },
     contaminatedRuns: all.filter((r) => r.contaminated).length,
@@ -651,16 +930,31 @@ export function scoreBench(manifest, results, thresholds = { invariance: 0.8 }) 
   if (out.noVerdictRuns) {
     out.flags.push(`F0 validity: ${out.noVerdictRuns} run(s) returned no verdict and were excluded — the measured arm is smaller than it looks`);
   }
+  // Accounting: a run the workflow started (its `agents` count) but never returned measured
+  // nothing either — a silently shrunken sample must not read as a complete one.
+  const expectedRuns = Number(results?.expectedRuns) || 0;
+  out.missingRuns = Math.max(0, expectedRuns - all.length);
+  if (out.missingRuns) {
+    out.flags.push(`F0 validity: ${out.missingRuns} run(s) missing — the workflow started ${expectedRuns} agent(s) but returned ${all.length} run(s); the measured sample is smaller than it looks`);
+  }
 
   // --- verifier arm (loop-iteration's checker on seeded diffs) ---
   const ver = runs.filter((r) => r.arm === "verifier" && fixtures.has(r.fixtureId));
   if (ver.length) {
     const repeats = [...new Set(ver.map((r) => r.repeat ?? 0))].sort((x, y) => x - y);
+    // The arm measured a fixture only when EVERY repeat index present measured it (the
+    // intersection, not the union): bench-score concatenates results files, so a part-manifest
+    // run at repeat 2 scored together with a full-manifest run at repeat 1 would otherwise read
+    // as a full bench at repeat ≥ 2 although part of the manifest was measured once — F3
+    // (procedural invariance) could never fire for it.
+    const inEveryRepeat = (id) => repeats.every((rep) => ver.some((r) => r.fixtureId === id && (r.repeat ?? 0) === rep));
     const per = repeats.map((rep) => {
       const rs = ver.filter((r) => (r.repeat ?? 0) === rep);
       const licensed = (r) => LICENSING.includes(r.verdict) && !r.denylistHit;
       return {
         repeat: rep,
+        // What this repeat measured, so a record shows where coverage fell short.
+        measured: measuredOf(rs),
         wrongAcceptRate: rate(rs.filter((r) => isBad(r.fixtureId) && licensed(r)).length, rs.filter((r) => isBad(r.fixtureId)).length),
         falseHoldRate: rate(rs.filter((r) => !isBad(r.fixtureId) && !licensed(r)).length, rs.filter((r) => !isBad(r.fixtureId)).length),
         deferRate: rate(rs.filter((r) => r.verdict === "defer").length, rs.length),
@@ -683,6 +977,7 @@ export function scoreBench(manifest, results, thresholds = { invariance: 0.8 }) 
     }
     out.arms.verifier = {
       repeats: repeats.length,
+      measured: measuredOf(ver.filter((r) => inEveryRepeat(r.fixtureId))),
       wrongAcceptRate: avg("wrongAcceptRate"),
       falseHoldRate: avg("falseHoldRate"),
       deferRate: avg("deferRate"),
@@ -727,7 +1022,7 @@ export function scoreBench(manifest, results, thresholds = { invariance: 0.8 }) 
   const single = runs.filter((r) => r.arm === "single-pass" && fixtures.has(r.fixtureId));
   if (single.length) {
     const blocks = new Map(single.map((r) => [r.fixtureId, !!r.block]));
-    out.arms.singlePass = { agents: single.length, ...detection(blocks) };
+    out.arms.singlePass = { agents: single.length, measured: measuredOf(single), ...detection(blocks) };
   }
   const panel = runs.filter((r) => r.arm === "panel" && fixtures.has(r.fixtureId));
   if (panel.length) {
@@ -746,6 +1041,7 @@ export function scoreBench(manifest, results, thresholds = { invariance: 0.8 }) 
     out.arms.panel = {
       agents: panel.length,
       critics: critics.length,
+      measured: measuredOf(panel),
       anyBlock: detection(anyBlock),
       majority: detection(majority),
       meanPairwiseErrorCorrelation: rho,
@@ -787,6 +1083,29 @@ export function storeFiles(storePath) {
 
 export function loadEntries(storePath) {
   return storeFiles(storePath).flatMap((f) => parseLines(readFileSync(f, "utf8"), f));
+}
+
+/**
+ * The memory wiki as wikiViolations reads it: every <WIKI_TOPICS>/*.md page (sorted, its path
+ * relative to memoryDir), quarantine.md and index.md. A missing file is null; a missing topics/
+ * directory means no pages.
+ */
+export function loadWiki(memoryDir = MEMORY_DIR) {
+  const read = (p) => {
+    try {
+      return readFileSync(p, "utf8");
+    } catch {
+      return null; // missing, or not a regular file
+    }
+  };
+  let names = [];
+  try {
+    names = readdirSync(join(memoryDir, WIKI_TOPICS)).filter((f) => f.endsWith(".md")).sort();
+  } catch {
+    // no topics/ directory: no pages
+  }
+  const pages = names.map((f) => ({ path: `${WIKI_TOPICS}/${f}`, text: read(join(memoryDir, WIKI_TOPICS, f)) })).filter((p) => p.text !== null);
+  return { pages, quarantine: read(join(memoryDir, "quarantine.md")), index: read(join(memoryDir, "index.md")) };
 }
 
 /**
@@ -855,7 +1174,25 @@ export function writeRecords(drafts, { storePath, now, policyVersion, commit, br
  */
 export const EVENT_ACTIONS = ["REUSE"];
 
-/** Append consumer actions all-or-nothing, enforcing the action matrix (fail closed). */
+/**
+ * The memory write boundary at the writer (append time only: replay, and so lint, is unchanged — wiki-check catches a
+ * replayed line where it is read). Only a wiki: record is COMMITted or COMMIT_QUALIFIED to a topic page (a ref under
+ * topics/, normalised as wiki-check reads refs, so ./topics/x.md and .claude/memory/topics/x.md count) or QUARANTINEd
+ * (only /dream quarantines). A COMMIT with any other ref (a story status's --ref US-001) is untouched. Never echoes the
+ * ref: a refusal's text is printed, and the action itself is screened for bench ground truth.
+ */
+function wikiActionViolation(rec, action, ref) {
+  if (isWikiClaim(rec)) return null;
+  if (COMMIT_ACTIONS.includes(action) && pageRef(ref).startsWith(`${WIKI_TOPICS}/`)) {
+    return `${action} to a topic page (a --ref under ${WIKI_TOPICS}/) on ${rec.record_id} (${rec.claim_id}), which is not a wiki: record — only a wiki: record is committed to a topic page (the memory write boundary follows the commit): ${READMIT}`;
+  }
+  if (action === "QUARANTINE") {
+    return `QUARANTINE on ${rec.record_id} (${rec.claim_id}), which is not a wiki: record — only /dream quarantines, and only a wiki: candidate: ${READMIT}`;
+  }
+  return null;
+}
+
+/** Append consumer actions all-or-nothing, enforcing the action matrix and the memory write boundary (fail closed). */
 export function appendActions(drafts, { storePath, now, policyVersion, schema, forbidden = [] }) {
   const sch = schema || loadSchema();
   const prior = replay(loadEntries(storePath), sch, policyVersion);
@@ -879,6 +1216,8 @@ export function appendActions(drafts, { storePath, now, policyVersion, schema, f
     else {
       const why = actionViolation(rec, a.action, prior.superseded, prior.latestOfClaim);
       if (why) violations.push(why);
+      const boundary = wikiActionViolation(rec, a.action, a.ref);
+      if (boundary) violations.push(boundary);
     }
     return { a, violations };
   });
@@ -1109,6 +1448,12 @@ export function markUnscanned(runs, transcripts) {
   return runs.map((r) => (r.noVerdict || keys.some((k) => runMatchesKey(r, k)) ? r : { ...r, unscanned: true }));
 }
 
+/** A marked block of a workflow source, marker lines included (the text the parity tests compare), or null. */
+function workflowBlock(text, tag) {
+  const m = new RegExp(`// <${tag}>\\n[\\s\\S]*?// </${tag}>\\n`).exec(String(text ?? ""));
+  return m ? m[0] : null;
+}
+
 /**
  * Evaluate a marked deterministic block from a workflow script (workflows cannot be
  * imported) and return the named bindings — used to run the PRODUCTION denylist
@@ -1118,9 +1463,9 @@ export function loadWorkflowBlock(file, tag, names, { source } = {}) {
   // `source` lets a caller evaluate a TRUSTED copy (e.g. `git show HEAD:<file>`) instead
   // of the working tree, which a patch under review may have rewritten.
   const text = source ?? readFileSync(join(ROOT, ".claude/workflows", file), "utf8");
-  const m = new RegExp(`// <${tag}>\\n[\\s\\S]*?// </${tag}>\\n`).exec(text);
-  if (!m) throw new Error(`${file}: no <${tag}> block`);
-  return new Function(`${m[0]}\nreturn { ${names.join(", ")} };`)();
+  const block = workflowBlock(text, tag);
+  if (block === null) throw new Error(`${file}: no <${tag}> block`);
+  return new Function(`${block}\nreturn { ${names.join(", ")} };`)();
 }
 
 /**
@@ -1208,36 +1553,127 @@ export function benchArgs(manifest, { arms, repeat, critics, only, runId }) {
   };
 }
 
-/** A TRACE-lite record draft for a scored bench run (a measured claim about our checkers). */
-export function benchRecordDraft(score, { resultsRef, priorRecordId, runIds = [] }) {
+/**
+ * A TRACE-lite record draft for a scored bench run (a measured claim about our checkers). The
+ * claim states the fixtures each scored arm measured next to the manifest's counts — for the
+ * verifier arm, the fixtures it measured in every repeat (each `perRepeat` entry carries its own) —
+ * and the measurement item carries both (`fixtures`, `arms.<arm>.measured`), so a run over part of
+ * the manifest never reads as a full bench (l3Check reads them). `verifierHash` (verifierBlockHash of
+ * the production verifier, read by the caller) names the <loop-verifier> block the run measured —
+ * only when the score has a verifier arm: a run without one measured no verifier. Without a named
+ * block the record never passes l3Check.
+ */
+export function benchRecordDraft(score, { resultsRef, priorRecordId, runIds = [], verifierHash }) {
   const v = score.arms.verifier || {};
   const s = score.arms.singlePass || {};
   const p = score.arms.panel || {};
   const f = (x) => (x == null ? "n/a" : Number(x).toFixed(2));
+  // "<measured>/<manifest> bad and <measured>/<manifest> good fixtures"; an arm that did not run measured none.
+  const of = (m) => `${m?.bad ?? 0}/${score.fixtures.bad} bad and ${m?.good ?? 0}/${score.fixtures.good} good fixtures`;
   const parts = [
-    `verifier WrongAcceptRate=${f(v.wrongAcceptRate)} FalseHoldRate=${f(v.falseHoldRate)} invariance=${f(v.proceduralInvariance)}`,
-    s.recall != null ? `single-pass recall=${f(s.recall)} false-block=${f(s.falseBlockRate)}` : null,
-    p.anyBlock ? `panel(any) recall=${f(p.anyBlock.recall)} n_eff=${f(p.effectivePanelSize)}` : null,
+    `verifier measured ${of(v.measured)}${score.arms.verifier ? " in every repeat" : ""}: WrongAcceptRate=${f(v.wrongAcceptRate)} FalseHoldRate=${f(v.falseHoldRate)} invariance=${f(v.proceduralInvariance)}`,
+    score.arms.singlePass ? `single-pass measured ${of(s.measured)}: recall=${f(s.recall)} false-block=${f(s.falseBlockRate)}` : null,
+    p.anyBlock ? `panel(any) measured ${of(p.measured)}: recall=${f(p.anyBlock.recall)} n_eff=${f(p.effectivePanelSize)}` : null,
   ].filter(Boolean);
   return {
     writer_id: "trace-bench/score",
     claim_id: "bench:trace-bench-lite",
-    claim_text: `TRACE-Bench-lite (${score.fixtures.bad} bad / ${score.fixtures.good} good fixtures): ${parts.join("; ")}`,
+    claim_text: `TRACE-Bench-lite (manifest: ${score.fixtures.bad} bad / ${score.fixtures.good} good fixtures): ${parts.join("; ")}`,
     claim_type: "measured",
     subject: ".claude/trace/bench/fixtures.json",
     // Counts only — never fixture ids or defect text: the record store is in the tree the
     // next bench run's agents can grep (contamination rule above).
     // The run ids are recorded so a later --record of the SAME run (e.g. reused args) is refused.
-    evidence: [{ kind: "measurement", ref: `pnpm trace bench-score ${resultsRef}${runIds.length ? ` [runs ${runIds.join(",")}]` : ""}`, result: JSON.stringify({ arms: score.arms, externalJudgeGap: Object.fromEntries(Object.entries(score.externalJudgeGap || {}).map(([k, ids]) => [k, ids.length])), contaminatedRuns: score.contaminatedRuns }).slice(0, 4000) }],
+    evidence: [
+      { kind: "measurement", ref: `pnpm trace bench-score ${resultsRef}${runIds.length ? ` [runs ${runIds.join(",")}]` : ""}`, result: JSON.stringify({ fixtures: score.fixtures, arms: score.arms, externalJudgeGap: Object.fromEntries(Object.entries(score.externalJudgeGap || {}).map(([k, ids]) => [k, ids.length])), contaminatedRuns: score.contaminatedRuns }).slice(0, 4000) },
+      // L3 freshness: the verifier this run measured, so a later edit to it shows (l3Check) — only
+      // when it had a verifier arm, else the record would name a verifier it never measured.
+      ...(verifierHash && score.arms.verifier ? [{ kind: "file_line", ref: VERIFIER_FILE, result: `<loop-verifier> sha256=${verifierHash}` }] : []),
+    ],
     failed_gates: score.flags.map((x) => x.split(":")[0]),
     missing: [],
-    // Excluded runs (contamination or no verdict) shrink the sample: the numbers hold
-    // only for the runs that were actually measured.
-    ...(score.contaminatedRuns || score.unscannedRuns || score.noVerdictRuns
-      ? { final_status: "qualify", qualifier: `measured on the clean runs only — ${score.contaminatedRuns || 0} contaminated, ${score.unscannedRuns || 0} unscanned and ${score.noVerdictRuns || 0} no-verdict run(s) were excluded` }
+    // Excluded runs (contamination or no verdict) and missing runs (started, never returned)
+    // shrink the sample: the numbers hold only for the runs that were actually measured.
+    ...(score.contaminatedRuns || score.unscannedRuns || score.noVerdictRuns || score.missingRuns
+      ? { final_status: "qualify", qualifier: `measured on the clean runs only — ${score.contaminatedRuns || 0} contaminated, ${score.unscannedRuns || 0} unscanned and ${score.noVerdictRuns || 0} no-verdict run(s) were excluded${score.missingRuns ? `; ${score.missingRuns} run(s) missing (started, never returned)` : ""}` }
       : { final_status: "accept" }),
     reason: "deterministic scoring of the raw bench runs against the manifest's ground truth; the flags are the pre-registered falsification criteria that fired",
     provenance: { workflow: "trace-bench" },
     ...(priorRecordId ? { revises: priorRecordId } : {}),
   };
+}
+
+// ---------------------------------------------------------------------------
+// L3 freshness (`pnpm trace l3-check`): the measured-checker item of .claude/loop-checklist.md,
+// computed. A bench record names the verifier it measured by the sha256 of the production
+// <loop-verifier> block (trace-bench.js runs a byte-identical copy, parity-tested), so a verifier
+// edited after the bench no longer passes as measured.
+
+/** The production verifier: the file whose <loop-verifier> block a bench record names. */
+export const VERIFIER_FILE = ".claude/workflows/loop-iteration.js";
+const VERIFIER_HASH = /^<loop-verifier> sha256=([0-9a-f]{64})$/;
+
+/** The sha256 (hex) of the <loop-verifier> block in a workflow source, marker lines included; null when it has none. */
+export function verifierBlockHash(source) {
+  const block = workflowBlock(source, "loop-verifier");
+  return block === null ? null : createHash("sha256").update(block).digest("hex");
+}
+
+/**
+ * The L3 gate over a replayed store: the LATEST bench:trace-bench-lite record, licensing or not
+ * (an older accept never stands in for a newer qualify), is an accept, from a verifier arm run at
+ * repeat ≥ 2 over every manifest fixture in every repeat (the arm's measured bad/good counts, which
+ * scoreBench takes over the fixtures measured in every repeat index present, equal the manifest's,
+ * both read from the record's measurement item), with no F0, F3 or F4 in its failed_gates, and names
+ * the <loop-verifier> block it measured by a hash equal to `currentHash` (the current block's; null
+ * when it cannot be read).
+ * Returns every unmet condition; ok only when there is none. Fail closed: a store that does not
+ * replay, a missing record and an unreadable field are each an unmet condition, never a pass.
+ */
+export function l3Check(state, currentHash) {
+  const unmet = [];
+  if (state.errors.length) unmet.push(`the record store does not replay (${state.errors.length} error(s)) — run pnpm trace lint`);
+  if (!currentHash) unmet.push(`the current <loop-verifier> block in ${VERIFIER_FILE} cannot be read — there is no verifier to compare the bench against`);
+  const rec = latestByClaim(state.records, state.superseded).get("bench:trace-bench-lite");
+  if (!rec) {
+    unmet.push("no bench:trace-bench-lite record — run /bench-checkers (repeat ≥ 2) and record it with pnpm trace bench-score --record");
+    return { ok: false, unmet, record_id: null, verdict: null, repeats: null, failed_gates: [], recordHash: null, currentHash: currentHash || null };
+  }
+  if (rec.final_status !== "accept") unmet.push(`the record is ${rec.final_status}, not accept${rec.qualifier ? ` (${rec.qualifier})` : ""}`);
+  // The verifier arm's repeat count, from the scored metrics in the record's measurement item.
+  const parse = (text) => {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return null; // not JSON (or cut short): no metrics to read
+    }
+  };
+  const metrics = rec.evidence.filter((e) => e.kind === "measurement").map((e) => parse(e.result)).find((m) => m && m.arms);
+  const repeats = metrics?.arms?.verifier?.repeats;
+  if (!Number.isInteger(repeats)) unmet.push("the record does not show the verifier arm's repeat count — L3 needs a bench of the verifier arm over the full manifest at repeat ≥ 2");
+  else if (repeats < 2) unmet.push(`the verifier arm ran ${repeats} repeat(s) — needs repeat ≥ 2 (F3, procedural invariance, cannot fire on fewer)`);
+  // The full manifest in every repeat: a verifier arm run over part of it (bench-args --only) never
+  // saw the rest — possibly no bad diff at all — and one scored together with a full-manifest run at
+  // fewer repeats saw the rest once (F3 could not fire for it), so scoreBench counts only the
+  // fixtures measured in every repeat. With no verifier arm the repeat-count condition above already fails.
+  if (metrics?.arms?.verifier) {
+    const total = metrics.fixtures;
+    const seen = metrics.arms.verifier.measured;
+    const count = (n, min) => Number.isInteger(n) && n >= min; // a manifest holds ≥ 1 bad and ≥ 1 good fixture
+    if (!(count(total?.bad, 1) && count(total?.good, 1) && count(seen?.bad, 0) && count(seen?.good, 0))) {
+      unmet.push("the record does not show the manifest's fixture counts and the ones its verifier arm measured (a record scored before full-manifest counts carries none) — L3 needs a verifier bench of every fixture in every repeat: re-bench the full manifest with /bench-checkers");
+    } else if (seen.bad !== total.bad || seen.good !== total.good) {
+      unmet.push(`the verifier arm measured ${seen.bad}/${total.bad} bad and ${seen.good}/${total.good} good manifest fixtures in every repeat — L3 needs every fixture in every repeat (a run over part of the manifest, e.g. bench-args --only, never meets it, even scored together with a full-manifest run at fewer repeats): re-bench the full manifest with /bench-checkers`);
+    }
+  }
+  const blocking = rec.failed_gates.filter((g) => /^F[034](?![0-9])/.test(g));
+  if (blocking.length) unmet.push(`its failed_gates contain ${blocking.join(", ")} — any F0, F3 or F4 keeps loops at ≤ L2`);
+  const named = rec.evidence.find((e) => e.kind === "file_line" && e.ref === VERIFIER_FILE && VERIFIER_HASH.test(String(e.result || "")));
+  const recordHash = named ? VERIFIER_HASH.exec(named.result)[1] : null;
+  if (!recordHash) {
+    unmet.push(`the record carries no <loop-verifier> hash (a file_line item on ${VERIFIER_FILE}), so it cannot show which verifier it measured — records scored before L3 freshness carry none: re-bench with /bench-checkers`);
+  } else if (currentHash && recordHash !== currentHash) {
+    unmet.push(`the record measured another <loop-verifier> block (sha256 ${recordHash.slice(0, 12)}…; the current block's is ${currentHash.slice(0, 12)}…) — the verifier changed after the bench: re-bench with /bench-checkers`);
+  }
+  return { ok: unmet.length === 0, unmet, record_id: rec.record_id, verdict: rec.final_status, repeats: Number.isInteger(repeats) ? repeats : null, failed_gates: rec.failed_gates, recordHash, currentHash: currentHash || null };
 }
