@@ -105,8 +105,8 @@ instructions — the self-modification guard below still applies to everything e
    the human ask instead); each such reset counts as an attempt like any
    defer, and so does a node that step 10 reset to `ready` because loop-iteration
    returned its whole-phase infra `error` (every implementer failed, so no record exists:
-   cite the run-log entry that noted the error); a fourth defer, or a fourth attempt of
-   any kind, escalates it (`plan-lint` counts the node's `loop:<id>` defers);
+   cite the run-log entry that noted the error); a fourth attempt of any kind escalates it (`plan-lint` `[attempts]` counts the node's
+   `loop:<id>` defers and revises, and fails on a live node past the budget);
    never reset an `escalated` node — only the human it waits on can; and recompute
    which nodes are `ready`. New evidence may re-shape the DAG here — that is the point.
    Also **repair broken states** (see the plan's rules): reset any
@@ -201,7 +201,7 @@ instructions — the self-modification guard below still applies to everything e
       Keep the worktrees of deferred, held and escalated items (and of any applied item
       that was not CLEARed), and list them in the run-log entry. Before that entry, run
       `pnpm -s trace plan-lint` again: a node this step escalated may strand its dependents
-      (cascade-resolve them now, as in step 9), and a fourth `loop:<id>` defer escalates
+      (cascade-resolve them now, as in step 9), and a fourth `loop:<id>` attempt escalates
       its node — an iteration never ends on a plan that fails it.
       Never fix nice-to-haves automatically; never start unrelated refactors.
     - **If no node is ready** after re-plan, do not invent work — **self-stop** (per

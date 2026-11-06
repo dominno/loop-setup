@@ -525,6 +525,30 @@ describe("plan-lint: TRACE cross-checks (a temp store written by writeRecords / 
     expect(flagged(errors, "attempts")).toEqual(["LP-001", "LP-004", "LP-005"]);
   });
 
+  it("the attempt budget counts every attempt: revises (a failed post-apply check, a released revise) count like defers, on any live node", () => {
+    const revRec = (id, repair, over = {}) => loopRec(id, { final_status: "revise", repair, reason: `not as written: ${repair}`, ...over });
+    // LP-001: 2 defers + 2 revises (one the Lead's failed post-apply check) = 4 attempts, still live.
+    write(deferRec("LP-001", "evidence 0"));
+    write(deferRec("LP-001", "evidence 1"));
+    write(revRec("LP-001", "keep the old key"));
+    const fourth = write(revRec("LP-001", "the post-apply check failed: unit", { writer_id: "loop/post-apply:LP-001" }));
+    act(fourth, "HOLD", "LP-001");
+    // LP-002: 2 defers + 1 revise = 3 attempts: within the budget.
+    write(deferRec("LP-002", "evidence 0"));
+    write(deferRec("LP-002", "evidence 1"));
+    const third = write(revRec("LP-002", "the post-apply check failed: lint", { writer_id: "loop/post-apply:LP-002" }));
+    act(third, "HOLD", "LP-002");
+    // LP-003: 4 attempts and in-progress — dispatching it a fifth time is past the budget too.
+    for (let i = 0; i < 4; i += 1) write(deferRec("LP-003", `evidence ${i}`));
+    const { errors } = lint([
+      row("LP-001", { record: fourth, missing: "the post-apply check failed: unit", notes: "attempt 4" }),
+      row("LP-002", { record: third, missing: "the post-apply check failed: lint", notes: "attempt 3" }),
+      row("LP-003", { status: "in-progress", notes: "attempt 5" }),
+    ]);
+    expect(flagged(errors, "attempts")).toEqual(["LP-001", "LP-003"]);
+    expect(errors.find((e) => e.startsWith("[attempts] LP-001"))).toContain("4 attempts");
+  });
+
   it("in-progress is a warning by default and an error with preDispatch", () => {
     const rows = [row("LP-001", { status: "in-progress" })];
     const plain = lint(rows);

@@ -25,8 +25,13 @@ const ID_RE = /^LP-\d{3,}$/;
 const RECORD_RE = /^TR-[0-9a-f]{12}$/;
 const CITED_RE = /\bTR-[0-9a-f]{12}\b/g;
 const EMPTY_CELLS = ["", "—", "–", "-"];
-/** Each defer is one attempt; a fourth escalates the node (loop.md step 9, the >3-attempts red flag). */
-const MAX_DEFERS = 3;
+/**
+ * The attempt budget (loop.md step 9, the >3-attempts red flag): every attempt on a node counts —
+ * each defer (an agent-failed one included) and each revise (a verifier's, or the Lead's failed
+ * post-apply check) on its loop:<id> claim. A fourth attempt escalates the node.
+ */
+export const MAX_ATTEMPTS = 3;
+const ATTEMPT_VERDICTS = ["defer", "revise"];
 /** A defer the loop cannot supply: its `missing` names a human decision (loop.md step 10). */
 const HUMAN_DECISION = /\b(human|approv\w*|decision|product call|sign-?off)\b/i;
 const VERIFIER_WRITER = "loop-iteration/verify:";
@@ -232,8 +237,8 @@ export function planViolations(plan, state = EMPTY_STATE, { preDispatch = false 
   }
 
   // --- TRACE cross-checks ---
-  const defers = new Map(); // claim_id → how many defer records it has (each one an attempt)
-  for (const r of state.records.values()) if (r.final_status === "defer") defers.set(r.claim_id, (defers.get(r.claim_id) || 0) + 1);
+  const attemptsOf = new Map(); // claim_id → how many defer/revise records it has (each one an attempt)
+  for (const r of state.records.values()) if (ATTEMPT_VERDICTS.includes(r.final_status)) attemptsOf.set(r.claim_id, (attemptsOf.get(r.claim_id) || 0) + 1);
   const cleared = new Map(); // claim_id → a record of it that carries a CLEAR (for loop:<id>, that node was done)
   for (const r of state.records.values()) if (actionsOn(r.record_id, "CLEAR").length) cleared.set(r.claim_id, r.record_id);
   for (const n of nodes) {
@@ -301,9 +306,9 @@ export function planViolations(plan, state = EMPTY_STATE, { preDispatch = false 
         warnings.push(`[latest] ${at(n)}: ${rec.record_id} is not the newest record for claim ${rec.claim_id} (${latest} is) — order-dependent (e.g. after a union merge); re-plan from the newest verdict${why}`);
       }
     }
-    const attempts = defers.get(claimOf(n.id)) || 0;
-    if (attempts > MAX_DEFERS && ["ready", "blocked", "deferred"].includes(n.status)) {
-      errors.push(`[attempts] ${at(n)}: ${attempts} ${claimOf(n.id)} defers (agent-failed ones included) — a fourth defer escalates the node (loop.md step 9)`);
+    const attempts = attemptsOf.get(claimOf(n.id)) || 0;
+    if (attempts > MAX_ATTEMPTS && LIVE.includes(n.status)) {
+      errors.push(`[attempts] ${at(n)}: ${attempts} attempts on ${claimOf(n.id)} (defers and revises, agent-failed and failed post-apply checks included) — a fourth attempt escalates the node (loop.md step 9)`);
     }
     // Records are tied to a node by its id, so a reused id inherits the old node's defers and its CLEARed verdict.
     if (n.status !== "done" && cleared.has(claimOf(n.id))) {

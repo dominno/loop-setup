@@ -96,9 +96,10 @@ next critic round's priors, so it stays HOLDed for the node until a critic round
 it. A defer whose `missing` is
 a human decision (approval, product call) is never reset by the loop: such a node is
 `escalated`, and only that human's answer moves it. Each
-defer counts as one attempt toward the >3-attempts red flag, an agent-failed one included —
-a node deferred for the fourth time becomes `escalated` (`plan-lint` counts the node's
-`loop:<id>` defers and fails on a fourth that is not). A `deferred` dependency keeps its
+attempt counts toward the >3-attempts red flag — every defer (an agent-failed one included)
+and every revise (a verifier's, or the Lead's failed post-apply check) on the node's
+`loop:<id>` claim — so a node with a fourth attempt becomes `escalated` (`plan-lint`'s
+`[attempts]` counts those records and fails on any live node past the budget). A `deferred` dependency keeps its
 dependents computed `blocked` (not dropped, not escalated — the dependency is resolvable);
 if the deferred node later escalates or drops, the cascade rules below apply.
 
