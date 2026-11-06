@@ -287,6 +287,22 @@ describe("plan-lint: structural rules", () => {
     expect(rulesOf(pre.errors).filter((r) => r === "done-when")).toEqual([]); // never an error
   });
 
+  it("story tokens: origin 'story:US-NNN#ACk' parses to node.story; [story-dangling] warns on an unknown story or AC, only when story ids are passed in", () => {
+    const p = plan(
+      row("LP-001", { origin: "plan:docs/stories/US-001 2026-11-06 story:US-001#AC2" }),
+      row("LP-002", { origin: "story:US-009#AC1" }),
+      row("LP-003", { origin: "story:US-001#AC7" }),
+      row("LP-004", { origin: "story:US-001" }),
+    );
+    expect(p.nodes[0].story).toEqual([{ id: "US-001", ac: 2 }]);
+    expect(p.nodes[3].story).toEqual([{ id: "US-001", ac: null }]);
+    expect(planViolations(p)).toEqual({ errors: [], warnings: [] }); // no story ids passed in: nothing checked
+    const stories = new Map([["US-001", new Set([1, 2, 3, 4])]]);
+    const { errors, warnings } = planViolations(p, undefined, { stories });
+    expect(errors).toEqual([]);
+    expect(flagged(warnings, "story-dangling")).toEqual(["LP-002", "LP-003"]);
+  });
+
   it("stranded: in the chain A (escalated) ← B ← C, B and C are flagged, while a deferred ancestor strands nothing", () => {
     const chain = (status) =>
       lint(row("LP-001", { status, missing: "a human decision on the auth flow" }), row("LP-002", { after: "LP-001", status: "blocked" }), row("LP-003", { after: "LP-002", status: "blocked" }));

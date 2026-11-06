@@ -36,6 +36,10 @@ const MAX_SPLIT_DEPTH = 2;
 const NAMES_SCOPE = /\b(scope|too large|too big|split|smaller)\b/i;
 const RECORD_RE = /^TR-[0-9a-f]{12}$/;
 const CITED_RE = /\bTR-[0-9a-f]{12}\b/g;
+/** A story link in a node's origin: `story:US-NNN` or `story:US-NNN#ACk` (acceptance criterion k). */
+const STORY_RE = /\bstory:(US-\d+)(?:#AC(\d+))?\b/g;
+/** The story links a node's origin carries → [{ id, ac }] (ac null when the token names no criterion). */
+export const storyLinks = (origin) => [...String(origin || "").matchAll(STORY_RE)].map((m) => ({ id: m[1], ac: m[2] ? Number(m[2]) : null }));
 const EMPTY_CELLS = ["", "—", "–", "-"];
 /** A node's checkable acceptance clause, in its description (case-insensitive, any dash before it). */
 const DONE_WHEN = /(^|[\s—–-])done when:/i;
@@ -146,6 +150,7 @@ export function parsePlan(text) {
       missing: c[5],
       origin: c[6],
       notes: c[7],
+      story: storyLinks(c[6]),
       scope: list(c[8]),
       check: c[9] ?? "",
       line: r.line,
@@ -303,7 +308,7 @@ const EMPTY_STATE = { records: new Map(), actions: new Map(), superseded: new Se
  * warns; an `in-progress` node is an error only with preDispatch, since the contract test can run
  * mid-loop.
  */
-export function planViolations(plan, state = EMPTY_STATE, { preDispatch = false, maxScope = MAX_SCOPE } = {}) {
+export function planViolations(plan, state = EMPTY_STATE, { preDispatch = false, maxScope = MAX_SCOPE, stories } = {}) {
   const { nodes, errors: parseErrors } = Array.isArray(plan) ? { nodes: plan, errors: [] } : plan;
   const errors = [...parseErrors];
   const warnings = [];
@@ -335,6 +340,14 @@ export function planViolations(plan, state = EMPTY_STATE, { preDispatch = false,
     }
     if (["ready", "blocked"].includes(n.status) && preDispatch && !DONE_WHEN.test(n.description)) {
       warnings.push(`[done-when] ${at(n)}: its description has no "done when: …" clause — re-plan writes one from the origin finding's evidence or recommended fix (never from implementer output)`);
+    }
+    // Story links (optional): checked only against the story ids cli.mjs passes in, and only as a warning.
+    if (stories) {
+      for (const link of n.story || storyLinks(n.origin)) {
+        const acs = stories.get(link.id);
+        if (!acs) warnings.push(`[story-dangling] ${at(n)}: its origin links story:${link.id}, which has no story file under docs/stories/`);
+        else if (link.ac !== null && !acs.has(link.ac)) warnings.push(`[story-dangling] ${at(n)}: its origin links story:${link.id}#AC${link.ac}, but ${link.id} has no AC${link.ac}`);
+      }
     }
     if ((n.status === "deferred" || n.status === "escalated") && !n.missing) {
       errors.push(`[missing] ${at(n)}: ${n.status} with an empty missing — name the evidence or human decision that would unblock it`);

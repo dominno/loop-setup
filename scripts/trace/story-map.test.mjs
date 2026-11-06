@@ -93,6 +93,27 @@ describe("parseStory", () => {
   });
 });
 
+describe("story-lint: plan nodes per story (warning only; plan and story statuses never move each other)", () => {
+  const node = (id, status, origin) => ({ id, status, origin, story: [...origin.matchAll(/\bstory:(US-\d+)(?:#AC(\d+))?/g)].map((m) => ({ id: m[1], ac: m[2] ? Number(m[2]) : null })) });
+
+  it("parseStory numbers the acceptance criteria", () => {
+    expect(parseStory({ path: storyPath("US-001"), text: storyText({ id: "US-001", status: "E2E tested", acs: ["- [x] AC1: a", "- [ ] AC2: b", "- [x] AC10: c"] }) }).acs).toEqual([1, 2, 10]);
+  });
+
+  it("lists each story's open plan nodes, and warns when a Done story still has one; no plan, no plan warnings", () => {
+    const nodes = [node("LP-001", "ready", "story:US-001#AC1"), node("LP-002", "done", "story:US-001#AC2"), node("LP-003", "blocked", "story:US-002#AC1")];
+    const map = storyMap([{ id: "US-001" }, { id: "US-002", status: "Done" }]);
+    const base = storyMapViolations(map, undefined, { specExists });
+    const { errors, warnings } = storyMapViolations(map, undefined, { specExists, planNodes: nodes });
+    expect(errors).toEqual(base.errors);
+    const added = warnings.filter((w) => !base.warnings.includes(w));
+    expect(flagged(added, "plan-nodes")).toEqual(["US-001", "US-002"]);
+    expect(added.find((w) => w.includes("US-001"))).toContain("LP-001");
+    expect(added.find((w) => w.includes("US-001"))).not.toContain("LP-002"); // done is not open
+    expect(added.find((w) => w.includes("US-002"))).toMatch(/Done/);
+  });
+});
+
 describe("story-lint: the story map against itself", () => {
   it("a consistent story map has no errors, and no warnings but the [pre-trace] one of each story no record backs", () => {
     expect(lint([{ id: "US-001" }, { id: "US-002", status: "Implemented", spec: null, log: false }])).toEqual({ errors: [], warnings: [preTrace("US-001"), preTrace("US-002")], stories: 2, absent: false });

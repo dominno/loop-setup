@@ -281,6 +281,16 @@ describe("plan commands (CLI process)", () => {
     expect(trace(["plan-ready", "--batch", "0", "--plan", p]).status).toBe(2);
   });
 
+  it("plan-lint reads the story ids from docs/stories and warns [story-dangling]; story-lint --plan lists open nodes per story", () => {
+    const p = writePlan("| LP-001 | a | — | ready | | | story:US-001#AC1 | |", "| LP-002 | b | — | ready | | | story:US-999#AC1 | |");
+    const out = trace(["plan-lint", "--plan", p]);
+    expect(out.status).toBe(0);
+    expect(out.stderr).toMatch(/warn: \[story-dangling\] LP-002/);
+    expect(out.stderr).not.toMatch(/\[story-dangling\] LP-001/);
+    const stories = trace(["story-lint", "--plan", p]);
+    expect(stories.stderr).toMatch(/warn: \[plan-nodes\] US-001 .*LP-001/);
+  });
+
   it("plan-lint exits 1 naming the rule when a done node cites a defer record, 0 on a consistent plan, and 2 when the store does not replay", () => {
     expect(trace(["write", "-"], draft({ writer_id: "loop-iteration/verify:LP-001-0", claim_id: "loop:lp-001", claim_type: "practical", final_status: "defer", missing: ["a unit test run"], evidence: [] })).status).toBe(0);
     const id = JSON.parse(trace(["query", "--json"]).stdout)[0].record_id;

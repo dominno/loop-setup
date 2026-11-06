@@ -45,7 +45,7 @@ import {
   writeRecords,
 } from "./lib.mjs";
 import { DEFAULT_PLAN, MAX_SCOPE, conflictFreeBatch, parsePlan, planItems, planViolations, readyIds } from "./plan.mjs";
-import { STORY_MAP, STORY_MAP_PATHS, storyMapViolations } from "./story-map.mjs";
+import { STORY_MAP, STORY_MAP_PATHS, parseStory, storyMapViolations } from "./story-map.mjs";
 
 const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (policy: .claude/memory/topics/trace.md)
 
@@ -86,7 +86,8 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
   pnpm trace story-lint [--root dir]   the story map (${STORY_MAP}/: story files, index, dashboard, verification log, E2E
                                        coverage map) against itself and the store (consistency, not truth): one status
                                        per story everywhere, plus the log row, coverage and licensing Record: line its
-                                       level needs — exit 1 on an error; an absent story map passes
+                                       level needs, and (warning) each story's open loop-plan nodes — exit 1 on an error;
+                                       an absent story map passes
   pnpm trace wiki-check                the memory wiki (.claude/memory) against the store (consistency, not truth): rec:
                                        comments, committed facts, quarantine rows, page sizes — JSON {ok, errors,
                                        warnings}; exit 1 on an error, 2 when the store does not replay
@@ -400,7 +401,18 @@ async function main() {
     }
     const plan = readPlan();
     const preDispatch = !!flags["pre-dispatch"];
-    const { errors, warnings } = planViolations(plan, state, { preDispatch, maxScope });
+    // The story ids (and their AC numbers) a node's story:US-NNN#ACk token may name; none when there is no story map.
+    const stories = new Map();
+    try {
+      const dir = join(ROOT, STORY_MAP_PATHS.stories);
+      for (const f of readdirSync(dir).filter((x) => /^US-.*\.md$/.test(x))) {
+        const st = parseStory({ path: `${STORY_MAP_PATHS.stories}/${f}`, text: readFileSync(join(dir, f), "utf8") });
+        if (st.id) stories.set(st.id, new Set(st.acs));
+      }
+    } catch {
+      // no stories/ directory: every story token dangles, as a warning
+    }
+    const { errors, warnings } = planViolations(plan, state, { preDispatch, maxScope, stories });
     for (const w of warnings) process.stderr.write(`warn: ${w}\n`);
     for (const e of errors) process.stderr.write(`error: ${e}\n`);
     out({ ok: errors.length === 0, errors: errors.length, warnings: warnings.length, nodes: plan.nodes.length, preDispatch, plan: planPath, store: storePath }, true);
@@ -457,7 +469,10 @@ async function main() {
       stories: names.map((f) => `${STORY_MAP_PATHS.stories}/${f}`).filter(isFile).map(file),
       ...Object.fromEntries(["index", "dashboard", "log", "coverage"].map((k) => [k, file(STORY_MAP_PATHS[k])])),
     };
-    const { errors, warnings, stories, absent } = storyMapViolations(map, state, { specExists: isFile });
+    // The loop plan's nodes, for the per-story list of open nodes; a plan that is absent or does not parse adds nothing.
+    const plan = readPlan();
+    const planNodes = plan.errors.length ? undefined : plan.nodes;
+    const { errors, warnings, stories, absent } = storyMapViolations(map, state, { specExists: isFile, planNodes });
     for (const w of warnings) process.stderr.write(`warn: ${w}\n`);
     for (const e of errors) process.stderr.write(`error: ${e}\n`);
     out({ ok: errors.length === 0, errors: errors.length, warnings: warnings.length, stories, ...(absent ? { absent } : {}), storyMap: join(root, STORY_MAP), store: storePath }, true);

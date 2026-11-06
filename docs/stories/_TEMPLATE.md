@@ -40,3 +40,7 @@ Record: `TR-xxxxxxxxxxxx` (the TRACE-lite record behind this status — `pnpm tr
 
 **Next action:**
 One concrete next action.
+
+Plan nodes: (optional) the `.claude/memory/loop-plan.md` nodes that deliver this story — their
+`origin` carries `story:US-NNN#ACk`; `pnpm trace story-lint` lists the open ones. A node never
+moves this story's status.

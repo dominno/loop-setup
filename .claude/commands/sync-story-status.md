@@ -14,7 +14,10 @@ Procedure:
    under `docs/stories/` that are in scope. Also consult the memory wiki
    (`.claude/memory/index.md` → relevant topic pages such as `topics/testing.md`)
    so evidence judgments match the project's testing/verification conventions.
-2. Read `docs/implementation-status.md` if it exists.
+2. Read `docs/implementation-status.md` if it exists. `pnpm trace story-lint` lists each
+   story's open loop-plan nodes (`[plan-nodes]`, from a node's `story:US-NNN#ACk` origin
+   token; `pnpm trace plan-ready --json` carries the same links): an open node is context,
+   never evidence — a plan node never moves a story's status, and a status never moves a node.
 3. Inspect relevant source files.
 4. Inspect relevant unit/component tests.
 5. Inspect relevant E2E tests.
