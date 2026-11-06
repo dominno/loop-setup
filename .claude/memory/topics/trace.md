@@ -106,6 +106,9 @@ denylist path still needs a human).
   adjudicate it (new record that `revises`) before acting, or HOLD.
 - **`reject`** → nothing to fix; HOLD/REJECT. In a plan node, `missing` becomes
   "a human decision on: <reason>".
+- **Human release** (only a human writes it): `pnpm trace act <record> human HOLD --ref <node>
+  --note "release: <decision>"` lets an escalated node return to ready/blocked; the record
+  still licenses nothing (no CLEAR). `plan-lint` `[unsupported-reset]` reads it.
 - **"Fixed"** = a `CLEAR` on the finding's latest licensing record, written only after the
   separate checker (post-implementation round / loop verifier + the post-apply check)
   shows it resolved; `--note` says what showed it.

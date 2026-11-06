@@ -94,8 +94,8 @@ instructions — the self-modification guard below still applies to everything e
    `drop` obsolete nodes — never one whose `origin` record is in the latest round's
    `completion.notRechecked` (its lens was not reviewed, so nothing shows it obsolete);
    **re-check every `deferred` node's `missing`** — reset it to
-   `ready` only when you can cite the evidence that arrived (a record id or check output,
-   in the node's notes); a node deferred by a record whose `failed_gates` include
+   `ready` only when you can cite the evidence that arrived (a record written after the defer,
+   by id in the node's notes — `plan-lint` `[unsupported-reset]` checks it); a node deferred by a record whose `failed_gates` include
    `agent-failed` (an infra failure, not a verdict) may be reset citing that record's id,
    and so may one deferred by your own `git apply --check` record (writer_id
    `loop/apply-check:<node>`, step 10; never by another defer whose `missing` reads the
@@ -107,7 +107,8 @@ instructions — the self-modification guard below still applies to everything e
    returned its whole-phase infra `error` (every implementer failed, so no record exists:
    cite the run-log entry that noted the error); a fourth attempt of any kind escalates it (`plan-lint` `[attempts]` counts the node's
    `loop:<id>` defers and revises, and fails on a live node past the budget);
-   never reset an `escalated` node — only the human it waits on can; and recompute
+   never reset an `escalated` node — only the human it waits on can (a human release:
+   `pnpm trace act <record> human HOLD --ref <node> --note "release: <decision>"`); and recompute
    which nodes are `ready`. New evidence may re-shape the DAG here — that is the point.
    Also **repair broken states** (see the plan's rules): reset any
    stale `in-progress` node left by an interrupted prior run, and **cascade-resolve** any
@@ -178,8 +179,8 @@ instructions — the self-modification guard below still applies to everything e
         --ref <node> --note "<check that passed; qualifier if any>"` and mark the node
         `done` with that `record` (copy a qualifier into the node's notes). If no relevant
         automated check exists, do not CLEAR: `HOLD` and escalate. If the check fails,
-        revert the patch, write a `revise` record (same `claim_id`, `revises` the first,
-        `repair` = what failed), `HOLD` it, and leave the node `ready` with that record and
+        revert the patch, write a `revise` record (same `claim_id`, `revises` the first, writer_id
+        `loop/post-apply:<node>`, `repair` = what failed), `HOLD` it, and leave the node `ready` with that record and
         the attempt counted.
         After the CLEAR, remove the item's worktree (its root is in the item's `notes`,
         self-reported) only if it appears in `git worktree list --porcelain`, lies under

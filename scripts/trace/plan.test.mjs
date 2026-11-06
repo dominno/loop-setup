@@ -349,7 +349,8 @@ describe("plan-lint: TRACE cross-checks (a temp store written by writeRecords / 
     // accept and the node goes back to ready with that revise. Left on the accept, the next verdict would fork the chain.
     const failedCheck = (id) => {
       const applied = write(loopRec(id));
-      const revise = write(loopRec(id, { final_status: "revise", repair: "the unit test still fails on an empty name", reason: "the smallest relevant check failed after the apply", revises: applied }));
+      // The Lead writes this revise (writer loop/post-apply:<node>), so plan-lint can tell it from a verifier's revise.
+      const revise = write(loopRec(id, { writer_id: `loop/post-apply:${id}`, final_status: "revise", repair: "the unit test still fails on an empty name", reason: "the smallest relevant check failed after the apply", revises: applied }));
       act(revise, "HOLD", id);
       return { applied, revise };
     };
@@ -547,6 +548,73 @@ describe("plan-lint: TRACE cross-checks (a temp store written by writeRecords / 
     ]);
     expect(flagged(errors, "attempts")).toEqual(["LP-001", "LP-003"]);
     expect(errors.find((e) => e.startsWith("[attempts] LP-001"))).toContain("4 attempts");
+  });
+
+  it("[unsupported-reset]: a ready or blocked node may not cite a HOLDed escalation-grade record unless a human released it", () => {
+    const actNote = (record_id, action, ref, consumer, note) => {
+      const [res] = appendActions([{ record_id, consumer, action, ref, note }], ctx());
+      expect(res.validation).toBe("pass");
+    };
+    const revise = write(loopRec("LP-001", { final_status: "revise", repair: "keep the old key", reason: "not as written" }));
+    act(revise, "HOLD", "LP-001");
+    const reject = write(criticRec({ claim_id: "critic:security:x", final_status: "reject", reason: "refuted" }));
+    act(reject, "HOLD", "LP-002");
+    const human = write(deferRec("LP-003", "a human decision to change the storage key"));
+    act(human, "HOLD", "LP-003");
+    const denied = write(deferRec("LP-004", "escalate: denylist path", { writer_id: "loop-iteration/denylist-gate:LP-004-0" }));
+    act(denied, "HOLD", "LP-004");
+    const released = write(loopRec("LP-005", { final_status: "revise", repair: "split the change", reason: "not as written" }));
+    act(released, "HOLD", "LP-005");
+    actNote(released, "HOLD", "LP-005", "human", "release: retry with the smaller change");
+    const postApply = write(loopRec("LP-006", { final_status: "revise", repair: "the post-apply check failed: unit", reason: "check failed", writer_id: "loop/post-apply:LP-006" }));
+    act(postApply, "HOLD", "LP-006");
+    const { errors } = lint([
+      row("LP-001", { record: revise, missing: "keep the old key" }),
+      row("LP-002", { status: "blocked", after: "LP-006", record: reject, missing: "a human decision on: refuted", origin: `critic:security rec:${reject}` }),
+      row("LP-003", { record: human, missing: "a human decision to change the storage key" }),
+      row("LP-004", { record: denied, missing: "escalate: denylist path" }),
+      row("LP-005", { record: released, missing: "split the change", notes: "released by a human" }),
+      row("LP-006", { record: postApply, missing: "the post-apply check failed: unit" }),
+    ]);
+    expect(flagged(errors, "unsupported-reset")).toEqual(["LP-001", "LP-002", "LP-003", "LP-004"]);
+  });
+
+  it("[unsupported-reset]: a ready node on its own HOLDed defer must cite newer evidence, except for the infra-path resets", () => {
+    const plainDefer = (id) => {
+      const r = write(deferRec(id, "a unit test run"));
+      act(r, "HOLD", id);
+      return r;
+    };
+    const stale = plainDefer("LP-001");
+    const fresh = plainDefer("LP-002");
+    const newer = write(criticRec({ claim_id: "critic:qa-e2e:unit-run" })); // written after LP-002's defer
+    const older = write(criticRec({ claim_id: "critic:qa-e2e:older" }));
+    const tooOld = plainDefer("LP-003"); // LP-003 cites only a record written before its defer
+    const infra = write(deferRec("LP-004", "re-run the workflow", { failed_gates: ["agent-failed"] }));
+    act(infra, "HOLD", "LP-004");
+    const apply = write(deferRec("LP-005", "a diff based on the current tree", { writer_id: "loop/apply-check:LP-005" }));
+    act(apply, "HOLD", "LP-005");
+    const base = write(deferRec("LP-006", "a diff based on HEAD", { failed_gates: ["base-mismatch"] }));
+    act(base, "HOLD", "LP-006");
+    const logged = plainDefer("LP-007");
+    const { errors } = lint([
+      row("LP-001", { record: stale, missing: "a unit test run", notes: "reset" }),
+      row("LP-002", { record: fresh, missing: "a unit test run", notes: `reset citing ${newer}` }),
+      row("LP-003", { record: tooOld, missing: "a unit test run", notes: `reset citing ${older}` }),
+      row("LP-004", { record: infra, missing: "re-run the workflow", notes: `reset citing ${infra}` }),
+      row("LP-005", { record: apply, missing: "a diff based on the current tree" }),
+      row("LP-006", { record: base, missing: "a diff based on HEAD", notes: "worktree.baseRef set" }),
+      row("LP-007", { record: logged, missing: "a unit test run", notes: "infra error reset, run-log [2026-10-07 12:00]" }),
+    ]);
+    expect(flagged(errors, "unsupported-reset")).toEqual(["LP-001", "LP-003"]);
+  });
+
+  it("[reused-id] is an error when a node that is not done cites its own CLEARed record (a done node moved back)", () => {
+    const old = write(loopRec("LP-001"));
+    act(old, "CLEAR", "LP-001");
+    const { errors, warnings } = lint([row("LP-001", { record: old })]);
+    expect(flagged(errors, "reused-id")).toEqual(["LP-001"]);
+    expect(warnings.filter((w) => w.startsWith("[reused-id]"))).toEqual([]);
   });
 
   it("in-progress is a warning by default and an error with preDispatch", () => {

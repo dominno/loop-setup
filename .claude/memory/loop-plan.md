@@ -60,6 +60,28 @@ table and in the store's `loop:<id>` claims (`pnpm trace query --writer loop` li
 because `plan-lint` ties records to the id — a reused id inherits the old node's defers and its
 CLEARed verdict (`plan-lint` warns `[reused-id]` while such a node is not `done`).
 
+## Transitions
+Which status changes are sanctioned, and what each needs (`plan-lint` checks the state each
+leaves; it never diffs against the previous plan). Anything not listed is not a transition.
+
+| From | To | Needs |
+|---|---|---|
+| (new) | `ready` / `blocked` | a node-creation origin (loop.md step 9); `blocked` while an `after:` dep is open |
+| `blocked` | `ready` | every `after:` dep `done` (computed) |
+| `ready` | `in-progress` | step 10 dispatch, only after `plan-items` built the item |
+| `in-progress` | `done` | the node's own verifier accept/qualify + `CLEAR --ref <node>` |
+| `in-progress` | `deferred` / `escalated` | a HOLDed record (step 10 branches) |
+| `in-progress` | `ready` | a failed post-apply check (`revise`, writer `loop/post-apply:<node>`, HOLDed), a workflow `error`/`budgetStopped`, or stale recovery |
+| `deferred` | `ready` / `blocked` | a record written after the defer, cited in notes, or an infra-path reset (agent-failed, base-mismatch, `loop/apply-check`, a `run-log [YYYY-MM-DD HH:MM]` infra entry) |
+| `escalated` | `ready` / `blocked` | a human release on its record: `HOLD`, consumer `human`, `--ref <node>`, note `release: …` |
+| any live | `dropped` | re-plan obsoletes it, cascades from a dropped dep, or splits it |
+| `done` | anything | never — new work is a new node (`[reused-id]` is an error when a non-done node cites its own CLEARed record) |
+
+`[unsupported-reset]` fails a `ready`/`blocked` node that cites a HOLDed escalation-grade
+record (a `revise`, a `reject`, a human-decision or denylist `defer`) with no human release,
+and a `ready` node on its own HOLDed defer whose notes cite no newer record (the infra-path
+resets above excepted).
+
 ## Ready-node rule (what the loop dispatches next)
 A node is **ready** iff `status ∉ {done, dropped, escalated, in-progress, deferred}` **and**
 every `id` in its `after:` is `done`. The loop picks the highest-priority ready node (topmost
@@ -83,8 +105,8 @@ never dispatch a leftover `in-progress` node as-is (it may be mid-flight or orph
 **Deferred nodes (TRACE "defer is prospective memory"):** a `deferred` node is not
 dispatchable, but it is not a dead end either. In each re-plan step, check its `missing`
 against the new evidence (fresh records, a dependency now `done`, a check that now runs):
-if satisfied, reset it to `ready` and cite the evidence that arrived (a record id or check
-output) in its notes — no citation, no reset; if not, leave it. One reset needs no new
+if satisfied, reset it to `ready` and cite the evidence that arrived (a record written after
+the defer, by id) in its notes — no citation, no reset (`plan-lint` `[unsupported-reset]`); if not, leave it. One reset needs no new
 evidence: a node deferred by a record whose `failed_gates` include `agent-failed` (an infra
 failure: the agent died, so nothing was weighed) may be reset citing that defer record's own
 id (`loop.md` step 9 lists the other record-cited resets). A reset keeps the node's `record`

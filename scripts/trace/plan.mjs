@@ -35,6 +35,17 @@ const ATTEMPT_VERDICTS = ["defer", "revise"];
 /** A defer the loop cannot supply: its `missing` names a human decision (loop.md step 10). */
 const HUMAN_DECISION = /\b(human|approv\w*|decision|product call|sign-?off)\b/i;
 const VERIFIER_WRITER = "loop-iteration/verify:";
+/** The Lead's revise after a failed post-apply check (loop.md step 10): it leaves the node ready. */
+const POST_APPLY_WRITER = "loop/post-apply:";
+const APPLY_CHECK_WRITER = "loop/apply-check:";
+const DENYLIST_WRITER = "loop-iteration/denylist-gate:";
+/** A human's release of an escalation-grade record for one node (topics/trace.md, consumer protocol). */
+const isRelease = (a, id) => a.consumer === "human" && a.action === "HOLD" && a.ref === id && /^release:/i.test(String(a.note || "").trim());
+/** A verdict the loop cannot resolve by itself: only a human moves its node back to ready/blocked. */
+const escalationGrade = (r) =>
+  r.final_status === "revise" ||
+  r.final_status === "reject" ||
+  (r.final_status === "defer" && (HUMAN_DECISION.test((r.missing || []).join("; ")) || String(r.writer_id).startsWith(DENYLIST_WRITER)));
 const CRITIC_WRITER = "critic-panel/";
 
 const at = (n) => `${n.id || "(no id)"} (line ${n.line})`;
@@ -310,8 +321,24 @@ export function planViolations(plan, state = EMPTY_STATE, { preDispatch = false 
     if (attempts > MAX_ATTEMPTS && LIVE.includes(n.status)) {
       errors.push(`[attempts] ${at(n)}: ${attempts} attempts on ${claimOf(n.id)} (defers and revises, agent-failed and failed post-apply checks included) — a fourth attempt escalates the node (loop.md step 9)`);
     }
+    // Transition rules (loop-plan.md, Transitions): a node goes back to ready/blocked only on evidence.
+    if (rec && ["ready", "blocked"].includes(n.status)) {
+      const released = (state.actions.get(rec.record_id) || []).some((a) => isRelease(a, n.id));
+      const heldHere = own ? holds.length > 0 : heldForNode;
+      if (heldHere && escalationGrade(rec) && !String(rec.writer_id).startsWith(POST_APPLY_WRITER) && !released) {
+        errors.push(`[unsupported-reset] ${at(n)}: ${n.status}, but it cites ${rec.record_id}, a HOLDed ${rec.final_status} the loop cannot resolve — only a human moves this node back (pnpm trace act ${rec.record_id} human HOLD --ref ${n.id} --note "release: <decision>"); otherwise keep it escalated`);
+      } else if (n.status === "ready" && own && rec.final_status === "defer" && holds.length) {
+        const infra = (rec.failed_gates || []).some((g) => g === "agent-failed" || g === "base-mismatch") || String(rec.writer_id).startsWith(APPLY_CHECK_WRITER) || /\brun-log \[\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}\]/.test(n.notes);
+        const newer = (n.notes.match(CITED_RE) || []).some((id) => id !== rec.record_id && state.records.has(id) && String(state.records.get(id).created_at) > String(rec.created_at));
+        if (!infra && !newer) {
+          errors.push(`[unsupported-reset] ${at(n)}: ready on its own HOLDed defer ${rec.record_id}, but its notes cite no newer record — reset a deferred node only citing the evidence that arrived (a record written after the defer), or the infra-path reset it qualifies for (loop.md step 9)`);
+        }
+      }
+    }
     // Records are tied to a node by its id, so a reused id inherits the old node's defers and its CLEARed verdict.
-    if (n.status !== "done" && cleared.has(claimOf(n.id))) {
+    if (n.status !== "done" && own && actionsOn(rec.record_id, "CLEAR").length) {
+      errors.push(`[reused-id] ${at(n)}: ${n.status}, but it cites its own CLEARed record ${rec.record_id} — a done node never moves back; add a new node (a new id) for new work`);
+    } else if (n.status !== "done" && cleared.has(claimOf(n.id))) {
       warnings.push(`[reused-id] ${at(n)}: ${n.status}, but claim ${claimOf(n.id)} already carries a CLEARed record (${cleared.get(claimOf(n.id))}), so this id was done before — ids are never reused, a pruned one included: renumber the node above the highest LP id ever used`);
     }
     if (n.status === "in-progress") {
