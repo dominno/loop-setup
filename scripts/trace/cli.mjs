@@ -44,7 +44,7 @@ import {
   wikiViolations,
   writeRecords,
 } from "./lib.mjs";
-import { DEFAULT_PLAN, MAX_SCOPE, conflictFreeBatch, parsePlan, planDrift, planStatus, planItems, planViolations, readyIds } from "./plan.mjs";
+import { DEFAULT_PLAN, MAX_SCOPE, conflictFreeBatch, newNodeId, parsePlan, planDrift, planStatus, planItems, planViolations, readyIds } from "./plan.mjs";
 import { STORY_MAP, STORY_MAP_PATHS, parseStory, storyMapViolations } from "./story-map.mjs";
 
 const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (policy: .claude/memory/topics/trace.md)
@@ -78,6 +78,9 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
                                        exit 1 on an error, 2 when the store does not replay; --pre-dispatch also fails on
                                        an in-progress node, a ready node with no check, and one whose scope lists more
                                        than N paths (default 3; L3 passes 1) — run it before every dispatch
+  pnpm trace plan-id "<description>" [--plan p]
+                                       a fresh collision-free node id, LP-<6 hex> (description + owner + time), not used
+                                       in the plan or the store; owner = LOOP_OWNER, else git user.email's local part
   pnpm trace status [--plan p]       read-only rollup of the plan: nodes per status, open/done nodes per story, in-progress
                                        claims and their age, oversize ready nodes, attempts — consistency, not truth; never
                                        evidence in a record (exit 2 when the store does not replay)
@@ -156,6 +159,13 @@ function git(args) {
   } catch {
     return null;
   }
+}
+
+/** Who runs this session: LOOP_OWNER, else the local part of git user.email (lowercased), else "unknown". */
+function currentOwner() {
+  const raw = process.env.LOOP_OWNER || (git(["config", "user.email"]) || "").split("@")[0];
+  const owner = String(raw || "").toLowerCase().replace(/[^a-z0-9._-]/g, "");
+  return owner || "unknown";
 }
 
 /** Concatenated product sources (see CODE_PATHS / patchOnlyTokens). */
@@ -426,6 +436,19 @@ async function main() {
     for (const e of errors) process.stderr.write(`error: ${e}\n`);
     out({ ok: errors.length === 0, errors: errors.length, warnings: warnings.length, nodes: plan.nodes.length, preDispatch, plan: planPath, store: storePath }, true);
     return errors.length ? 1 : 0;
+  }
+
+  if (cmd === "plan-id") {
+    if (!pos.length) {
+      out('usage: pnpm trace plan-id "<node description>" [--plan p]');
+      return 2;
+    }
+    // Every id the plan or the store already uses (a pruned node lives on in its loop:<id> claims).
+    const plan = readPlan();
+    const taken = new Set(plan.nodes.map((n) => n.id.toLowerCase()));
+    for (const r of state.records.values()) if (/^loop:lp-/.test(r.claim_id)) taken.add(r.claim_id.slice(5));
+    process.stdout.write(`${newNodeId(pos.join(" "), { owner: currentOwner(), now: new Date().toISOString(), taken })}\n`);
+    return 0;
   }
 
   if (cmd === "status") {

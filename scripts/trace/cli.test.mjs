@@ -310,6 +310,14 @@ describe("plan commands (CLI process)", () => {
     expect(trace(["status", "--plan", p]).status).toBe(2);
   });
 
+  it("plan-id prints a fresh LP-<6 hex> id not in the plan or the store (owner from LOOP_OWNER)", () => {
+    const p = writePlan("| LP-001 | a | — | ready | | | human | |");
+    const out = spawnSync(process.execPath, [CLI, "plan-id", "Fix the empty-name crash", "--plan", p], { encoding: "utf8", env: { ...process.env, TRACE_STORE: store, LOOP_OWNER: "ana" } });
+    expect(out.status).toBe(0);
+    expect(out.stdout.trim()).toMatch(/^LP-[0-9a-f]{6}$/);
+    expect(trace(["plan-id"]).status).toBe(2); // a description is required
+  });
+
   it("plan-lint exits 1 naming the rule when a done node cites a defer record, 0 on a consistent plan, and 2 when the store does not replay", () => {
     expect(trace(["write", "-"], draft({ writer_id: "loop-iteration/verify:LP-001-0", claim_id: "loop:lp-001", claim_type: "practical", final_status: "defer", missing: ["a unit test run"], evidence: [] })).status).toBe(0);
     const id = JSON.parse(trace(["query", "--json"]).stdout)[0].record_id;

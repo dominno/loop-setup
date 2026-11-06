@@ -8,6 +8,7 @@
 //
 // It lives under scripts/trace/, which the loop denylist covers, so a loop cannot weaken the gate
 // that picks its own work. Pure (no fs / git): cli.mjs reads the plan and replays the store.
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { LICENSING, ROOT } from "./lib.mjs";
 
@@ -24,7 +25,8 @@ export const NOT_READY = ["done", "dropped", "escalated", "in-progress", "deferr
 /** A node whose dependency is one of these can never become ready (stranded). A deferred one strands nothing. */
 const STRANDING = ["dropped", "escalated"];
 const LIVE = ["ready", "blocked", "in-progress", "deferred"];
-const ID_TOKEN = "LP-\\d{3,}";
+/** A node id: legacy sequential `LP-NNN`, or the collision-free `LP-<4-6 lowercase hex>` (M1, pnpm trace plan-id). */
+const ID_TOKEN = "LP-(?:\\d{3,}|[0-9a-f]{4,6})";
 const ID_RE = new RegExp(`^${ID_TOKEN}$`);
 const SPLIT_FROM_RE = new RegExp(`\\bsplit from (${ID_TOKEN})\\b`);
 const SPLIT_INTO_RE = new RegExp(`\\bsplit into ((?:${ID_TOKEN})(?:\\s*,\\s*${ID_TOKEN})*)`);
@@ -155,12 +157,24 @@ export function parsePlan(text) {
       check: c[9] ?? "",
       line: r.line,
     };
-    if (!ID_RE.test(node.id)) errors.push(`[id] ${at(node)}: an id is LP- followed by 3 or more digits`);
-    if (seen.has(node.id)) errors.push(`[duplicate-id] ${at(node)}: also on line ${seen.get(node.id)} — ids are never reused`);
+    if (!ID_RE.test(node.id)) errors.push(`[id] ${at(node)}: an id is LP- followed by 4–6 lowercase hex (pnpm trace plan-id) or, legacy, 3 or more digits`);
+    if (seen.has(node.id)) errors.push(`[duplicate-id] ${at(node)}: also on line ${seen.get(node.id)} — ids are never reused (after a merge of two branches that each added this id, give one of them a new id: pnpm trace plan-id)`);
     else seen.set(node.id, node.line);
     nodes.push(node);
   }
   return { nodes, errors };
+}
+
+/**
+ * A collision-free node id (M1, Beads-style): `LP-` + the first 6 hex of sha256(description, creator,
+ * time). Two people adding a node on two branches get different ids, so a merge never fuses their
+ * nodes or their loop:<id> records. `taken` (ids in the plan and the store) steps past a collision.
+ */
+export function newNodeId(description, { owner = "unknown", now = new Date().toISOString(), taken = new Set() } = {}) {
+  for (let salt = 0; ; salt += 1) {
+    const id = `LP-${createHash("sha256").update(`${description}\n${owner}\n${now}\n${salt}`).digest("hex").slice(0, 6)}`;
+    if (!taken.has(id) && !taken.has(id.toLowerCase())) return id;
+  }
 }
 
 /** The first row per id (a duplicate id is a parse error). */
@@ -473,7 +487,7 @@ export function planViolations(plan, state = EMPTY_STATE, { preDispatch = false,
     if (n.status !== "done" && own && actionsOn(rec.record_id, "CLEAR").length) {
       errors.push(`[reused-id] ${at(n)}: ${n.status}, but it cites its own CLEARed record ${rec.record_id} — a done node never moves back; add a new node (a new id) for new work`);
     } else if (n.status !== "done" && cleared.has(claimOf(n.id))) {
-      warnings.push(`[reused-id] ${at(n)}: ${n.status}, but claim ${claimOf(n.id)} already carries a CLEARed record (${cleared.get(claimOf(n.id))}), so this id was done before — ids are never reused, a pruned one included: renumber the node above the highest LP id ever used`);
+      warnings.push(`[reused-id] ${at(n)}: ${n.status}, but claim ${claimOf(n.id)} already carries a CLEARed record (${cleared.get(claimOf(n.id))}), so this id was done before — ids are never reused, a pruned one included: give the node a new id (pnpm trace plan-id)`);
     }
     // Verified but not landed: the verifier accepted the node's diff, and the run ended before the apply.
     const newestOwn = state.records.get(state.latestOfClaim.get(claimOf(n.id)));

@@ -83,7 +83,8 @@ instructions — the self-modification guard below still applies to everything e
 9. **Re-evaluate & re-plan** (a first-class step, not an afterthought) — run this
    **before** any dispatch so the DAG is fresh when you act. Rewrite
    `.claude/memory/loop-plan.md`: nodes already `done` (record + `CLEAR`) unblock their
-   dependents — re-plan never marks a node `done` itself; **add new nodes** for this run's confirmed findings (with `after:` deps + `origin` citing the finding's record id, a
+   dependents — re-plan never marks a node `done` itself; **add new nodes** for this run's confirmed findings (each with a fresh id from
+   `pnpm -s trace plan-id "<description>"`, `after:` deps + `origin` citing the finding's record id, a
    `scope` from the finding's `file:line`, a `check` that proves the fix, and a description
    ending `— done when: <the observable outcome>`, written from the origin finding's evidence
    or recommended fix, never from implementer output; `plan-lint --pre-dispatch` warns

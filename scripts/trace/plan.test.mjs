@@ -6,7 +6,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendActions, loadEntries, loadSchema, readPolicyVersion, replay, writeRecords } from "./lib.mjs";
-import { DEFAULT_PLAN, NOT_READY, STATUSES, conflictFreeBatch, dependents, planDrift, planStatus, scopesOverlap, parsePlan, planItems, planViolations, readyIds } from "./plan.mjs";
+import { DEFAULT_PLAN, NOT_READY, STATUSES, conflictFreeBatch, newNodeId, dependents, planDrift, planStatus, scopesOverlap, parsePlan, planItems, planViolations, readyIds } from "./plan.mjs";
 
 const HEADER = "| id | description | after | status | record | missing | origin | notes |\n|---|---|---|---|---|---|---|---|";
 const planText = (...rows) => `# Loop Plan\n\n## Plan\n_Some prose before the table._\n\n${HEADER}\n${rows.join("\n")}\n`;
@@ -18,7 +18,7 @@ const row = (id, cells = {}) => {
 const plan = (...rows) => parsePlan(planText(...rows));
 // Every lint message starts with its rule tag, then the node id when it is about one node.
 const rulesOf = (msgs) => msgs.map((m) => /^\[([a-z-]+)\]/.exec(m)?.[1]);
-const flagged = (msgs, rule) => [...new Set(msgs.filter((m) => m.startsWith(`[${rule}] `)).map((m) => /^\[[a-z-]+\] (LP-\d+)/.exec(m)?.[1]))];
+const flagged = (msgs, rule) => [...new Set(msgs.filter((m) => m.startsWith(`[${rule}] `)).map((m) => /^\[[a-z-]+\] (LP-[0-9a-f]+)/.exec(m)?.[1]))];
 
 describe("parsePlan", () => {
   it("the committed plan parses, and only rows under its '## Plan' heading are nodes (its schema table and fenced example are not)", () => {
@@ -79,6 +79,25 @@ describe("parsePlan", () => {
   it("an id that is not LP- and 3 or more digits, or a duplicate id, is an error", () => {
     const p = plan(row("LP-001"), row("LP-1"), row("lp-002"), row("LP-001"), row("LP-1000"));
     expect(rulesOf(p.errors).sort()).toEqual(["duplicate-id", "id", "id"]);
+  });
+
+  it("M1: a collision-free LP-<4-6 hex> id is valid next to legacy LP-NNN ids; two branches that both add one id fail [duplicate-id] after the merge", () => {
+    const p = plan(row("LP-001"), row("LP-a3f9c2"), row("LP-0b1e", { after: "LP-a3f9c2", status: "blocked" }));
+    expect(p.errors).toEqual([]);
+    expect(planViolations(p).errors).toEqual([]);
+    for (const bad of ["LP-A3F9", "LP-a3f", "LP-a3f9c2d", "LP-g123"]) expect(rulesOf(plan(row(bad)).errors), bad).toEqual(["id"]);
+    // Branch A and branch B each append "the next" sequential id; the union of their tables holds it twice.
+    const merged = plan(row("LP-001"), row("LP-002"), row("LP-004", { description: "A's node" }), row("LP-004", { description: "B's node" }));
+    expect(rulesOf(merged.errors)).toEqual(["duplicate-id"]);
+  });
+
+  it("newNodeId hashes the description, creator and time into LP-<6 hex>, and steps past an id already taken", () => {
+    const at = "2026-11-06T12:00:00.000Z";
+    const a = newNodeId("Fix the empty-name crash", { owner: "ana", now: at });
+    expect(a).toMatch(/^LP-[0-9a-f]{6}$/);
+    expect(newNodeId("Fix the empty-name crash", { owner: "ana", now: at })).toBe(a); // deterministic
+    expect(newNodeId("Fix the empty-name crash", { owner: "ben", now: at })).not.toBe(a); // two people never collide on one description
+    expect(newNodeId("Fix the empty-name crash", { owner: "ana", now: at, taken: new Set([a]) })).not.toBe(a);
   });
 
   it("fails closed without a '## Plan' table, and on rows split off the table by a blank line", () => {

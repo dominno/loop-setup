@@ -19,7 +19,7 @@ an empty scope and check.
 
 | Field | Meaning |
 |---|---|
-| `id` | Stable node id, `LP-NNN` (never reused after `done`/`dropped`). |
+| `id` | Stable node id, never reused after `done`/`dropped`: a new node gets `LP-<6 hex>` from `pnpm trace plan-id "<description>"` (a hash of description, creator and time, so two people's branches never collide); legacy `LP-NNN` ids stay valid. |
 | `description` | One line — the bounded unit of work, ending `— done when: <observable outcome>` (from the origin finding's evidence or fix; `[done-when]` warns under `--pre-dispatch` without it). |
 | `after` | Comma-separated `id`s this node depends on; empty = no deps. |
 | `status` | `ready` · `blocked` · `in-progress` · `deferred` · `done` · `escalated` · `dropped`. |
@@ -60,8 +60,8 @@ score, a new node status, bd-style commands): see `.claude/memory/topics/workflo
 Deleting a `done` id changes no readiness, but deleting a `dropped` one would make its live
 dependents ready with no cascade decision: prune a `dropped` row only once no live node lists
 it in `after:`, so cascade-resolve those nodes first (`plan-lint`'s `[stranded]` rule names them).
-A pruned id is never reused: number a new node above the highest `LP` id ever used, in the
-table and in the store's `loop:<id>` claims (`pnpm trace query --writer loop` lists them),
+A pruned id is never reused: give a new node a fresh id with `pnpm trace plan-id` (it skips
+every id in the table and in the store's `loop:<id>` claims),
 because `plan-lint` ties records to the id — a reused id inherits the old node's defers and its
 CLEARed verdict (`plan-lint` warns `[reused-id]` while such a node is not `done`).
 
