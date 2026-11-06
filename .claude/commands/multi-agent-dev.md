@@ -45,7 +45,9 @@ Procedure:
    the **consumer protocol** in `.claude/memory/topics/trace.md` says (save the result to
    a scratchpad file → `pnpm trace write <file>` → `pnpm trace act --from <file>`).
 5. As Lead Agent, choose the smallest safe plan from the confirmed blockers +
-   directly-related important findings. Act on a `qualify` finding only at its qualified
+   directly-related important findings. If the work is meant to run unattended through
+   `/loop` instead, offer `/plan-nodes` (it turns the plan into confirmed loop-plan nodes) —
+   never invoke it yourself. Act on a `qualify` finding only at its qualified
    strength (state the qualifier in your plan). A `deferred` or `revised` blocker is
    handled per the consumer protocol: gather its `missing` evidence (run the check,
    reproduce in the browser) or restate it per its `repair`, then re-adjudicate it in the

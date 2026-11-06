@@ -63,6 +63,7 @@ CLAUDE.md                         Project rules + multi-agent workflow + doc-sca
   commands/                       Each command has a description used for routing
     write-goal.md                 Write a production-grade /goal (or /loop) prompt for a task
     multi-agent-dev.md            Full critic-led development pass
+    plan-nodes.md                 Story/spec/goal → loop-plan nodes, each appended only after you confirm it
     critic-round.md               Review-only multi-agent critic round
     multi-agent-e2e.md            E2E test design (enumerate → judge) + run + a critic round on the new specs
     qa-pass.md                    Pre-ship QA checklist

@@ -78,6 +78,30 @@ describe("planning upgrade (docs/plans/planning-upgrade/04-spec.md)", () => {
   });
 });
 
+describe("W4.1 /plan-nodes: a confirmation-gated planner, offered by /multi-agent-dev and /write-goal, never invoked by them", () => {
+  it("the command appends each proposed node only after the user confirms it, lints the draft first, and is for /loop work only", () => {
+    const cmd = prose(".claude/commands/plan-nodes.md");
+    const anchors = [
+      "only after the user confirms it",
+      "pnpm trace plan-lint --pre-dispatch --plan",
+      "for work meant to run through `/loop`",
+      "`origin` `plan:<source> <YYYY-MM-DD>`",
+      "never sets a node `done`, `deferred` or `escalated`",
+    ];
+    expect(anchors.filter((a) => !cmd.includes(a))).toEqual([]);
+    expect(prose(".claude/skills-index.md")).toContain("`/plan-nodes`");
+  });
+
+  it("/multi-agent-dev and /write-goal offer /plan-nodes and never run it themselves; /write-goal proposes blocked human:goal rows for an oversize loop goal", () => {
+    for (const f of [".claude/commands/multi-agent-dev.md", ".claude/commands/write-goal.md"]) {
+      expect(prose(f), f).toContain("offer `/plan-nodes`");
+      expect(prose(f), f).toContain("never invoke it yourself");
+    }
+    const goal = prose(".claude/commands/write-goal.md");
+    for (const a of ["origin `human:goal <YYYY-MM-DD>`", "status `blocked`", "pasting them is the approval"]) expect(goal, a).toContain(a);
+  });
+});
+
 describe("shared permissions (.claude/settings.json)", () => {
   const allow = () => JSON.parse(read(".claude/settings.json")).permissions?.allow ?? [];
 
