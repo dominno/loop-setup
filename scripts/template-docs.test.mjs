@@ -6,7 +6,7 @@
 // and a phrase split across a line break still counts as present.
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ESLint } from "eslint";
@@ -99,6 +99,28 @@ describe("W4.1 /plan-nodes: a confirmation-gated planner, offered by /multi-agen
     }
     const goal = prose(".claude/commands/write-goal.md");
     for (const a of ["origin `human:goal <YYYY-MM-DD>`", "status `blocked`", "pasting them is the approval"]) expect(goal, a).toContain(a);
+  });
+});
+
+describe("W4.2 persistent step lists (docs/plans/<slug>/steps.md)", () => {
+  const STEP_HEADER = "| id | description | scope | check | after | status | commit |";
+  const plans = existsSync(join(ROOT, "docs/plans")) ? readdirSync(join(ROOT, "docs/plans")).filter((d) => existsSync(join(ROOT, "docs/plans", d, "steps.md"))) : [];
+
+  it("/multi-agent-dev writes its plan as a step list in the repo, with follow-ups as child ids", () => {
+    const cmd = prose(".claude/commands/multi-agent-dev.md");
+    for (const a of ["`docs/plans/<slug>/steps.md`", STEP_HEADER, "a child id of the step it came from (`S03.1`)", "never only in a scratchpad"]) expect(cmd, a).toContain(a);
+  });
+
+  it("every committed step list has the fixed header, unique ids, and children whose parent step exists", () => {
+    expect(plans.length).toBeGreaterThan(0);
+    for (const d of plans) {
+      const text = read(`docs/plans/${d}/steps.md`);
+      expect(text, d).toContain(`${STEP_HEADER}\n|---|---|---|---|---|---|---|`);
+      const ids = [...text.matchAll(/^\| (S[0-9]+(?:\.[0-9]+)*) \|/gm)].map((m) => m[1]);
+      expect(new Set(ids).size, d).toBe(ids.length);
+      const orphans = ids.filter((id) => id.includes(".") && !ids.includes(id.slice(0, id.lastIndexOf("."))));
+      expect(orphans, d).toEqual([]);
+    }
   });
 });
 
