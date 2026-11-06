@@ -635,6 +635,23 @@ describe("plan-lint: TRACE cross-checks (a temp store written by writeRecords / 
     expect(msg).toContain("abc1234def56"); // the record's provenance commit: resume only when HEAD equals it
   });
 
+  it("readyIds ranks by the origin record's severity (blocker, important, then the rest and human), table order breaking ties", () => {
+    const important = write(criticRec({ claim_id: "critic:a:important", severity: "important" }));
+    const blocker = write(criticRec({ claim_id: "critic:a:blocker", severity: "blocker" }));
+    const nice = write(criticRec({ claim_id: "critic:a:nice", severity: "nice-to-have" }));
+    const nodes = plan(
+      row("LP-001", { origin: "human" }),
+      row("LP-002", { origin: `critic:a rec:${important}` }),
+      row("LP-003", { origin: `critic:a rec:${nice}` }),
+      row("LP-004", { origin: `critic:a rec:${blocker}` }),
+      row("LP-005", { origin: `critic:a rec:${important}` }),
+      row("LP-006", { status: "blocked", after: "LP-001", origin: `critic:a rec:${blocker}` }),
+    ).nodes;
+    expect(readyIds(nodes)).toEqual(["LP-001", "LP-002", "LP-003", "LP-004", "LP-005"]); // no store: table order
+    expect(readyIds(nodes, { state: replayed() })).toEqual(["LP-004", "LP-002", "LP-005", "LP-001", "LP-003"]);
+    expect(readyIds(nodes, { state: replayed(), max: 2 })).toEqual(["LP-004", "LP-002"]);
+  });
+
   it("in-progress is a warning by default and an error with preDispatch", () => {
     const rows = [row("LP-001", { status: "in-progress" })];
     const plain = lint(rows);

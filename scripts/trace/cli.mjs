@@ -67,9 +67,10 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
                                        exit 2 when it cannot be verified (git error, no paths)
   pnpm trace lint                      replay the whole store and check every contract invariant (exit 1 on error)
   pnpm trace plan-ready [--max N] [--json] [--plan p]
-                                       the loop plan's ready node ids as a JSON array (loop-plan.md's ready-node rule, in
-                                       table order; --max N keeps the first N; --json prints those rows in full) — exit 1
-                                       and no ids when the plan table does not parse
+                                       the loop plan's ready node ids as a JSON array (loop-plan.md's ready-node rule),
+                                       ranked by the origin record's severity (blocker, important, the rest), table order
+                                       breaking ties; --max N keeps the first N; --json prints those rows in full — exit 1
+                                       and no ids when the plan table does not parse, 2 when the store does not replay
   pnpm trace plan-lint [--pre-dispatch] [--plan p]
                                        check the plan against its contract and the record store (consistency, not truth):
                                        exit 1 on an error, 2 when the store does not replay; --pre-dispatch also fails on
@@ -236,22 +237,6 @@ async function main() {
     return true;
   };
 
-  if (cmd === "plan-ready") {
-    const max = flags.max !== undefined ? (/^[1-9]\d*$/.test(String(flags.max)) ? Number(flags.max) : NaN) : undefined;
-    if (flags.plan === true || Number.isNaN(max)) {
-      out("usage: pnpm trace plan-ready [--max N] [--json] [--plan p]   (N a positive integer)");
-      return 2;
-    }
-    const plan = readPlan();
-    if (unparsed(plan)) return 1;
-    const ids = readyIds(plan.nodes, { max });
-    if (flags.json) {
-      const byId = new Map(plan.nodes.map((n) => [n.id, n]));
-      out(ids.map((id) => byId.get(id)), true);
-    } else process.stdout.write(JSON.stringify(ids) + "\n");
-    return 0;
-  }
-
   const schema = loadSchema();
   const policyVersion = readPolicyVersion();
 
@@ -365,6 +350,27 @@ async function main() {
     for (const e of state.errors) process.stderr.write(`error: ${e}\n`);
     out({ ok: state.errors.length === 0, errors: state.errors.length, warnings: state.warnings.length, records: m.records, store: storePath });
     return state.errors.length ? 1 : 0;
+  }
+
+  if (cmd === "plan-ready") {
+    const max = flags.max !== undefined ? (/^[1-9]\d*$/.test(String(flags.max)) ? Number(flags.max) : NaN) : undefined;
+    if (flags.plan === true || Number.isNaN(max)) {
+      out("usage: pnpm trace plan-ready [--max N] [--json] [--plan p]   (N a positive integer)");
+      return 2;
+    }
+    // The ranking reads the origin records' severity, so a store that does not replay yields no ids.
+    if (state.errors.length) {
+      process.stderr.write(`error: the record store does not replay (${state.errors.length} error(s)) — no ids; run pnpm trace lint\n`);
+      return 2;
+    }
+    const plan = readPlan();
+    if (unparsed(plan)) return 1;
+    const ids = readyIds(plan.nodes, { max, state });
+    if (flags.json) {
+      const byId = new Map(plan.nodes.map((n) => [n.id, n]));
+      out(ids.map((id) => byId.get(id)), true);
+    } else process.stdout.write(JSON.stringify(ids) + "\n");
+    return 0;
   }
 
   if (cmd === "plan-lint") {

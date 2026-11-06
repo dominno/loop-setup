@@ -147,13 +147,31 @@ function indexById(nodes) {
   return byId;
 }
 
+/** Priority tiers by the origin record's severity: blocker first, then important, then the rest (human included). */
+const SEVERITY_RANK = { blocker: 0, important: 1 };
+/** A node's priority tier: the severity of the first record its origin cites that is in the store. */
+export function priorityRank(node, state) {
+  if (!state) return 2;
+  for (const id of String(node.origin || "").match(CITED_RE) || []) {
+    const r = state.records.get(id);
+    if (r) return SEVERITY_RANK[r.severity] ?? 2;
+  }
+  return 2;
+}
+
 /**
- * loop-plan.md's ready-node rule, literally, in table order: a known status outside NOT_READY,
- * and every `after` id done. An unknown status is never ready. `max` keeps the first N.
+ * loop-plan.md's ready-node rule, literally: a known status outside NOT_READY, and every `after`
+ * id done. An unknown status is never ready. With a replayed store (`state`), the ready ids are
+ * ranked by their origin record's severity (blocker < important < other/human), table order
+ * breaking ties; without one, table order. `max` keeps the first N after ranking.
  */
-export function readyIds(nodes, { max } = {}) {
+export function readyIds(nodes, { max, state } = {}) {
   const done = new Set(nodes.filter((n) => n.status === "done").map((n) => n.id));
-  const ready = nodes.filter((n) => STATUSES.includes(n.status) && !NOT_READY.includes(n.status) && n.after.every((d) => done.has(d))).map((n) => n.id);
+  const ready = nodes
+    .filter((n) => STATUSES.includes(n.status) && !NOT_READY.includes(n.status) && n.after.every((d) => done.has(d)))
+    .map((n, i) => ({ id: n.id, rank: priorityRank(n, state), i }))
+    .sort((x, y) => x.rank - y.rank || x.i - y.i)
+    .map((x) => x.id);
   return Number.isInteger(max) && max >= 0 ? ready.slice(0, max) : ready;
 }
 

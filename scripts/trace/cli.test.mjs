@@ -247,6 +247,17 @@ describe("plan commands (CLI process)", () => {
     expect(trace(["plan-ready", "--max", "0", "--plan", p]).status).toBe(2);
   });
 
+  it("plan-ready ranks the ready ids by their origin record's severity from the replayed store, and exits 2 when the store does not replay", () => {
+    expect(trace(["write", "-"], draft({ writer_id: "critic-panel/verify:a-0", claim_id: "critic:a:blocker", severity: "blocker" })).status).toBe(0);
+    const [blocker] = JSON.parse(trace(["query", "--json"]).stdout).map((r) => r.record_id);
+    const p = writePlan("| LP-001 | first | — | ready | | | human | |", `| LP-002 | second | — | ready | | | critic:a rec:${blocker} | |`);
+    expect(JSON.parse(trace(["plan-ready", "--plan", p]).stdout)).toEqual(["LP-002", "LP-001"]);
+    writeFileSync(store, `${readFileSync(store, "utf8")}not json\n`);
+    const broken = trace(["plan-ready", "--plan", p]);
+    expect(broken.status).toBe(2);
+    expect(broken.stdout).toBe("");
+  });
+
   it("plan-lint exits 1 naming the rule when a done node cites a defer record, 0 on a consistent plan, and 2 when the store does not replay", () => {
     expect(trace(["write", "-"], draft({ writer_id: "loop-iteration/verify:LP-001-0", claim_id: "loop:lp-001", claim_type: "practical", final_status: "defer", missing: ["a unit test run"], evidence: [] })).status).toBe(0);
     const id = JSON.parse(trace(["query", "--json"]).stdout)[0].record_id;

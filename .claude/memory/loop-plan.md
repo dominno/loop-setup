@@ -84,12 +84,15 @@ resets above excepted).
 
 ## Ready-node rule (what the loop dispatches next)
 A node is **ready** iff `status ∉ {done, dropped, escalated, in-progress, deferred}` **and**
-every `id` in its `after:` is `done`. The loop picks the highest-priority ready node (topmost
-first). Denylist and trust-level gates still apply **on top** of readiness — a ready node
+every `id` in its `after:` is `done`. The loop picks the highest-priority ready node.
+**Priority** is computed from the node's origin record's `severity` (the first record its
+`origin` cites): `blocker`, then `important`, then everything else (a human origin included);
+table order breaks ties, so a human reorders by moving rows within one tier. Severity comes
+from same-model critics: it is triage, not ground truth. Denylist and trust-level gates still apply **on top** of readiness — a ready node
 whose fix would touch a denylist path is escalated, never auto-applied.
 
-**Computed, not hand-derived:** `pnpm trace plan-ready` prints the ready ids in table order
-(`--max N` keeps the first N), and `pnpm trace plan-lint` checks the rest of this contract
+**Computed, not hand-derived:** `pnpm trace plan-ready` prints the ready ids in priority order
+(`--max N` keeps the first N; a store that does not replay exits 2), and `pnpm trace plan-lint` checks the rest of this contract
 against the record store: statuses, `after:` edges, cycles, stranded nodes, and each node's
 record and consumer actions. It checks consistency, not truth: it shows that the table and
 the records agree, not that a fix is right or that a `missing` was really supplied. A table
