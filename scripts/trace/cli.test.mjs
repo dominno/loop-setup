@@ -1163,6 +1163,10 @@ describe("CLI wiring, end to end in a throwaway repo", () => {
       expect(byClaim["cli:squashed"].changed).toBeUndefined();
       expect(byClaim["cli:changed"]).toMatchObject({ changed: ["src/b.ts"] });
       expect(byClaim["cli:changed"].unreachable).toBeUndefined();
+      // M6: --unreachable keeps only the squashed-away provenance; --annotate prints a GitHub warning per record, exit 0.
+      const unreach = r.cli(["reaudit", "--unreachable", "--annotate"]);
+      expect(unreach.status).toBe(0);
+      expect(unreach.stdout.trim().split("\n")).toEqual([expect.stringMatching(/^::warning title=TRACE provenance unreachable::cli:squashed .*squash/)]);
       expect(r.cli(["reaudit", "--act"]).status).toBe(0);
       const notes = readFileSync(join(r.d, "store.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l)).filter((e) => e.kind === "action").map((a) => a.note);
       expect(notes.sort()).toEqual(["evidence changed: src/b.ts", `provenance commit ${byClaim["cli:squashed"].unreachable} is unreachable — re-verify: src/a.ts`]);

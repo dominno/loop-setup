@@ -108,10 +108,12 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
                                        over every manifest fixture in every repeat (no --only subset), with no F0, F3
                                        or F4 in its failed_gates, and names the current <loop-verifier> block by its
                                        sha256 — exit 0 when all hold, else exit 1 listing every unmet condition
-  pnpm trace reaudit [--claim-prefix P] [--act]
+  pnpm trace reaudit [--claim-prefix P] [--unreachable] [--act | --annotate]
                                        licensing records whose file evidence changed since their commit; one whose
                                        commit the repo no longer has (squashed away) is listed apart, as unreachable;
-                                       --claim-prefix keeps the claims starting with P (story: = story statuses)
+                                       --claim-prefix keeps the claims starting with P (story: = story statuses);
+                                       --unreachable keeps only the unreachable ones; --annotate prints one GitHub
+                                       ::warning:: line per record instead of JSON (CI's provenance job; exit 0)
   pnpm trace metrics                   store-level consumer-value metrics
   pnpm trace rotate [--max 500] [--keep 200]   lossless move of old lines into <YYYY>.jsonl archives
   pnpm trace bench-args [--arms verifier,single-pass,panel] [--repeat N] [--critics a,b] [--only B01-x,G01-y]
@@ -647,7 +649,17 @@ async function main() {
       return 2;
     }
     const prefix = typeof flags["claim-prefix"] === "string" ? flags["claim-prefix"] : "";
-    const cands = reauditCandidates(state.records, state.superseded, changedSince, reachable).filter((c) => String(c.claim_id).startsWith(prefix));
+    const cands = reauditCandidates(state.records, state.superseded, changedSince, reachable)
+      .filter((c) => String(c.claim_id).startsWith(prefix))
+      .filter((c) => !flags.unreachable || c.unreachable);
+    // M6, the CI provenance job: one GitHub warning annotation per record whose commit was squashed away. Never fails.
+    if (flags.annotate) {
+      for (const c of cands) {
+        const what = c.unreachable ? `provenance commit ${c.unreachable} is unreachable (squash-merged or rebased away) — re-verify ${c.paths.join(", ")}` : `evidence changed: ${c.changed.join(", ")}`;
+        process.stdout.write(`::warning title=TRACE provenance${c.unreachable ? " unreachable" : ""}::${c.claim_id} ${c.record_id}: ${what}\n`);
+      }
+      return 0;
+    }
     if (flags.act && cands.length) {
       const note = (c) => (c.unreachable ? `provenance commit ${c.unreachable} is unreachable — re-verify: ${c.paths.join(", ")}` : `evidence changed: ${c.changed.join(", ")}`);
       const res = appendActions(

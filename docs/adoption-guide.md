@@ -608,7 +608,11 @@ Adapt it to your stack:
 - **Merge method.** Squash-merging a PR that appends TRACE records orphans their provenance
   commits: in a fresh clone, or locally once the deleted branch's commits have been pruned
   (deleting the branch alone keeps them), `pnpm trace reaudit` reports those records as
-  unreachable. Prefer a merge commit for such PRs.
+  unreachable. Prefer a merge commit for such PRs — better, disable squash merging in
+  *Settings → General → Pull Requests* (allow merge commits only), so no PR can orphan them.
+  The warn-only `provenance` job in `verify.yml` (full history, `fetch-depth: 0`) runs
+  `pnpm trace reaudit --unreachable --annotate` and prints one warning per record whose
+  provenance commit is gone; it never fails the run. Do not make it a required check.
 
 ---
 

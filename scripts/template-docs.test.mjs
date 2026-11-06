@@ -124,6 +124,18 @@ describe("W4.2 persistent step lists (docs/plans/<slug>/steps.md)", () => {
   });
 });
 
+describe("M6: merge commits keep TRACE provenance reachable", () => {
+  it("CI runs a warn-only provenance job on full history, and the adoption guide says to disable squash merges", () => {
+    const ci = read(".github/workflows/verify.yml");
+    const job = ci.slice(ci.indexOf("  provenance:"));
+    expect(job).toContain("fetch-depth: 0");
+    expect(job).toContain("node scripts/trace/cli.mjs reaudit --unreachable --annotate");
+    expect(job).toContain("continue-on-error: true");
+    const guide = prose("docs/adoption-guide.md");
+    expect(guide).toContain("disable squash merging");
+  });
+});
+
 describe("shared permissions (.claude/settings.json)", () => {
   const allow = () => JSON.parse(read(".claude/settings.json")).permissions?.allow ?? [];
 
