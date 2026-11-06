@@ -114,6 +114,13 @@ instructions — the self-modification guard below still applies to everything e
    never reset an `escalated` node — only the human it waits on can (a human release:
    `pnpm trace act <record> human HOLD --ref <node> --note "release: <decision>"`); and recompute
    which nodes are `ready`. New evidence may re-shape the DAG here — that is the point.
+   **Split instead of retry** when a node's own `loop:<id>` revise carries a `repair`, its
+   post-apply check failed, or its defer names the scope (too large): drop it with notes
+   `split into …`, create 2–4 children `origin: split from <parent> rec:<that record>` and
+   re-point its dependents to all of them (or the last of a chained set) — the full rule is
+   `loop-plan.md`, *Split on failure*. At L2 propose the children through the `/plan-nodes`
+   confirmation path; at L3 escalate the node instead of splitting it. Log the split in the
+   run-log re-plan delta.
    Also **repair broken states** (see the plan's rules): reset any
    stale `in-progress` node left by an interrupted prior run; for a node `plan-lint` warns
    `[verified-unlanded]` (its verifier accept was never applied), resume from the accept only

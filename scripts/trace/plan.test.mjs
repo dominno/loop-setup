@@ -728,6 +728,82 @@ describe("plan-lint: TRACE cross-checks (a temp store written by writeRecords / 
     expect(readyIds(nodes, { state: replayed(), max: 2 })).toEqual(["LP-004", "LP-002"]);
   });
 
+  describe("split on failure (dropped parent + 'split from' children)", () => {
+    const revRec = (id, repair) => loopRec(id, { final_status: "revise", repair, reason: "not as written" });
+    // A parent LP-001 whose own revise asks for a split, HOLDed for it, and two children LP-002/LP-003.
+    const setup = () => {
+      const trigger = write(revRec("LP-001", "too large: split the parser and the renderer"));
+      act(trigger, "HOLD", "LP-001");
+      return trigger;
+    };
+    const parent = (t, notes = "split into LP-002, LP-003") => row("LP-001", { status: "dropped", record: t, notes });
+    const child = (id, t, cells = {}) => row(id, { origin: `split from LP-001 rec:${t}`, ...cells });
+
+    it("a valid split lints clean, with dependents re-pointed to every child (or the last of a chained set)", () => {
+      const t = setup();
+      expect(lint([parent(t), child("LP-002", t), child("LP-003", t), row("LP-004", { status: "blocked", after: "LP-002, LP-003" })]).errors).toEqual([]);
+      const chained = [parent(t), child("LP-002", t), child("LP-003", t, { status: "blocked", after: "LP-002" }), row("LP-004", { status: "blocked", after: "LP-003" })];
+      expect(lint(chained).errors).toEqual([]);
+    });
+
+    it("[split]: the parent must be dropped, list 2–4 children that exist and name it; a dependent may not point at only part of an unchained set", () => {
+      const t = setup();
+      const errs = (rows) => flagged(lint(rows).errors, "split");
+      expect(errs([row("LP-001", { record: t, notes: "split into LP-002, LP-003" }), child("LP-002", t), child("LP-003", t)])).toContain("LP-001"); // not dropped
+      expect(errs([parent(t, "split into LP-002, LP-009"), child("LP-002", t)])).toContain("LP-001"); // LP-009 missing
+      expect(errs([parent(t, "split into LP-002"), child("LP-002", t)])).toContain("LP-001"); // one child is no split
+      expect(errs([parent(t), child("LP-002", t), child("LP-003", t), child("LP-005", t)])).toContain("LP-005"); // not listed by the parent
+      expect(errs([parent(t), child("LP-002", t), child("LP-003", t), row("LP-004", { status: "blocked", after: "LP-003" })])).toContain("LP-004"); // last of an unchained set
+    });
+
+    it("[split-origin]: the child cites the parent's own revise with a repair, or its defer naming scope — never a reject, a human-decision defer or another claim", () => {
+      const scoped = write(deferRec("LP-011", "a smaller scope: split the change"));
+      act(scoped, "HOLD", "LP-011");
+      const ok = [row("LP-011", { status: "dropped", record: scoped, notes: "split into LP-012, LP-013" }), row("LP-012", { origin: `split from LP-011 rec:${scoped}` }), row("LP-013", { origin: `split from LP-011 rec:${scoped}` })];
+      expect(lint(ok).errors).toEqual([]);
+      const rejected = write(loopRec("LP-021", { final_status: "reject", reason: "wrong approach" }));
+      act(rejected, "HOLD", "LP-021");
+      const human = write(deferRec("LP-031", "a human decision to change the storage key"));
+      act(human, "HOLD", "LP-031");
+      const other = write(criticRec());
+      const children = (pid, rec) => [row(`${pid.slice(0, 5)}8`, { origin: `split from ${pid} rec:${rec}` }), row(`${pid.slice(0, 5)}9`, { origin: `split from ${pid} rec:${rec}` })];
+      for (const [pid, rec] of [["LP-021", rejected], ["LP-031", human], ["LP-041", other]]) {
+        const rows = [row(pid, { status: "dropped", record: rec, notes: `split into ${pid.slice(0, 5)}8, ${pid.slice(0, 5)}9` }), ...children(pid, rec)];
+        expect(flagged(lint(rows).errors, "split-origin"), pid).toEqual([`${pid.slice(0, 5)}8`, `${pid.slice(0, 5)}9`]);
+      }
+    });
+
+    it("[split-depth]: a split of a split of a split is refused (at most 2 levels)", () => {
+      const t1 = setup();
+      const t2 = write(revRec("LP-002", "still too large"));
+      act(t2, "HOLD", "LP-002");
+      const t3 = write(revRec("LP-005", "still too large again"));
+      act(t3, "HOLD", "LP-005");
+      const rows = [
+        parent(t1),
+        child("LP-002", t1, { status: "dropped", record: t2, notes: "split into LP-005, LP-006" }),
+        child("LP-003", t1),
+        row("LP-005", { status: "dropped", record: t3, origin: `split from LP-002 rec:${t2}`, notes: "split into LP-007, LP-008" }),
+        row("LP-006", { origin: `split from LP-002 rec:${t2}` }),
+        row("LP-007", { origin: `split from LP-005 rec:${t3}` }),
+        row("LP-008", { origin: `split from LP-005 rec:${t3}` }),
+      ];
+      expect(flagged(lint(rows).errors, "split-depth")).toEqual(["LP-007", "LP-008"]);
+    });
+
+    it("children inherit the parent's attempts plus one for the split; [split-of] stops a drop-and-recreate from resetting them", () => {
+      const t = setup(); // 1 attempt on LP-001
+      write(deferRec("LP-002", "evidence 0"));
+      write(deferRec("LP-002", "evidence 1")); // LP-002: 2 own + 1 inherited + 1 split = 4 > 3
+      const rows = [parent(t), child("LP-002", t), child("LP-003", t)];
+      expect(flagged(lint(rows).errors, "attempts")).toEqual(["LP-002"]);
+      const finding = write(criticRec({ claim_id: "critic:qa-e2e:recreated" }));
+      write(deferRec("LP-051", "evidence 0"));
+      const recreated = [row("LP-051", { status: "dropped", origin: `critic:qa-e2e rec:${finding}` }), row("LP-052", { origin: `critic:qa-e2e rec:${finding}` })];
+      expect(flagged(lint(recreated).errors, "split-of")).toEqual(["LP-052"]);
+    });
+  });
+
   it("in-progress is a warning by default and an error with preDispatch", () => {
     const rows = [row("LP-001", { status: "in-progress" })];
     const plain = lint(rows);

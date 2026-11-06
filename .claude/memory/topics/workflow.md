@@ -160,7 +160,8 @@ for `loop-plan.md` and turned down. Each says what would reopen it, so this is n
   fails closed on a malformed edit, and the TRACE records hold the verdicts. Reopen when
   plan-lint misses a hand-edit corruption that a JSON schema would have caught.
 - **epic/parent containers** (a hierarchy column or nested ids) — a parent row would be one
-  more status nobody dispatches. Reopen when a real plan needs a rollup that a story token
+  more status nobody dispatches; as-needed decomposition is covered by the split convention
+  (`loop-plan.md`, *Split on failure*: a dropped parent with a `split into` trail). Reopen when a real plan needs a rollup that a story token
   and `pnpm trace status` cannot give.
 - **A numeric complexity score** — a same-model guess with no ground truth; size is derived
   from the `scope` column instead. Reopen when measured split rates show scope counts

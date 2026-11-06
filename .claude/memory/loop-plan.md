@@ -79,7 +79,7 @@ leaves; it never diffs against the previous plan). Anything not listed is not a 
 | `in-progress` | `ready` | a failed post-apply check (`revise`, writer `loop/post-apply:<node>`, HOLDed), a workflow `error`/`budgetStopped`, or stale recovery |
 | `deferred` | `ready` / `blocked` | a record written after the defer, cited in notes, or an infra-path reset (agent-failed, base-mismatch, `loop/apply-check`, a `run-log [YYYY-MM-DD HH:MM]` infra entry) |
 | `escalated` | `ready` / `blocked` | a human release on its record: `HOLD`, consumer `human`, `--ref <node>`, note `release: …` |
-| any live | `dropped` | re-plan obsoletes it, cascades from a dropped dep, or splits it |
+| any live | `dropped` | re-plan obsoletes it, cascades from a dropped dep, or splits it (*Split on failure*) |
 | `done` | anything | never — new work is a new node (`[reused-id]` is an error when a non-done node cites its own CLEARed record) |
 
 `[unsupported-reset]` fails a `ready`/`blocked` node that cites a HOLDed escalation-grade
@@ -155,6 +155,36 @@ to bootstrap, so an empty plan never deadlocks:
     is unresolved) — set the dependent `escalated` too, with a note. It cites the escalated
     ancestor's HOLDed record in `record`, with `origin: cascade from <id>`.
   - dependency **`deferred`** → leave the dependent computed `blocked` (see *Deferred nodes*).
+
+## Split on failure (as-needed decomposition, ADaPT)
+A node is split only after it failed as one unit, never up front, and only from a recorded
+verdict: its own `loop:<id>` **revise with a non-empty `repair`** (a verifier's, or the Lead's
+failed post-apply check), or its own **defer whose `missing`/`reason` names the scope** (too
+large, split it). Only a `deferred` node, or a `ready` one carrying such a record, is split.
+Never split a `reject`, a denylist hit, a human-decision defer, an `escalated` node, or a node
+whose origin record is in the latest round's `completion.notRechecked`.
+- **Parent:** set `dropped`, notes `split into LP-a, LP-b`; HOLD the triggering record for it
+  (`pnpm trace act <record> loop HOLD --ref <parent>`).
+- **Children (2–4):** each a new node with `origin: split from <parent> rec:<triggering record>`
+  (plus the parent's critic record, if it had one: a child that cites it in `record` HOLDs it
+  `--ref <child>`), its own `scope`, `check` and `done when:` clause, and `after:` edges between
+  children where order matters.
+- **Dependents:** re-point every node that listed the parent in `after:` to **all** the
+  children, or — when the children are chained by `after:` — to the last one; never to the
+  last child of an unchained set.
+- **Attempts:** a child inherits its parent's attempts, plus one for the split; the budget
+  (`MAX_ATTEMPTS`) applies to that sum, so a split never resets the count.
+- **Depth:** at most 2 levels (a split of a split); deeper, escalate.
+- **Trust level:** at L2 the split rows are proposed through the `/plan-nodes` confirmation
+  path (a human confirms them); at L3 the node is escalated instead of split until
+  `/bench-checkers` has measured split nodes. Each split is logged in the run-log re-plan delta.
+
+`plan-lint` checks the state: `[split]` (the parent is dropped and lists 2–4 children that
+exist and name it; no dependent points at only part of an unchained set), `[split-origin]`
+(a child's origin cites the parent's own triggering revise/defer), `[split-depth]`, and
+`[split-of]` (a live node that re-creates a dropped, attempted node's finding must declare
+`split from`, or drop-and-recreate would reset the attempt count). This is how the plan covers
+hierarchy: no parent/epic container, just dropped parents with their `split into` trail.
 
 ## Example (illustrative — not a live row)
 ```

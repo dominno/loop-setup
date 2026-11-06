@@ -24,7 +24,16 @@ export const NOT_READY = ["done", "dropped", "escalated", "in-progress", "deferr
 /** A node whose dependency is one of these can never become ready (stranded). A deferred one strands nothing. */
 const STRANDING = ["dropped", "escalated"];
 const LIVE = ["ready", "blocked", "in-progress", "deferred"];
-const ID_RE = /^LP-\d{3,}$/;
+const ID_TOKEN = "LP-\\d{3,}";
+const ID_RE = new RegExp(`^${ID_TOKEN}$`);
+const SPLIT_FROM_RE = new RegExp(`\\bsplit from (${ID_TOKEN})\\b`);
+const SPLIT_INTO_RE = new RegExp(`\\bsplit into ((?:${ID_TOKEN})(?:\\s*,\\s*${ID_TOKEN})*)`);
+const CASCADE_FROM_RE = new RegExp(`\\bcascade from (${ID_TOKEN})\\b`);
+/** A split (loop-plan.md, Split on failure): 2–4 children, at most 2 levels deep. */
+const SPLIT_CHILDREN = [2, 4];
+const MAX_SPLIT_DEPTH = 2;
+/** A defer that asks for a smaller node: its missing or reason names the scope or a split. */
+const NAMES_SCOPE = /\b(scope|too large|too big|split|smaller)\b/i;
 const RECORD_RE = /^TR-[0-9a-f]{12}$/;
 const CITED_RE = /\bTR-[0-9a-f]{12}\b/g;
 const EMPTY_CELLS = ["", "—", "–", "-"];
@@ -349,6 +358,14 @@ export function planViolations(plan, state = EMPTY_STATE, { preDispatch = false,
   // --- TRACE cross-checks ---
   const attemptsOf = new Map(); // claim_id → how many defer/revise records it has (each one an attempt)
   for (const r of state.records.values()) if (ATTEMPT_VERDICTS.includes(r.final_status)) attemptsOf.set(r.claim_id, (attemptsOf.get(r.claim_id) || 0) + 1);
+  // A split child inherits its parent's attempts plus one for the split itself (summed over the lineage).
+  const lineageAttempts = (n, depth = 0) => {
+    const own = attemptsOf.get(claimOf(n.id)) || 0;
+    const from = SPLIT_FROM_RE.exec(n.origin || "");
+    const parent = from && byId.get(from[1]);
+    return parent && parent !== n && depth <= MAX_SPLIT_DEPTH + 1 ? own + 1 + lineageAttempts(parent, depth + 1) : own;
+  };
+  splitViolations(nodes, byId, state, errors);
   const cleared = new Map(); // claim_id → a record of it that carries a CLEAR (for loop:<id>, that node was done)
   for (const r of state.records.values()) if (actionsOn(r.record_id, "CLEAR").length) cleared.set(r.claim_id, r.record_id);
   for (const n of nodes) {
@@ -387,7 +404,7 @@ export function planViolations(plan, state = EMPTY_STATE, { preDispatch = false,
       if (problems.length) errors.push(`[deferred-record] ${at(n)}: deferred needs a defer record with a HOLD — ${problems.join("; ")}`);
     }
     if (n.status === "escalated") {
-      const cascade = /\bcascade from (LP-\d{3,})\b/.exec(n.origin);
+      const cascade = CASCADE_FROM_RE.exec(n.origin);
       if (!n.record) problems.push("it cites no record");
       else if (rec && own) {
         if (!holds.length) problems.push(`${rec.record_id} carries no HOLD`);
@@ -416,9 +433,9 @@ export function planViolations(plan, state = EMPTY_STATE, { preDispatch = false,
         warnings.push(`[latest] ${at(n)}: ${rec.record_id} is not the newest record for claim ${rec.claim_id} (${latest} is) — order-dependent (e.g. after a union merge); re-plan from the newest verdict${why}`);
       }
     }
-    const attempts = attemptsOf.get(claimOf(n.id)) || 0;
+    const attempts = lineageAttempts(n);
     if (attempts > MAX_ATTEMPTS && LIVE.includes(n.status)) {
-      errors.push(`[attempts] ${at(n)}: ${attempts} attempts on ${claimOf(n.id)} (defers and revises, agent-failed and failed post-apply checks included) — a fourth attempt escalates the node (loop.md step 9)`);
+      errors.push(`[attempts] ${at(n)}: ${attempts} attempts on ${claimOf(n.id)} (defers and revises, agent-failed and failed post-apply checks included, plus a split parent's attempts and one for the split) — a fourth attempt escalates the node (loop.md step 9)`);
     }
     // Transition rules (loop-plan.md, Transitions): a node goes back to ready/blocked only on evidence.
     if (rec && ["ready", "blocked"].includes(n.status)) {
@@ -454,6 +471,79 @@ export function planViolations(plan, state = EMPTY_STATE, { preDispatch = false,
     }
   }
   return { errors, warnings };
+}
+
+/**
+ * The split convention (loop-plan.md, Split on failure), state-only: a parent `dropped` with notes
+ * "split into <ids>" and 2–4 children whose origin is "split from <parent> rec:<trigger>", the
+ * trigger being the parent's own loop:<id> revise with a repair or its defer naming scope;
+ * dependents re-pointed to every child (or to the last of a chained set); at most 2 levels; and a
+ * live node may not re-create a dropped node's finding without declaring the split (attempts).
+ */
+function splitViolations(nodes, byId, state, errors) {
+  const childrenOf = new Map();
+  for (const n of nodes) {
+    const m = SPLIT_INTO_RE.exec(n.notes || "");
+    if (!m) continue;
+    const kids = m[1].split(",").map((x) => x.trim());
+    childrenOf.set(n.id, kids);
+    const problems = [];
+    if (n.status !== "dropped") problems.push(`it is ${n.status}, not dropped`);
+    if (kids.length < SPLIT_CHILDREN[0] || kids.length > SPLIT_CHILDREN[1]) problems.push(`it lists ${kids.length} child(ren), not ${SPLIT_CHILDREN.join("–")}`);
+    for (const k of kids) {
+      const c = byId.get(k);
+      if (!c) problems.push(`${k} is not in the table`);
+      else if (SPLIT_FROM_RE.exec(c.origin || "")?.[1] !== n.id) problems.push(`${k}'s origin does not say 'split from ${n.id}'`);
+    }
+    if (problems.length) errors.push(`[split] ${at(n)}: a split parent is dropped and lists 2–4 children that name it — ${problems.join("; ")}`);
+  }
+  const depthOf = (n, seen = new Set()) => {
+    const from = SPLIT_FROM_RE.exec(n.origin || "");
+    if (!from || seen.has(n.id) || !byId.has(from[1])) return from ? 1 : 0;
+    seen.add(n.id);
+    return 1 + depthOf(byId.get(from[1]), seen);
+  };
+  for (const n of nodes) {
+    const from = SPLIT_FROM_RE.exec(n.origin || "");
+    if (!from) continue;
+    const p = byId.get(from[1]);
+    if (!p) {
+      errors.push(`[split] ${at(n)}: its origin says 'split from ${from[1]}', which is not in the table`);
+      continue;
+    }
+    if (!(childrenOf.get(p.id) || []).includes(n.id)) errors.push(`[split] ${at(n)}: ${p.id}'s notes do not list it ('split into …')`);
+    // The trigger: a record the child's origin cites that is the parent's own loop:<id> revise with a repair, or its defer naming scope.
+    const cited = (n.origin.match(CITED_RE) || []).map((id) => state.records.get(id)).filter(Boolean);
+    const fits = cited.some(
+      (r) =>
+        r.claim_id === claimOf(p.id) &&
+        ((r.final_status === "revise" && String(r.repair || "").trim()) ||
+          (r.final_status === "defer" && !HUMAN_DECISION.test((r.missing || []).join("; ")) && !String(r.writer_id).startsWith(DENYLIST_WRITER) && NAMES_SCOPE.test(`${(r.missing || []).join("; ")} ${r.reason}`))),
+    );
+    if (!fits) errors.push(`[split-origin] ${at(n)}: its origin must cite the record that triggered the split — ${p.id}'s own ${claimOf(p.id)} revise with a repair, or its defer naming scope (never a reject, a denylist hit or a human-decision defer)`);
+    if (depthOf(n) > MAX_SPLIT_DEPTH) errors.push(`[split-depth] ${at(n)}: a split ${depthOf(n)} levels deep — at most ${MAX_SPLIT_DEPTH}; escalate the node instead of splitting again`);
+  }
+  // Dependents re-pointed: to every child, or (children chained by after:) to the last one.
+  for (const [pid, kids] of childrenOf) {
+    const chained = kids.every((k, i) => i === 0 || byId.get(k)?.after.includes(kids[i - 1]));
+    for (const d of nodes) {
+      if (kids.includes(d.id) || d.id === pid) continue;
+      const hits = d.after.filter((a) => kids.includes(a));
+      if (!hits.length) continue;
+      const whole = kids.every((k) => d.after.includes(k)) || (chained && d.after.includes(kids[kids.length - 1]));
+      if (!whole) errors.push(`[split] ${at(d)}: it depends on ${hits.join(", ")}, only part of ${pid}'s split — re-point it to every child${chained ? " or to the last one" : " (they are not chained, so the last one is not enough)"}`);
+    }
+  }
+  // Drop-and-recreate: a live node citing a dropped, attempted node's finding must declare the split.
+  for (const n of nodes) {
+    if (!LIVE.includes(n.status) || SPLIT_FROM_RE.test(n.origin || "")) continue;
+    const mine = new Set(String(n.origin || "").match(CITED_RE) || []);
+    for (const d of nodes) {
+      if (d === n || d.status !== "dropped" || !(String(d.origin || "").match(CITED_RE) || []).some((id) => mine.has(id))) continue;
+      const attempted = [...state.records.values()].some((r) => r.claim_id === claimOf(d.id) && ATTEMPT_VERDICTS.includes(r.final_status));
+      if (attempted) errors.push(`[split-of] ${at(n)}: it re-creates the finding of ${d.id}, a dropped node with attempts — declare 'split from ${d.id}' in its origin, or the attempt count resets`);
+    }
+  }
 }
 
 /**
