@@ -44,7 +44,7 @@ import {
   wikiViolations,
   writeRecords,
 } from "./lib.mjs";
-import { DEFAULT_PLAN, parsePlan, planItems, planViolations, readyIds } from "./plan.mjs";
+import { DEFAULT_PLAN, MAX_SCOPE, parsePlan, planItems, planViolations, readyIds } from "./plan.mjs";
 import { STORY_MAP, STORY_MAP_PATHS, storyMapViolations } from "./story-map.mjs";
 
 const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (policy: .claude/memory/topics/trace.md)
@@ -71,10 +71,11 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
                                        ranked by the origin record's severity (blocker, important, the rest), table order
                                        breaking ties; --max N keeps the first N; --json prints those rows in full — exit 1
                                        and no ids when the plan table does not parse, 2 when the store does not replay
-  pnpm trace plan-lint [--pre-dispatch] [--plan p]
+  pnpm trace plan-lint [--pre-dispatch [--max-scope N]] [--plan p]
                                        check the plan against its contract and the record store (consistency, not truth):
                                        exit 1 on an error, 2 when the store does not replay; --pre-dispatch also fails on
-                                       an in-progress node (run it before every dispatch)
+                                       an in-progress node, a ready node with no check, and one whose scope lists more
+                                       than N paths (default 3; L3 passes 1) — run it before every dispatch
   pnpm trace plan-items <ids…> [--plan p]
                                        loop-iteration args.items for ready nodes: [{id, description, priorRecordId?,
                                        missing?}]; priorRecordId only for the node's own loop:<id> record, never a
@@ -375,7 +376,12 @@ async function main() {
 
   if (cmd === "plan-lint") {
     if (flags.plan === true) {
-      out("usage: pnpm trace plan-lint [--pre-dispatch] [--plan p] [--store s]");
+      out("usage: pnpm trace plan-lint [--pre-dispatch [--max-scope N]] [--plan p] [--store s]   (N 1..3)");
+      return 2;
+    }
+    const maxScope = flags["max-scope"] === undefined ? MAX_SCOPE : /^[1-3]$/.test(String(flags["max-scope"])) ? Number(flags["max-scope"]) : NaN;
+    if (Number.isNaN(maxScope)) {
+      out("usage: pnpm trace plan-lint [--pre-dispatch [--max-scope N]] [--plan p] [--store s]   (N 1..3)");
       return 2;
     }
     // The cross-checks read the store; one that does not replay cannot vouch for any node.
@@ -385,7 +391,7 @@ async function main() {
     }
     const plan = readPlan();
     const preDispatch = !!flags["pre-dispatch"];
-    const { errors, warnings } = planViolations(plan, state, { preDispatch });
+    const { errors, warnings } = planViolations(plan, state, { preDispatch, maxScope });
     for (const w of warnings) process.stderr.write(`warn: ${w}\n`);
     for (const e of errors) process.stderr.write(`error: ${e}\n`);
     out({ ok: errors.length === 0, errors: errors.length, warnings: warnings.length, nodes: plan.nodes.length, preDispatch, plan: planPath, store: storePath }, true);

@@ -258,6 +258,17 @@ describe("plan commands (CLI process)", () => {
     expect(broken.stdout).toBe("");
   });
 
+  it("plan-lint --pre-dispatch --max-scope 1 (the L3 ceiling) fails a ready node with two scope paths; a value above 3 is a usage error", () => {
+    const H10 = "| id | description | after | status | record | missing | origin | notes | scope | check |\n|---|---|---|---|---|---|---|---|---|---|";
+    const p = join(dir, "loop-plan-scope.md");
+    writeFileSync(p, `## Plan\n\n${H10}\n| LP-001 | w | — | ready | | | human | | src/a.ts, src/a.test.ts | pnpm test |\n`);
+    expect(trace(["plan-lint", "--pre-dispatch", "--plan", p]).status).toBe(0);
+    const l3 = trace(["plan-lint", "--pre-dispatch", "--max-scope", "1", "--plan", p]);
+    expect(l3.status).toBe(1);
+    expect(l3.stderr).toMatch(/\[oversize\] LP-001/);
+    expect(trace(["plan-lint", "--pre-dispatch", "--max-scope", "4", "--plan", p]).status).toBe(2);
+  });
+
   it("plan-lint exits 1 naming the rule when a done node cites a defer record, 0 on a consistent plan, and 2 when the store does not replay", () => {
     expect(trace(["write", "-"], draft({ writer_id: "loop-iteration/verify:LP-001-0", claim_id: "loop:lp-001", claim_type: "practical", final_status: "defer", missing: ["a unit test run"], evidence: [] })).status).toBe(0);
     const id = JSON.parse(trace(["query", "--json"]).stdout)[0].record_id;

@@ -225,6 +225,9 @@ function findCycles(nodes, byId) {
   return cycles;
 }
 
+/** Size from scope: a ready node may list at most this many scope paths (L2); L3 lowers it to 1 (loop-checklist.md). */
+export const MAX_SCOPE = 3;
+
 const EMPTY_STATE = { records: new Map(), actions: new Map(), superseded: new Set(), latestOfClaim: new Map() };
 
 /**
@@ -234,7 +237,7 @@ const EMPTY_STATE = { records: new Map(), actions: new Map(), superseded: new Se
  * warns; an `in-progress` node is an error only with preDispatch, since the contract test can run
  * mid-loop.
  */
-export function planViolations(plan, state = EMPTY_STATE, { preDispatch = false } = {}) {
+export function planViolations(plan, state = EMPTY_STATE, { preDispatch = false, maxScope = MAX_SCOPE } = {}) {
   const { nodes, errors: parseErrors } = Array.isArray(plan) ? { nodes: plan, errors: [] } : plan;
   const errors = [...parseErrors];
   const warnings = [];
@@ -256,6 +259,10 @@ export function planViolations(plan, state = EMPTY_STATE, { preDispatch = false 
     // The node contract (loop-plan.md, Node schema): which files it may touch, and which command proves it.
     if (n.status === "ready" && !(n.check || "").trim() && preDispatch) {
       errors.push(`[check] ${at(n)}: ready with an empty check — name the smallest command that proves the node, or escalate it as not automatically checkable before it is dispatched`);
+    }
+    const globAtL3 = maxScope === 1 && (n.scope || []).some((p) => /[*?[{]/.test(p));
+    if (n.status === "ready" && ((n.scope || []).length > maxScope || globAtL3) && preDispatch) {
+      errors.push(`[oversize] ${at(n)}: its scope lists ${n.scope.length} path(s)${globAtL3 ? ", one a glob" : ""} (at most ${maxScope}${maxScope === 1 ? " literal file" : ""}) — split it (loop-plan.md, Split on failure) or escalate it as architecturally significant before it is dispatched`);
     }
     if (n.status === "ready" && !(n.scope || []).length && preDispatch) {
       warnings.push(`[scope] ${at(n)}: ready with an empty scope — list the files it may touch (from its origin finding's file:line); an empty scope dispatches alone`);

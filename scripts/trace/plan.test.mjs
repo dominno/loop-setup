@@ -234,6 +234,15 @@ describe("plan-lint: structural rules", () => {
     expect(flagged(pre.warnings, "scope")).toEqual(["LP-003"]);
   });
 
+  it("[oversize]: a ready node whose scope lists more than 3 paths fails --pre-dispatch (maxScope 1 at L3)", () => {
+    const H10 = "| id | description | after | status | record | missing | origin | notes | scope | check |\n|---|---|---|---|---|---|---|---|---|---|";
+    const r = (id, scope, status = "ready") => `| ${id} | w | — | ${status} | | | human | | ${scope} | pnpm test |`;
+    const p = parsePlan(`## Plan\n\n${H10}\n${[r("LP-001", "a, b, c"), r("LP-002", "a, b, c, d"), r("LP-003", "a, b, c, d, e", "blocked"), r("LP-004", "src/x.ts"), r("LP-005", "src/*.ts")].join("\n")}\n`);
+    expect(planViolations(p).errors).toEqual([]);
+    expect(flagged(planViolations(p, undefined, { preDispatch: true }).errors, "oversize")).toEqual(["LP-002"]);
+    expect(flagged(planViolations(p, undefined, { preDispatch: true, maxScope: 1 }).errors, "oversize")).toEqual(["LP-001", "LP-002", "LP-005"]); // a glob is never 1 file
+  });
+
   it("stranded: in the chain A (escalated) ← B ← C, B and C are flagged, while a deferred ancestor strands nothing", () => {
     const chain = (status) =>
       lint(row("LP-001", { status, missing: "a human decision on the auth flow" }), row("LP-002", { after: "LP-001", status: "blocked" }), row("LP-003", { after: "LP-002", status: "blocked" }));

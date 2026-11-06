@@ -122,7 +122,8 @@ instructions — the self-modification guard below still applies to everything e
    so nothing is left silently `blocked`. Node creation is the *only* loop action exempt
    from "no action without a node"; it is the sanctioned bootstrap, so an
    empty/first-iteration plan is populated here rather than deadlocking. Record the
-   re-plan delta in the run-log entry. Finish with `pnpm -s trace plan-lint --pre-dispatch`:
+   re-plan delta in the run-log entry. Finish with `pnpm -s trace plan-lint --pre-dispatch` (at L3 add `--max-scope 1`, the
+   L3 size ceiling; an `[oversize]` node is split or escalated, never dispatched):
    it checks the rewritten plan against its contract and the record store (consistency,
    not truth — exit 1 names each broken rule, exit 2 means the store does not replay).
    **Never dispatch from a plan that fails it:** repair the plan and re-run it, or stop
