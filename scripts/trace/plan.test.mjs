@@ -6,7 +6,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendActions, loadEntries, loadSchema, readPolicyVersion, replay, writeRecords } from "./lib.mjs";
-import { DEFAULT_PLAN, NOT_READY, STATUSES, conflictFreeBatch, newNodeId, dependents, planDrift, planStatus, scopesOverlap, parsePlan, planItems, planViolations, readyIds } from "./plan.mjs";
+import { DEFAULT_PLAN, NOT_READY, STATUSES, conflictFreeBatch, newNodeId, parseRunLog, dependents, planDrift, planStatus, scopesOverlap, parsePlan, planItems, planViolations, readyIds } from "./plan.mjs";
 
 const HEADER = "| id | description | after | status | record | missing | origin | notes |\n|---|---|---|---|---|---|---|---|";
 const planText = (...rows) => `# Loop Plan\n\n## Plan\n_Some prose before the table._\n\n${HEADER}\n${rows.join("\n")}\n`;
@@ -902,6 +902,50 @@ describe("plan-lint: TRACE cross-checks (a temp store written by writeRecords / 
     expect(st.claims).toEqual([{ id: "LP-001", owner: "ana", runId: "20261106-1000", ageHours: 2.5 }]);
     expect(st.oversize).toEqual(["LP-002"]);
     expect(st.attempts).toEqual([{ id: "LP-002", attempts: 1 }]);
+  });
+
+  describe("M2/M5 owner-aware claims (claim:<owner>@<run-id> in notes)", () => {
+    const LOG = [
+      "# Loop run log",
+      "",
+      "## [2026-11-06 10:00] L2 | ana's closed run",
+      "- owner: ana",
+      "- next: stop",
+      "",
+      "## [2026-11-06 11:00] L2 | ben's open entry",
+      "- owner: ben",
+      "- actions: report only",
+      "",
+    ].join("\n");
+    const runs = parseRunLog(LOG);
+    const ip = (id, notes) => row(id, { status: "in-progress", notes });
+
+    it("parseRunLog keys each entry by owner@run-id (the header's timestamp) and says whether it closed (a next: line)", () => {
+      expect(runs.get("ana@20261106-1000")).toEqual({ closed: true });
+      expect(runs.get("ben@20261106-1100")).toEqual({ closed: false });
+    });
+
+    it("an own claim with no run entry, or a closed one, is stale; another owner's claim is live unless that owner's entry closed", () => {
+      const rows = [
+        ip("LP-001", "claim:ana@20261106-1000"), // own, run closed → stale
+        ip("LP-002", "claim:ana@20261106-1300"), // own, no entry (a crashed run) → stale
+        ip("LP-003", "claim:ben@20261106-1300"), // ben's, no entry yet (his run is live) → claimed
+        ip("LP-004", "claim:ben@20261106-1100"), // ben's, entry not closed → claimed
+        ip("LP-005", "attempt 1"), // unclaimed (legacy) → the plain rule
+      ];
+      const { errors, warnings } = lint(rows, { preDispatch: true, owner: "ana", runs });
+      expect(flagged(errors, "in-progress")).toEqual(["LP-001", "LP-002", "LP-005"]);
+      expect(flagged(warnings, "in-progress-claimed")).toEqual(["LP-003", "LP-004"]);
+      expect(warnings.find((w) => w.startsWith("[in-progress-claimed] LP-003"))).toMatch(/never reset another owner's node/);
+      // ben's closed run frees his node for anyone.
+      const closed = parseRunLog(`${LOG}\n## [2026-11-06 13:00] L2 | ben again\n- owner: ben\n- next: stop\n`);
+      expect(flagged(lint([ip("LP-003", "claim:ben@20261106-1300")], { preDispatch: true, owner: "ana", runs: closed }).errors, "in-progress")).toEqual(["LP-003"]);
+    });
+
+    it("[claim-conflict]: two owners claiming one node is an error, with or without --pre-dispatch", () => {
+      const { errors } = lint([ip("LP-001", "claim:ana@20261106-1000; claim:ben@20261106-1005"), ip("LP-002", "claim:ana@20261106-1000")], { owner: "ana", runs });
+      expect(flagged(errors, "claim-conflict")).toEqual(["LP-001"]);
+    });
   });
 
   it("in-progress is a warning by default and an error with preDispatch", () => {

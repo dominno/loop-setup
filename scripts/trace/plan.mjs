@@ -322,7 +322,7 @@ const EMPTY_STATE = { records: new Map(), actions: new Map(), superseded: new Se
  * warns; an `in-progress` node is an error only with preDispatch, since the contract test can run
  * mid-loop.
  */
-export function planViolations(plan, state = EMPTY_STATE, { preDispatch = false, maxScope = MAX_SCOPE, stories } = {}) {
+export function planViolations(plan, state = EMPTY_STATE, { preDispatch = false, maxScope = MAX_SCOPE, stories, owner, runs } = {}) {
   const { nodes, errors: parseErrors } = Array.isArray(plan) ? { nodes: plan, errors: [] } : plan;
   const errors = [...parseErrors];
   const warnings = [];
@@ -497,9 +497,23 @@ export function planViolations(plan, state = EMPTY_STATE, { preDispatch = false,
         warnings.push(`[verified-unlanded] ${at(n)}: ${newestOwn.record_id} (${newestOwn.final_status}) licenses this node's diff, but carries no CLEAR and no HOLD — resume only when the run-log names its saved diff, that file still exists and HEAD is ${newestOwn.provenance?.commit || "(no provenance commit)"}, and even then run denylist-check, git apply --check and the post-apply check; otherwise HOLD it as orphaned (pnpm trace act ${newestOwn.record_id} loop HOLD --ref ${n.id} --note "orphaned accept") and re-dispatch`);
       }
     }
+    // Owner-aware claims (M2/M5): a claim of another owner's live run is never ours to reset.
+    const claims = claimsOf(n.notes);
+    const owners = [...new Set(claims.map((c) => c.owner))];
+    if (owners.length > 1) errors.push(`[claim-conflict] ${at(n)}: claimed by ${owners.join(" and ")} — one node has one owner; the owners decide who keeps it, and the other's claim is removed`);
     if (n.status === "in-progress") {
-      const msg = `[in-progress] ${at(n)}: in-progress — stale unless this iteration dispatched it; reset it to ready/blocked before dispatching (loop-plan.md, Stale in-progress recovery)`;
-      (preDispatch ? errors : warnings).push(msg);
+      const claim = claims[claims.length - 1];
+      const run = claim && runs ? runs.get(`${claim.owner}@${claim.runId}`) : undefined;
+      const mine = claim && owner !== undefined && claim.owner === String(owner).toLowerCase();
+      // Stale: the claiming run's entry closed (a next: line), or — for our own claim — it was never logged (the run died).
+      const live = claim && runs && owner !== undefined && (run ? !run.closed : !mine);
+      if (live) {
+        warnings.push(`[in-progress-claimed] ${at(n)}: claimed by ${claim.owner}'s run ${claim.runId}, which has not closed${mine ? "" : ` — never reset another owner's node: ask ${claim.owner} or a human to release it`}`);
+      } else {
+        const why = claim && runs && owner !== undefined ? ` (its claim ${claim.owner}@${claim.runId}: ${run ? "that run closed" : "no run-log entry, so the run died"})` : "";
+        const msg = `[in-progress] ${at(n)}: in-progress — stale unless this iteration dispatched it${why}; reset it to ready/blocked before dispatching, citing the claim it broke (loop-plan.md, Stale in-progress recovery)`;
+        (preDispatch ? errors : warnings).push(msg);
+      }
     }
   }
   return { errors, warnings };
@@ -530,6 +544,39 @@ const runIdTime = (runId) => {
   const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})$/.exec(runId);
   return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]) : NaN;
 };
+
+/**
+ * The run log's entries (loop-run-log.md, outside ``` fences): `## [YYYY-MM-DD HH:MM] …` headers,
+ * each keyed `<owner>@<YYYYMMDD-HHMM>` by its `- owner:` line ("unknown" without one), and closed
+ * when the entry has a `- next:` line. → Map key → { closed }.
+ */
+export function parseRunLog(text) {
+  const runs = new Map();
+  let fenced = false;
+  let cur = null;
+  const flush = () => {
+    if (cur) runs.set(`${cur.owner}@${cur.runId}`, { closed: cur.closed });
+  };
+  for (const line of String(text ?? "").split("\n")) {
+    if (/^\s*(```|~~~)/.test(line)) {
+      fenced = !fenced;
+      continue;
+    }
+    if (fenced) continue;
+    const h = /^##\s+\[(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})\]/.exec(line);
+    if (h) {
+      flush();
+      cur = { runId: `${h[1]}${h[2]}${h[3]}-${h[4]}${h[5]}`, owner: "unknown", closed: false };
+      continue;
+    }
+    if (!cur) continue;
+    const o = /^-\s+owner:\s*([a-z0-9][a-z0-9._-]*)/i.exec(line);
+    if (o) cur.owner = o[1].toLowerCase();
+    if (/^-\s+next:/i.test(line)) cur.closed = true;
+  }
+  flush();
+  return runs;
+}
 
 /**
  * `pnpm trace status`: a read-only rollup of the plan — nodes per status, open/done nodes per

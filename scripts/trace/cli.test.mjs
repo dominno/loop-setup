@@ -318,6 +318,19 @@ describe("plan commands (CLI process)", () => {
     expect(trace(["plan-id"]).status).toBe(2); // a description is required
   });
 
+  it("claim-token prints claim:<owner>@<YYYYMMDD-HHMM>; plan-lint reads --run-log to tell a live claim from a stale one", () => {
+    const env = { ...process.env, TRACE_STORE: store, LOOP_OWNER: "ana" };
+    const tok = spawnSync(process.execPath, [CLI, "claim-token"], { encoding: "utf8", env });
+    expect(tok.status).toBe(0);
+    expect(tok.stdout.trim()).toMatch(/^claim:ana@\d{8}-\d{4}$/);
+    const log = join(dir, "run-log.md");
+    writeFileSync(log, "## [2026-11-06 11:00] L2 | ben\n- owner: ben\n- actions: x\n");
+    const p = writePlan("| LP-001 | a | — | in-progress | | | human | claim:ben@20261106-1100 |");
+    const out = spawnSync(process.execPath, [CLI, "plan-lint", "--pre-dispatch", "--plan", p, "--run-log", log], { encoding: "utf8", env });
+    expect(out.status).toBe(0); // ben's live claim only warns: it is not ana's to reset
+    expect(out.stderr).toMatch(/\[in-progress-claimed\] LP-001/);
+  });
+
   it("plan-lint exits 1 naming the rule when a done node cites a defer record, 0 on a consistent plan, and 2 when the store does not replay", () => {
     expect(trace(["write", "-"], draft({ writer_id: "loop-iteration/verify:LP-001-0", claim_id: "loop:lp-001", claim_type: "practical", final_status: "defer", missing: ["a unit test run"], evidence: [] })).status).toBe(0);
     const id = JSON.parse(trace(["query", "--json"]).stdout)[0].record_id;

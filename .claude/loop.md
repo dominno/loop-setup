@@ -12,6 +12,14 @@ budget, denylist, escalation, stop conditions). Before running, fix the loop's
 - **L3 — Unattended.** May act without a human watching; requires every section of
   `.claude/loop-checklist.md` to be satisfied first.
 
+## One loop per branch
+The plan file is a single-writer resource: run at most one `/loop` per checkout, and do not
+start an iteration on a shared branch while another session's claim is live (`pnpm trace
+status` lists the in-progress claims and their age; `plan-lint` warns `[in-progress-claimed]`).
+Two people work through branches and PRs, each loop on its own branch, or take turns on one
+through the commit-and-push lease (step 10). A markdown claim does not make plan writes atomic;
+git's rejected push is what serializes them.
+
 ## The plan (`.claude/memory/loop-plan.md`) — the DAG every action traces to
 The loop's watchlist is a **durable, mutable plan** of typed work nodes with `after:`
 dependency edges, kept in `.claude/memory/loop-plan.md` (schema + ready-node rule are
@@ -123,7 +131,11 @@ instructions — the self-modification guard below still applies to everything e
    confirmation path; at L3 escalate the node instead of splitting it. Log the split in the
    run-log re-plan delta.
    Also **repair broken states** (see the plan's rules): reset any
-   stale `in-progress` node left by an interrupted prior run; for a node `plan-lint` warns
+   stale `in-progress` node left by an interrupted prior run — `plan-lint` decides stale from
+   the node's claim and the run log: your own claim whose run closed or was never logged is
+   stale; another owner's claim is stale only once that owner's entry closed
+   (`[in-progress-claimed]` otherwise: never reset another owner's node — report it, and ask
+   that owner or a human to release it); for a node `plan-lint` warns
    `[verified-unlanded]` (its verifier accept was never applied), resume from the accept only
    when the run-log entry names the saved diff, that file still exists and HEAD equals the
    record's provenance commit — and still run denylist-check, `git apply --check` and the
@@ -157,9 +169,15 @@ instructions — the self-modification guard below still applies to everything e
       stop and report "needs a commit of <files>". Then, in this order: write the items
       with `pnpm -s trace plan-items <selected ids> > <scratchpad>/loop-items.json` (exit 1
       = an id is not ready: dispatch nothing and re-plan; exit 2 = the store does not
-      replay: dispatch nothing and stop, as for plan-lint); set the selected nodes
-      `in-progress` in the plan (only now: an `in-progress` node is never ready, so
-      plan-items would refuse it); then fix them via the **loop-iteration Workflow**
+      replay: dispatch nothing and stop, as for plan-lint); set the selected nodes `in-progress` in the plan, each with a claim in its notes
+      (`pnpm -s trace claim-token` → `claim:<owner>@<YYYYMMDD-HHMM>`; the run-log entry you
+      append in step 11 carries the same time in its header and a `- owner:` line) — only now:
+      an `in-progress` node is never ready, so plan-items would refuse it. **Lease through git
+      (a shared branch, and only when the user allowed this loop to commit and push):** commit
+      the claimed rows (`git commit -m "claim <ids>" -- .claude/memory/loop-plan.md`) and push
+      before dispatching; a rejected push means someone else moved the plan — never force:
+      fetch, re-read the plan and re-plan (step 9). Without that permission the loop runs on a
+      branch of its own, where no lease is needed; then fix them via the **loop-iteration Workflow**
       (`.claude/workflows/loop-iteration.js`, `args.level` = the declared level,
       `args.treeId` = `pnpm -s trace tree-id`, `args.headSha` = `git rev-parse HEAD`,
       `args.items` = the array in that file, unedited — each `id` is the node `id`, and a
@@ -294,6 +312,7 @@ Notify only when action is needed — do not ping on a no-op run.
 ## Run-log entry (append to `.claude/memory/loop-run-log.md`)
 ```
 ## [YYYY-MM-DD HH:MM] L<level> | <task>
+- owner: <LOOP_OWNER, else git user.email's local part — the claims' owner>
 - node: <plan-item id acted on, or "none — report-only / no ready node">
 - found: <n blockers / n important / n nice-to-have>
 - actions: <fixes applied, or "report only">

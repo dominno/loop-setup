@@ -44,7 +44,7 @@ import {
   wikiViolations,
   writeRecords,
 } from "./lib.mjs";
-import { DEFAULT_PLAN, MAX_SCOPE, conflictFreeBatch, newNodeId, parsePlan, planDrift, planStatus, planItems, planViolations, readyIds } from "./plan.mjs";
+import { DEFAULT_PLAN, MAX_SCOPE, conflictFreeBatch, newNodeId, parsePlan, parseRunLog, planDrift, planStatus, planItems, planViolations, readyIds } from "./plan.mjs";
 import { STORY_MAP, STORY_MAP_PATHS, parseStory, storyMapViolations } from "./story-map.mjs";
 
 const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (policy: .claude/memory/topics/trace.md)
@@ -73,11 +73,13 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
                                        not overlap (an empty scope goes alone), then the first N, naming each skipped id on
                                        stderr; --json prints those rows in full — exit 1
                                        and no ids when the plan table does not parse, 2 when the store does not replay
-  pnpm trace plan-lint [--pre-dispatch [--max-scope N]] [--plan p]
+  pnpm trace plan-lint [--pre-dispatch [--max-scope N]] [--plan p] [--run-log f]
                                        check the plan against its contract and the record store (consistency, not truth):
                                        exit 1 on an error, 2 when the store does not replay; --pre-dispatch also fails on
                                        an in-progress node, a ready node with no check, and one whose scope lists more
                                        than N paths (default 3; L3 passes 1) — run it before every dispatch
+  pnpm trace claim-token                claim:<owner>@<YYYYMMDD-HHMM> (UTC now) for a dispatched node's notes; the run-log
+                                       entry's header carries the same time and a "- owner:" line
   pnpm trace plan-id "<description>" [--plan p]
                                        a fresh collision-free node id, LP-<6 hex> (description + owner + time), not used
                                        in the plan or the store; owner = LOOP_OWNER, else git user.email's local part
@@ -431,11 +433,26 @@ async function main() {
     } catch {
       // no stories/ directory: every story token dangles, as a warning
     }
-    const { errors, warnings } = planViolations(plan, state, { preDispatch, maxScope, stories });
+    // The run log decides whether an in-progress node's claim belongs to a live run (absent log: no entries).
+    const runLogPath = typeof flags["run-log"] === "string" ? resolve(flags["run-log"]) : join(ROOT, ".claude/memory/loop-run-log.md");
+    let runs = new Map();
+    try {
+      runs = parseRunLog(readFileSync(runLogPath, "utf8"));
+    } catch {
+      // no run log yet: an own claim is stale, another owner's is live
+    }
+    const { errors, warnings } = planViolations(plan, state, { preDispatch, maxScope, stories, owner: currentOwner(), runs });
     for (const w of warnings) process.stderr.write(`warn: ${w}\n`);
     for (const e of errors) process.stderr.write(`error: ${e}\n`);
     out({ ok: errors.length === 0, errors: errors.length, warnings: warnings.length, nodes: plan.nodes.length, preDispatch, plan: planPath, store: storePath }, true);
     return errors.length ? 1 : 0;
+  }
+
+  if (cmd === "claim-token") {
+    // The claim a dispatch writes into a node's notes; its time is the run-log entry's header (YYYY-MM-DD HH:MM, UTC).
+    const t = new Date().toISOString();
+    process.stdout.write(`claim:${currentOwner()}@${t.slice(0, 10).replace(/-/g, "")}-${t.slice(11, 13)}${t.slice(14, 16)}\n`);
+    return 0;
   }
 
   if (cmd === "plan-id") {

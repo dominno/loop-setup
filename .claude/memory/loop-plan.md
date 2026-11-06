@@ -112,6 +112,12 @@ at the *start* of a later iteration means the prior run was interrupted (crash /
 budget exhaustion) — it is stale. The re-plan step MUST resolve it (reset it to `ready`
 or `blocked` per its current `after:` deps, with a note) before it can be selected again;
 never dispatch a leftover `in-progress` node as-is (it may be mid-flight or orphaned).
+A dispatched node's notes carry its claim, `claim:<owner>@<YYYYMMDD-HHMM>` (`pnpm trace
+claim-token`), and the run log decides stale (`plan-lint`, with `[in-progress-claimed]` for a
+live claim): your own claim is stale once its run's entry closed (`- next:`) or if no entry
+was logged (the run died); **another owner's claim is never yours to reset** — it is stale only
+once that owner's entry closed, else ask that owner or a human. Two owners' claims on one node
+fail `[claim-conflict]`.
 
 **Deferred nodes (TRACE "defer is prospective memory"):** a `deferred` node is not
 dispatchable, but it is not a dead end either. In each re-plan step, check its `missing`

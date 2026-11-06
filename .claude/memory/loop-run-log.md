@@ -8,6 +8,7 @@ Entry format (see `.claude/loop.md`):
 
 ```
 ## [YYYY-MM-DD HH:MM] L<level> | <task>
+- owner: <LOOP_OWNER, else git user.email's local part — the claims' owner>
 - node: <plan-item id acted on, or "none — report-only / no ready node">
 - found: <n blockers / n important / n nice-to-have>
 - actions: <fixes applied, or "report only">
