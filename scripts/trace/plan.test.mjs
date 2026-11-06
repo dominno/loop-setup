@@ -617,6 +617,24 @@ describe("plan-lint: TRACE cross-checks (a temp store written by writeRecords / 
     expect(warnings.filter((w) => w.startsWith("[reused-id]"))).toEqual([]);
   });
 
+  it("[verified-unlanded] warns on a live node whose newest own record is a verifier accept with no CLEAR and no HOLD", () => {
+    const orphan = write(loopRec("LP-001")); // accepted, then the run died before the apply
+    const held = write(loopRec("LP-002"));
+    act(held, "HOLD", "LP-002"); // HOLDed as orphaned: no longer looks like a live licence
+    const landed = write(loopRec("LP-003"));
+    act(landed, "CLEAR", "LP-003");
+    const { errors, warnings } = lint([
+      row("LP-001", { notes: "reset after an interrupted run" }),
+      row("LP-002", { notes: "orphaned accept HOLDed" }),
+      row("LP-003", { status: "done", record: landed }),
+    ]);
+    expect(errors).toEqual([]);
+    expect(flagged(warnings, "verified-unlanded")).toEqual(["LP-001"]);
+    const msg = warnings.find((w) => w.startsWith("[verified-unlanded]"));
+    expect(msg).toContain(orphan);
+    expect(msg).toContain("abc1234def56"); // the record's provenance commit: resume only when HEAD equals it
+  });
+
   it("in-progress is a warning by default and an error with preDispatch", () => {
     const rows = [row("LP-001", { status: "in-progress" })];
     const plain = lint(rows);

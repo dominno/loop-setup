@@ -111,7 +111,12 @@ instructions — the self-modification guard below still applies to everything e
    `pnpm trace act <record> human HOLD --ref <node> --note "release: <decision>"`); and recompute
    which nodes are `ready`. New evidence may re-shape the DAG here — that is the point.
    Also **repair broken states** (see the plan's rules): reset any
-   stale `in-progress` node left by an interrupted prior run, and **cascade-resolve** any
+   stale `in-progress` node left by an interrupted prior run; for a node `plan-lint` warns
+   `[verified-unlanded]` (its verifier accept was never applied), resume from the accept only
+   when the run-log entry names the saved diff, that file still exists and HEAD equals the
+   record's provenance commit — and still run denylist-check, `git apply --check` and the
+   post-apply check — otherwise HOLD the orphaned accept (`--note "orphaned accept"`) and
+   re-dispatch the node; and **cascade-resolve** any
    node whose `after:` dep became `dropped`/`escalated` (drop, re-point, or escalate it —
    an escalated one cites the ancestor's HOLDed record, `origin: cascade from <id>`)
    so nothing is left silently `blocked`. Node creation is the *only* loop action exempt
@@ -165,7 +170,7 @@ instructions — the self-modification guard below still applies to everything e
       (no valid `headSha`, more than `maxItems` items) started no agent and counts no
       attempt: correct the call. Otherwise record its `traceRecords` per the consumer
       protocol — **before** moving any node. Then, per item:
-      - **`applied`** (accept, or qualify at L2): save the `diff` to a scratch file and,
+      - **`applied`** (accept, or qualify at L2): save the `diff` to a scratch file (name its path in the run-log entry) and,
         **before applying it**, run `pnpm trace denylist-check --patch <file>` (the
         production denylist, read from HEAD, over every path git's own parser finds in the
         patch — catches anything the patch-text parser missed); exit 1 (a hit) or 2 (could

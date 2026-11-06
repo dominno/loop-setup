@@ -341,6 +341,14 @@ export function planViolations(plan, state = EMPTY_STATE, { preDispatch = false 
     } else if (n.status !== "done" && cleared.has(claimOf(n.id))) {
       warnings.push(`[reused-id] ${at(n)}: ${n.status}, but claim ${claimOf(n.id)} already carries a CLEARed record (${cleared.get(claimOf(n.id))}), so this id was done before — ids are never reused, a pruned one included: renumber the node above the highest LP id ever used`);
     }
+    // Verified but not landed: the verifier accepted the node's diff, and the run ended before the apply.
+    const newestOwn = state.records.get(state.latestOfClaim.get(claimOf(n.id)));
+    if (newestOwn && LIVE.includes(n.status) && String(newestOwn.writer_id).startsWith(VERIFIER_WRITER) && LICENSING.includes(newestOwn.final_status)) {
+      const acted = (state.actions.get(newestOwn.record_id) || []).some((a) => a.action === "CLEAR" || a.action === "HOLD");
+      if (!acted) {
+        warnings.push(`[verified-unlanded] ${at(n)}: ${newestOwn.record_id} (${newestOwn.final_status}) licenses this node's diff, but carries no CLEAR and no HOLD — resume only when the run-log names its saved diff, that file still exists and HEAD is ${newestOwn.provenance?.commit || "(no provenance commit)"}, and even then run denylist-check, git apply --check and the post-apply check; otherwise HOLD it as orphaned (pnpm trace act ${newestOwn.record_id} loop HOLD --ref ${n.id} --note "orphaned accept") and re-dispatch`);
+      }
+    }
     if (n.status === "in-progress") {
       const msg = `[in-progress] ${at(n)}: in-progress — stale unless this iteration dispatched it; reset it to ready/blocked before dispatching (loop-plan.md, Stale in-progress recovery)`;
       (preDispatch ? errors : warnings).push(msg);
