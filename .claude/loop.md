@@ -194,7 +194,9 @@ instructions — the self-modification guard below still applies to everything e
         with it — it is re-dispatchable (step 9). If it passes → `git apply <file>`, then run the node's `check` (its smallest relevant
         check), and log in the run-log entry the diff paths that fall outside its `scope` (a
         drift signal, never a gate). If it passes, `pnpm trace act <that node's loop-iteration record> loop CLEAR
-        --ref <node> --note "<check that passed; qualifier if any>"` and mark the node
+        --ref <node> --note "base <baseSha>; patch <hash>; <check that passed>; <qualifier if any>"`
+        (`<baseSha>` = the item's reported `baseSha`; `<hash>` = the first 12 hex of
+        `git hash-object <patch file>`, so a later commit can be tied back to this apply) and mark the node
         `done` with that `record` (copy a qualifier into the node's notes). If no relevant
         automated check exists, do not CLEAR: `HOLD` and escalate. If the check fails,
         revert the patch, write a `revise` record (same `claim_id`, `revises` the first, writer_id
@@ -225,7 +227,9 @@ instructions — the self-modification guard below still applies to everything e
       Never fix nice-to-haves automatically; never start unrelated refactors.
     - **If no node is ready** after re-plan, do not invent work — **self-stop** (per
       *Stop when*).
-11. **Append a run entry** to `.claude/memory/loop-run-log.md` (see format below).
+11. **Append a run entry** to `.claude/memory/loop-run-log.md` (see format below). When the
+    user later commits a node's change, a `Plan: LP-…` trailer in the commit message ties it to
+    the node — an optional convention, never linted as an error.
 
 ## Denylist — never touch autonomously (escalate instead)
 (The TRACE record store under `.claude/memory/trace/` is appended only through
@@ -294,7 +298,7 @@ Notify only when action is needed — do not ping on a no-op run.
 - actions: <fixes applied, or "report only">
 - re-plan: <nodes added / marked done / deferred→ready / dropped, or "none">
 - records: <record ids written + actions (CLEAR/HOLD/REUSE), or "none">
-- drift: <diff paths outside each node's scope, or none>
+- drift: <diff paths outside each node's scope, or none; plus `pnpm -s trace plan-drift` (advisory): nodes added/dropped/moved since the last entry>
 - worktrees: kept <paths> | removed <n>
 - budget: <used>/<cap> (turns or tokens)
 - escalations: <none | reason>

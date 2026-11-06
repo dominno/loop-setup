@@ -291,6 +291,16 @@ describe("plan commands (CLI process)", () => {
     expect(stories.stderr).toMatch(/warn: \[plan-nodes\] US-001 .*LP-001/);
   });
 
+  it("plan-drift is advisory: exit 0 with the drift JSON against --base-plan, labelled consistency, not truth", () => {
+    const now = writePlan("| LP-001 | a | — | ready | | | human | |", "| LP-002 | b | — | ready | | | human | |");
+    const base = writePlan("| LP-001 | a | — | blocked | | | human | |");
+    const out = trace(["plan-drift", "--plan", now, "--base-plan", base]);
+    expect(out.status).toBe(0);
+    const j = JSON.parse(out.stdout);
+    expect(j).toMatchObject({ added: ["LP-002"], removed: [], changed: [{ id: "LP-001", from: "blocked", to: "ready" }] });
+    expect(j.note).toMatch(/consistency, not truth/);
+  });
+
   it("plan-lint exits 1 naming the rule when a done node cites a defer record, 0 on a consistent plan, and 2 when the store does not replay", () => {
     expect(trace(["write", "-"], draft({ writer_id: "loop-iteration/verify:LP-001-0", claim_id: "loop:lp-001", claim_type: "practical", final_status: "defer", missing: ["a unit test run"], evidence: [] })).status).toBe(0);
     const id = JSON.parse(trace(["query", "--json"]).stdout)[0].record_id;

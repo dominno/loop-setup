@@ -6,7 +6,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendActions, loadEntries, loadSchema, readPolicyVersion, replay, writeRecords } from "./lib.mjs";
-import { DEFAULT_PLAN, NOT_READY, STATUSES, conflictFreeBatch, dependents, scopesOverlap, parsePlan, planItems, planViolations, readyIds } from "./plan.mjs";
+import { DEFAULT_PLAN, NOT_READY, STATUSES, conflictFreeBatch, dependents, planDrift, scopesOverlap, parsePlan, planItems, planViolations, readyIds } from "./plan.mjs";
 
 const HEADER = "| id | description | after | status | record | missing | origin | notes |\n|---|---|---|---|---|---|---|---|";
 const planText = (...rows) => `# Loop Plan\n\n## Plan\n_Some prose before the table._\n\n${HEADER}\n${rows.join("\n")}\n`;
@@ -840,6 +840,28 @@ describe("plan-lint: TRACE cross-checks (a temp store written by writeRecords / 
     ];
     expect(flagged(lint(rows).errors, "origin")).toEqual([]); // a dispatch-time gate
     expect(flagged(lint(rows, { preDispatch: true }).errors, "origin")).toEqual(["LP-006", "LP-007", "LP-008", "LP-010"]);
+  });
+
+  it("planDrift (advisory): a done node's CLEARed diff paths outside its scope, and the nodes added, removed or moved since a base plan", () => {
+    const H10 = "| id | description | after | status | record | missing | origin | notes | scope | check |\n|---|---|---|---|---|---|---|---|---|---|";
+    const inScope = write(loopRec("LP-001", { evidence: [{ kind: "diff", ref: "src/a.ts, src/a.test.ts" }] }));
+    act(inScope, "CLEAR", "LP-001");
+    const drifted = write(loopRec("LP-002", { evidence: [{ kind: "diff", ref: "src/b.ts, src/lib/other.ts" }] }));
+    act(drifted, "CLEAR", "LP-002");
+    const t = (...rows) => parsePlan(`## Plan\n\n${H10}\n${rows.join("\n")}\n`).nodes;
+    const now = t(
+      `| LP-001 | a | — | done | ${inScope} | | human | | src/a.ts, src/a.test.ts | pnpm test |`,
+      `| LP-002 | b | — | done | ${drifted} | | human | | src/b.ts | pnpm test |`,
+      "| LP-004 | d | — | ready | | | human | | src/d.ts | pnpm test |",
+    );
+    const base = t("| LP-002 | b | — | ready | | | human | | src/b.ts | pnpm test |", "| LP-003 | c | — | ready | | | human | | src/c.ts | pnpm test |");
+    expect(planDrift(now, base, replayed())).toEqual({
+      outOfScope: [{ id: "LP-002", record: drifted, paths: ["src/lib/other.ts"] }],
+      added: ["LP-001", "LP-004"],
+      removed: ["LP-003"],
+      changed: [{ id: "LP-002", from: "ready", to: "done" }],
+    });
+    expect(planDrift(now, null, replayed())).toMatchObject({ added: [], removed: [], changed: [] }); // no base: only the scope drift
   });
 
   it("in-progress is a warning by default and an error with preDispatch", () => {

@@ -573,6 +573,36 @@ function splitViolations(nodes, byId, state, errors) {
 }
 
 /**
+ * `pnpm trace plan-drift` (advisory, never a gate): for each done node, the paths of its CLEARed
+ * record's diff evidence that fall outside its scope; and, against a base plan (the plan at the
+ * previous run-log commit, or another file), the nodes added, removed or moved to another status.
+ * It reports consistency, not truth, and is never evidence in a record.
+ */
+export function planDrift(nodes, baseNodes, state = EMPTY_STATE) {
+  const outOfScope = [];
+  for (const n of nodes) {
+    if (n.status !== "done" || !(n.scope || []).length) continue;
+    const rec = state.records.get(n.record);
+    if (!rec || !(state.actions.get(rec.record_id) || []).some((a) => a.action === "CLEAR")) continue;
+    const paths = (rec.evidence || [])
+      .filter((e) => e.kind === "diff")
+      .flatMap((e) => String(e.ref).split(",").map((x) => x.trim()))
+      .filter((x) => x && x !== "implementer diff");
+    const outside = paths.filter((p) => !n.scope.some((sc) => scopesOverlap([sc], [p])));
+    if (outside.length) outOfScope.push({ id: n.id, record: rec.record_id, paths: outside });
+  }
+  if (!baseNodes) return { outOfScope, added: [], removed: [], changed: [] };
+  const before = new Map(baseNodes.map((n) => [n.id, n]));
+  const after = new Set(nodes.map((n) => n.id));
+  return {
+    outOfScope,
+    added: nodes.filter((n) => !before.has(n.id)).map((n) => n.id),
+    removed: baseNodes.filter((n) => !after.has(n.id)).map((n) => n.id),
+    changed: nodes.filter((n) => before.has(n.id) && before.get(n.id).status !== n.status).map((n) => ({ id: n.id, from: before.get(n.id).status, to: n.status })),
+  };
+}
+
+/**
  * `pnpm trace plan-items <ids…>`: loop-iteration's args.items for ready nodes, in the order asked.
  * Each item is { id, description, priorRecordId?, missing? } and nothing else: the verifier sees
  * the item verbatim, and the bench measured this shape. A deferred node reset to ready keeps its

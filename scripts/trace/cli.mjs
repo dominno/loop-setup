@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { readdirSync, statSync, writeFileSync } from "node:fs";
-import { join, resolve, sep } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import {
   appendActions,
   BENCH_BUNDLE,
@@ -44,7 +44,7 @@ import {
   wikiViolations,
   writeRecords,
 } from "./lib.mjs";
-import { DEFAULT_PLAN, MAX_SCOPE, conflictFreeBatch, parsePlan, planItems, planViolations, readyIds } from "./plan.mjs";
+import { DEFAULT_PLAN, MAX_SCOPE, conflictFreeBatch, parsePlan, planDrift, planItems, planViolations, readyIds } from "./plan.mjs";
 import { STORY_MAP, STORY_MAP_PATHS, parseStory, storyMapViolations } from "./story-map.mjs";
 
 const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (policy: .claude/memory/topics/trace.md)
@@ -78,6 +78,10 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
                                        exit 1 on an error, 2 when the store does not replay; --pre-dispatch also fails on
                                        an in-progress node, a ready node with no check, and one whose scope lists more
                                        than N paths (default 3; L3 passes 1) — run it before every dispatch
+  pnpm trace plan-drift [--base <ref> | --base-plan <file>] [--plan p]
+                                       advisory, exit 0: done nodes whose CLEARed diff touched paths outside their scope,
+                                       and the nodes added, removed or moved since the base plan (default: the plan at
+                                       the last commit of the run log) — consistency, not truth; never evidence
   pnpm trace plan-items <ids…> [--plan p]
                                        loop-iteration args.items for ready nodes: [{id, description, priorRecordId?,
                                        missing?}]; priorRecordId only for the node's own loop:<id> record, never a
@@ -417,6 +421,37 @@ async function main() {
     for (const e of errors) process.stderr.write(`error: ${e}\n`);
     out({ ok: errors.length === 0, errors: errors.length, warnings: warnings.length, nodes: plan.nodes.length, preDispatch, plan: planPath, store: storePath }, true);
     return errors.length ? 1 : 0;
+  }
+
+  if (cmd === "plan-drift") {
+    if (state.errors.length) {
+      out({ ok: false, error: `the record store does not replay (${state.errors.length} error(s)); run pnpm trace lint`, store: storePath }, true);
+      return 2;
+    }
+    const plan = readPlan();
+    if (unparsed(plan)) return 1;
+    // The base: --base-plan <file>, else the plan at --base <ref> (default: the last commit that touched the run log).
+    let base = null;
+    let baseFrom = "none";
+    if (typeof flags["base-plan"] === "string") {
+      try {
+        base = parsePlan(readFileSync(resolve(flags["base-plan"]), "utf8"));
+        baseFrom = flags["base-plan"];
+      } catch {
+        base = null;
+      }
+    } else {
+      const ref = typeof flags.base === "string" ? flags.base : git(["log", "-1", "--format=%H", "--", ".claude/memory/loop-run-log.md"]);
+      const rel = relative(ROOT, planPath);
+      const text = ref && !rel.startsWith("..") ? git(["show", `${ref}:${rel}`]) : null;
+      if (text) {
+        base = parsePlan(text);
+        baseFrom = `${ref}:${rel}`;
+      }
+    }
+    const drift = planDrift(plan.nodes, base && !base.errors.length ? base.nodes : null, state);
+    out({ ...drift, base: base && !base.errors.length ? baseFrom : "none (no readable base plan)", note: "advisory: consistency, not truth — never evidence in a TRACE record" }, true);
+    return 0;
   }
 
   if (cmd === "plan-items") {
