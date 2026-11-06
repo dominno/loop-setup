@@ -57,6 +57,19 @@ describe("parsePlan", () => {
     }
   });
 
+  it("the 10-column header adds scope (comma-separated paths) and check; the legacy 8-column header stays valid (back-compat)", () => {
+    const H10 = "| id | description | after | status | record | missing | origin | notes | scope | check |\n|---|---|---|---|---|---|---|---|---|---|";
+    const p = parsePlan(`## Plan\n\n${H10}\n| LP-001 | fix it | — | ready | | | human | | src/a.ts, src/a.test.ts | pnpm vitest run src/a.test.ts |\n`);
+    expect(p.errors).toEqual([]);
+    expect(p.nodes[0]).toMatchObject({ id: "LP-001", scope: ["src/a.ts", "src/a.test.ts"], check: "pnpm vitest run src/a.test.ts" });
+    const legacy = plan(row("LP-001"));
+    expect(legacy.errors).toEqual([]);
+    expect(legacy.nodes[0]).toMatchObject({ scope: [], check: "" });
+    expect(planViolations(legacy).errors).toEqual([]);
+    // A 10-column table needs 10 cells per row.
+    expect(rulesOf(parsePlan(`## Plan\n\n${H10}\n${row("LP-001")}\n`).errors)).toEqual(["cells"]);
+  });
+
   it("a row without 8 cells is an error and is not read as a node", () => {
     const p = plan(row("LP-001"), "| LP-002 | too few | ready |");
     expect(rulesOf(p.errors)).toEqual(["cells"]);
@@ -123,7 +136,8 @@ describe("readyIds (loop-plan.md's ready-node rule, in table order)", () => {
     const doc = readFileSync(DEFAULT_PLAN, "utf8");
     const example = /## Example[^\n]*\n```\n([\s\S]*?)\n```/.exec(doc)?.[1].split("\n") ?? [];
     expect(example).toHaveLength(4);
-    const p = plan(...example);
+    const H10 = "| id | description | after | status | record | missing | origin | notes | scope | check |\n|---|---|---|---|---|---|---|---|---|---|";
+    const p = parsePlan(`## Plan\n\n${H10}\n${example.join("\n")}\n`);
     expect(p.errors).toEqual([]);
     expect(readyIds(p.nodes)).toEqual(["LP-002"]);
   });
@@ -209,6 +223,15 @@ describe("plan-lint: structural rules", () => {
   it("deferred or escalated with an empty missing", () => {
     const { errors } = lint(row("LP-001", { status: "deferred" }), row("LP-002", { status: "escalated" }), row("LP-003", { status: "deferred", missing: "a unit test run" }));
     expect(flagged(errors, "missing")).toEqual(["LP-001", "LP-002"]);
+  });
+
+  it("[check]: a ready node with an empty check fails --pre-dispatch; [scope]: an empty scope on a ready node warns there", () => {
+    const H10 = "| id | description | after | status | record | missing | origin | notes | scope | check |\n|---|---|---|---|---|---|---|---|---|---|";
+    const p = parsePlan(`## Plan\n\n${H10}\n| LP-001 | a | — | ready | | | human | | src/a.ts | pnpm vitest run src/a.test.ts |\n| LP-002 | b | — | ready | | | human | | src/b.ts | — |\n| LP-003 | c | — | ready | | | human | | — | pnpm lint |\n| LP-004 | d | LP-002 | blocked | | | human | | — | — |\n`);
+    expect(planViolations(p)).toEqual({ errors: [], warnings: [] }); // both are dispatch-time rules
+    const pre = planViolations(p, undefined, { preDispatch: true });
+    expect(flagged(pre.errors, "check")).toEqual(["LP-002"]);
+    expect(flagged(pre.warnings, "scope")).toEqual(["LP-003"]);
   });
 
   it("stranded: in the chain A (escalated) ← B ← C, B and C are flagged, while a deferred ancestor strands nothing", () => {

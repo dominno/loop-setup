@@ -12,7 +12,10 @@ This is **distinct from `loop-run-log.md`**:
 > iteration start (step 1) and rewrites it in the re-plan step (see `.claude/loop.md`).
 
 ## Node schema
-One row per node in the table below:
+One row per node in the table below. The header is
+`| id | description | after | status | record | missing | origin | notes | scope | check |`;
+a table with the legacy 8-column header (no `scope`/`check`) still parses, its nodes reading as
+an empty scope and check.
 
 | Field | Meaning |
 |---|---|
@@ -24,6 +27,8 @@ One row per node in the table below:
 | `missing` | For `deferred`/`escalated`: the evidence or decision that would unblock it — the record's `missing`, else its `repair`, else "a human decision on: <its reason>". Never empty. |
 | `origin` | Where it came from: a confirmed critic finding (cite its record id), a re-plan, or a human. |
 | `notes` | Evidence / decision trail (attempt count, escalation reason). |
+| `scope` | Comma-separated repo-relative files (or globs) the node may touch, taken from its origin finding's `file:line` at creation. Lead-side only: it drives dispatch-time exclusion and the dirty-file skip (loop.md step 10), never the verifier's item. Empty (`—`) warns under `--pre-dispatch` and dispatches alone. |
+| `check` | The smallest command that proves the node (e.g. `pnpm vitest run src/x.test.ts`, a named Playwright spec): the post-apply check the Lead runs before any `CLEAR`. A `ready` node with an empty `check` fails `plan-lint --pre-dispatch` — escalate a node that has no automated check before it is dispatched, not after. |
 
 Not adopted for this plan, deliberately (a JSON plan, epic/parent containers, a complexity
 score, a new node status, bd-style commands): see `.claude/memory/topics/workflow.md`,
@@ -153,15 +158,15 @@ to bootstrap, so an empty plan never deadlocks:
 
 ## Example (illustrative — not a live row)
 ```
-| LP-001 | Fix hydration warning on /        | —      | done      | TR-1a2b3c4d5e6f | —                                   | critic:frontend-arch rec:TR-0f… | verified 2026-… |
-| LP-002 | Add E2E for the cleared-name path | LP-001 | ready     |                 |                                     | critic:qa-e2e rec:TR-9c…        |                 |
-| LP-003 | Tighten max-length message        | —      | deferred  | TR-77aa01bb02cc | unit test run of greeting.test.ts   | critic:regression rec:TR-41…    | attempt 1       |
-| LP-004 | Rework auth token refresh         | —      | escalated | TR-5e5e6f6f7a7a | human approval: denylisted path     | critic:security rec:TR-c3…      | denylist: auth  |
+| LP-001 | Fix hydration warning on /        | —      | done      | TR-1a2b3c4d5e6f | —                                   | critic:frontend-arch rec:TR-0f… | verified 2026-… | src/app/page.tsx         | pnpm test:e2e e2e/home.spec.ts            |
+| LP-002 | Add E2E for the cleared-name path | LP-001 | ready     |                 |                                     | critic:qa-e2e rec:TR-9c…        |                 | e2e/remember-me.spec.ts  | pnpm test:e2e e2e/remember-me.spec.ts     |
+| LP-003 | Tighten max-length message        | —      | deferred  | TR-77aa01bb02cc | unit test run of greeting.test.ts   | critic:regression rec:TR-41…    | attempt 1       | src/lib/greeting.ts      | pnpm vitest run src/lib/greeting.test.ts  |
+| LP-004 | Rework auth token refresh         | —      | escalated | TR-5e5e6f6f7a7a | human approval: denylisted path     | critic:security rec:TR-c3…      | denylist: auth  | src/lib/auth.ts          | —                                         |
 ```
 
 ## Plan
 _No nodes yet. The first L2/L3 loop run bootstraps nodes here from its confirmed
 findings during the re-plan step._
 
-| id | description | after | status | record | missing | origin | notes |
-|---|---|---|---|---|---|---|---|
+| id | description | after | status | record | missing | origin | notes | scope | check |
+|---|---|---|---|---|---|---|---|---|---|

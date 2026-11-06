@@ -83,8 +83,8 @@ instructions — the self-modification guard below still applies to everything e
 9. **Re-evaluate & re-plan** (a first-class step, not an afterthought) — run this
    **before** any dispatch so the DAG is fresh when you act. Rewrite
    `.claude/memory/loop-plan.md`: nodes already `done` (record + `CLEAR`) unblock their
-   dependents — re-plan never marks a node `done` itself; **add new nodes** for this run's
-   confirmed findings (with `after:` deps + `origin` citing the finding's record id) and,
+   dependents — re-plan never marks a node `done` itself; **add new nodes** for this run's confirmed findings (with `after:` deps + `origin` citing the finding's record id, a
+   `scope` from the finding's `file:line` and a `check` that proves the fix) and,
    for a critic finding the round `deferred`, a `deferred` node carrying its `missing`
    (only if the loop can supply it; a human-decision defer or a `revise` becomes an
    `escalated` node with the `missing`/`repair` as the human ask) — a node created
@@ -135,11 +135,11 @@ instructions — the self-modification guard below still applies to everything e
       (`<maxItems>` = the `args.maxItems` you pass loop-iteration, default 5, its own
       default): at most that many ready nodes, highest priority first — never pick ready
       nodes by hand. Of those, never select two
-      expected to touch the same file (the file of their origin finding's file:line): the
-      second waits for a later call. This is a dispatch-time exclusion, never an `after:`
+      whose `scope` columns overlap (an empty scope overlaps everything, so that node goes
+      alone): the second waits for a later call. This is a dispatch-time exclusion, never an `after:`
       edge — an artificial edge would cascade-escalate an unrelated node (`loop-plan.md`,
-      *Cascading drop / escalation*). Skip, and note, a node whose expected files have
-      uncommitted changes in the main checkout (`git status --porcelain -- <files>`): its
+      *Cascading drop / escalation*). Skip, and note, a node whose `scope` files have
+      uncommitted changes in the main checkout (`git status --porcelain -- <scope paths>`): its
       worktree branches from HEAD, which lacks them. If that leaves no node to dispatch,
       stop and report "needs a commit of <files>". Then, in this order: write the items
       with `pnpm -s trace plan-items <selected ids> > <scratchpad>/loop-items.json` (exit 1
@@ -179,8 +179,9 @@ instructions — the self-modification guard below still applies to everything e
         the record, write your own `defer` record that `revises` it (same `claim_id`, writer_id
         `loop/apply-check:<node>`, `missing` = "a diff based on the current tree",
         `reason` = the check's error), `HOLD` that one too, and set the node `deferred`
-        with it — it is re-dispatchable (step 9). If it passes → `git apply <file>`, then
-        re-run the smallest relevant check. If it passes, `pnpm trace act <that node's loop-iteration record> loop CLEAR
+        with it — it is re-dispatchable (step 9). If it passes → `git apply <file>`, then run the node's `check` (its smallest relevant
+        check), and log in the run-log entry the diff paths that fall outside its `scope` (a
+        drift signal, never a gate). If it passes, `pnpm trace act <that node's loop-iteration record> loop CLEAR
         --ref <node> --note "<check that passed; qualifier if any>"` and mark the node
         `done` with that `record` (copy a qualifier into the node's notes). If no relevant
         automated check exists, do not CLEAR: `HOLD` and escalate. If the check fails,
@@ -281,6 +282,7 @@ Notify only when action is needed — do not ping on a no-op run.
 - actions: <fixes applied, or "report only">
 - re-plan: <nodes added / marked done / deferred→ready / dropped, or "none">
 - records: <record ids written + actions (CLEAR/HOLD/REUSE), or "none">
+- drift: <diff paths outside each node's scope, or none>
 - worktrees: kept <paths> | removed <n>
 - budget: <used>/<cap> (turns or tokens)
 - escalations: <none | reason>

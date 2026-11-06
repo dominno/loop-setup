@@ -12,8 +12,11 @@ import { join } from "node:path";
 import { LICENSING, ROOT } from "./lib.mjs";
 
 export const DEFAULT_PLAN = join(ROOT, ".claude/memory/loop-plan.md");
-/** The plan table's header, exactly (loop-plan.md, Node schema). */
+/** The legacy plan table header (still valid: a table with it has no scope or check). */
 export const PLAN_COLUMNS = ["id", "description", "after", "status", "record", "missing", "origin", "notes"];
+/** The full plan table header (loop-plan.md, Node schema): the legacy columns + scope + check. */
+export const PLAN_COLUMNS_FULL = [...PLAN_COLUMNS, "scope", "check"];
+const HEADERS = [PLAN_COLUMNS_FULL, PLAN_COLUMNS];
 /** The node statuses loop-plan.md defines (Node schema, `status`). */
 export const STATUSES = ["ready", "blocked", "in-progress", "deferred", "done", "escalated", "dropped"];
 /** The statuses the ready-node rule excludes (loop-plan.md, Ready-node rule). */
@@ -94,7 +97,7 @@ export function parsePlan(text) {
     body.push(v);
   }
   const first = body.findIndex(startsWithPipe);
-  if (first < 0) return { nodes, errors: [...errors, `[table] the '## Plan' section (line ${heads[0].line}) has no table — expected | ${PLAN_COLUMNS.join(" | ")} |`] };
+  if (first < 0) return { nodes, errors: [...errors, `[table] the '## Plan' section (line ${heads[0].line}) has no table — expected | ${PLAN_COLUMNS_FULL.join(" | ")} |`] };
   let last = first;
   // Consecutive source lines only: a fenced block is gone from `visible`, and it ends the table.
   while (last + 1 < body.length && body[last + 1].line === body[last].line + 1 && hasPipe(body[last + 1])) last += 1;
@@ -106,21 +109,23 @@ export function parsePlan(text) {
     errors.push(`[table] line ${v.line}: a row outside the plan table (a blank line, a line without a pipe or a fence split it off) — keep every node in one table, and write a literal | as \\|`);
   }
   const [head, separator, ...rows] = body.slice(first, last + 1);
-  if (splitRow(head.text).join("|") !== PLAN_COLUMNS.join("|")) {
-    return { nodes, errors: [...errors, `[header] line ${head.line}: the plan table header must be exactly | ${PLAN_COLUMNS.join(" | ")} |`] };
+  const columns = HEADERS.find((h) => splitRow(head.text).join("|") === h.join("|"));
+  if (!columns) {
+    return { nodes, errors: [...errors, `[header] line ${head.line}: the plan table header must be exactly | ${PLAN_COLUMNS_FULL.join(" | ")} | (or the legacy | ${PLAN_COLUMNS.join(" | ")} |)`] };
   }
   const sep = separator ? splitRow(separator.text) : [];
-  if (sep.length !== PLAN_COLUMNS.length || !sep.every((c) => /^:?-+:?$/.test(c))) {
-    return { nodes, errors: [...errors, `[header] line ${head.line + 1}: the header must be followed by its separator row (|---| × ${PLAN_COLUMNS.length})`] };
+  if (sep.length !== columns.length || !sep.every((c) => /^:?-+:?$/.test(c))) {
+    return { nodes, errors: [...errors, `[header] line ${head.line + 1}: the header must be followed by its separator row (|---| × ${columns.length})`] };
   }
   const seen = new Map();
   for (const r of rows) {
     const cells = splitRow(r.text);
-    if (cells.length !== PLAN_COLUMNS.length) {
-      errors.push(`[cells] line ${r.line}: a row needs ${PLAN_COLUMNS.length} cells, found ${cells.length} (write a literal | as \\|)`);
+    if (cells.length !== columns.length) {
+      errors.push(`[cells] line ${r.line}: a row needs ${columns.length} cells, found ${cells.length} (write a literal | as \\|)`);
       continue;
     }
     const c = cells.map((x) => (EMPTY_CELLS.includes(x) ? "" : x));
+    const list = (v) => String(v ?? "").split(",").map((x) => x.trim()).filter((x) => !EMPTY_CELLS.includes(x));
     const node = {
       id: c[0],
       description: c[1],
@@ -130,6 +135,8 @@ export function parsePlan(text) {
       missing: c[5],
       origin: c[6],
       notes: c[7],
+      scope: list(c[8]),
+      check: c[9] ?? "",
       line: r.line,
     };
     if (!ID_RE.test(node.id)) errors.push(`[id] ${at(node)}: an id is LP- followed by 3 or more digits`);
@@ -245,6 +252,13 @@ export function planViolations(plan, state = EMPTY_STATE, { preDispatch = false 
     const open = n.after.filter((d) => byId.has(d) && byId.get(d).status !== "done");
     if (n.status === "ready" && open.length) {
       errors.push(`[hand-set-ready] ${at(n)}: status ready, but ${open.map((d) => `${d} is ${byId.get(d).status}`).join(", ")} — readiness is computed (pnpm trace plan-ready); set it blocked`);
+    }
+    // The node contract (loop-plan.md, Node schema): which files it may touch, and which command proves it.
+    if (n.status === "ready" && !(n.check || "").trim() && preDispatch) {
+      errors.push(`[check] ${at(n)}: ready with an empty check — name the smallest command that proves the node, or escalate it as not automatically checkable before it is dispatched`);
+    }
+    if (n.status === "ready" && !(n.scope || []).length && preDispatch) {
+      warnings.push(`[scope] ${at(n)}: ready with an empty scope — list the files it may touch (from its origin finding's file:line); an empty scope dispatches alone`);
     }
     if ((n.status === "deferred" || n.status === "escalated") && !n.missing) {
       errors.push(`[missing] ${at(n)}: ${n.status} with an empty missing — name the evidence or human decision that would unblock it`);
