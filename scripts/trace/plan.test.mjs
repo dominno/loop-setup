@@ -948,6 +948,26 @@ describe("plan-lint: TRACE cross-checks (a temp store written by writeRecords / 
     });
   });
 
+  it("back-compat: a legacy 8-column plan with LP-NNN ids in every status, and its existing records, lints clean and builds the same item shape", () => {
+    const accepted = write(loopRec("LP-001"));
+    act(accepted, "CLEAR", "LP-001");
+    const deferred = write(deferRec("LP-003", "a unit test run"));
+    act(deferred, "HOLD", "LP-003");
+    const escalated = write(loopRec("LP-004", { final_status: "reject", reason: "wrong approach" }));
+    act(escalated, "HOLD", "LP-004");
+    const rows = [
+      row("LP-001", { status: "done", record: accepted }),
+      row("LP-002", { status: "blocked", after: "LP-003" }),
+      row("LP-003", { status: "deferred", record: deferred, missing: "a unit test run" }),
+      row("LP-004", { status: "escalated", record: escalated, missing: "a human decision on: wrong approach" }),
+      row("LP-005", { status: "dropped" }),
+      row("LP-006", { after: "LP-001" }),
+    ];
+    expect(lint(rows)).toEqual({ errors: [], warnings: [] });
+    expect(replayed().errors).toEqual([]);
+    expect(planItems(plan(...rows).nodes, ["LP-006"], replayed()).items).toEqual([{ id: "LP-006", description: "work for LP-006" }]);
+  });
+
   it("in-progress is a warning by default and an error with preDispatch", () => {
     const rows = [row("LP-001", { status: "in-progress" })];
     const plain = lint(rows);
