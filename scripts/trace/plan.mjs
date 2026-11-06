@@ -341,6 +341,19 @@ export function planViolations(plan, state = EMPTY_STATE, { preDispatch = false,
     if (["ready", "blocked"].includes(n.status) && preDispatch && !DONE_WHEN.test(n.description)) {
       warnings.push(`[done-when] ${at(n)}: its description has no "done when: …" clause — re-plan writes one from the origin finding's evidence or recommended fix (never from implementer output)`);
     }
+    // The plan review gate (loop-plan.md, Node schema `origin`): a node is dispatchable only from a reviewed origin.
+    if (preDispatch && LIVE.includes(n.status)) {
+      const o = n.origin || "";
+      const ancestor = (SPLIT_FROM_RE.exec(o) || CASCADE_FROM_RE.exec(o))?.[1];
+      const critic = (o.match(CITED_RE) || [])
+        .map((id) => state.records.get(id))
+        .filter((r) => r && String(r.writer_id).startsWith(CRITIC_WRITER))
+        .some((r) => LICENSING.includes(r.final_status) || ["deferred", "escalated"].includes(n.status) || (state.actions.get(r.record_id) || []).some((a) => a.action === "HOLD" && a.ref === n.id));
+      const reviewed = /^\s*human\b/i.test(o) || /(^|\s)plan:\S/.test(o) || critic || (ancestor && byId.has(ancestor));
+      if (!reviewed) {
+        errors.push(`[origin] ${at(n)}: origin "${o || "(empty)"}" is not a reviewed one — cite a critic-panel record that licenses it (accept/qualify, or one HOLDed for this node), 'cascade from'/'split from' a node in the table, a /plan-nodes entry (plan:<source> <date>), or a human; a decomposition the loop drafts by itself goes through /plan-nodes or the next critic round first`);
+      }
+    }
     // Story links (optional): checked only against the story ids cli.mjs passes in, and only as a warning.
     if (stories) {
       for (const link of n.story || storyLinks(n.origin)) {

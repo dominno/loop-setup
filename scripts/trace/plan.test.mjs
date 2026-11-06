@@ -820,6 +820,28 @@ describe("plan-lint: TRACE cross-checks (a temp store written by writeRecords / 
     });
   });
 
+  it("[origin] (plan review gate): under --pre-dispatch a live node's origin is a licensing critic record, a valid cascade/split, a /plan-nodes entry or a human", () => {
+    const licensed = write(criticRec({ claim_id: "critic:a:licensed" }));
+    const deferred = write(criticRec({ claim_id: "critic:a:deferred", final_status: "defer", missing: ["an E2E run"] }));
+    act(deferred, "HOLD", "LP-005");
+    const unheld = write(criticRec({ claim_id: "critic:a:unheld", final_status: "defer", missing: ["an E2E run"] }));
+    const loopOwn = write(loopRec("LP-090"));
+    const rows = [
+      row("LP-001", { origin: `critic:a rec:${licensed}` }),
+      row("LP-002", { origin: "human" }),
+      row("LP-003", { origin: "human:goal 2026-11-06" }),
+      row("LP-004", { origin: "plan:docs/stories/US-001 2026-11-06 story:US-001#AC1" }),
+      row("LP-005", { record: deferred, missing: "an E2E run", origin: `critic:a rec:${deferred}`, notes: `reset citing ${licensed}` }),
+      row("LP-006", { origin: `critic:a rec:${unheld}` }),
+      row("LP-007", { origin: "re-plan" }),
+      row("LP-008", { origin: `loop rec:${loopOwn}` }),
+      row("LP-009", { status: "dropped", origin: "re-plan" }), // not live: not gated
+      row("LP-010", { status: "blocked", after: "LP-009", origin: "cascade from LP-099" }),
+    ];
+    expect(flagged(lint(rows).errors, "origin")).toEqual([]); // a dispatch-time gate
+    expect(flagged(lint(rows, { preDispatch: true }).errors, "origin")).toEqual(["LP-006", "LP-007", "LP-008", "LP-010"]);
+  });
+
   it("in-progress is a warning by default and an error with preDispatch", () => {
     const rows = [row("LP-001", { status: "in-progress" })];
     const plain = lint(rows);
