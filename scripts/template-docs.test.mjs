@@ -136,6 +136,21 @@ describe("M6: merge commits keep TRACE provenance reachable", () => {
   });
 });
 
+describe("M7-M10: two developers on one project", () => {
+  it("the adoption guide has a 'Working as a team' section covering ids, claims, the lease, union logs, merge commits, shared plans, story sync and /dream, and what stays personal", () => {
+    const team = section(read("docs/adoption-guide.md"), "## Working as a team").replace(/\s+/g, " ");
+    const anchors = ["pnpm trace plan-id", "claim:<owner>@<run-id>", "[claim-conflict]", "commit and push the claim", "merge=union", "disable squash merging", "docs/plans/<slug>/steps.md", "`/sync-story-status` on `main`", "`/dream` through PRs", "settings.local.json"];
+    expect(anchors.filter((a) => !team.includes(a))).toEqual([]);
+  });
+
+  it("/sync-story-status runs on main (one status PR at a time) and /dream's wiki edits go through PRs, never a hand-edited store", () => {
+    const sync = prose(".claude/commands/sync-story-status.md");
+    for (const a of ["run it on `main`", "re-sync after merging two status PRs"]) expect(sync, a).toContain(a);
+    const dream = prose(".claude/commands/dream.md");
+    for (const a of ["wiki edits go through PRs", "a new record that `revises` it"]) expect(dream, a).toContain(a);
+  });
+});
+
 describe("shared permissions (.claude/settings.json)", () => {
   const allow = () => JSON.parse(read(".claude/settings.json")).permissions?.allow ?? [];
 

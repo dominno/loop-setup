@@ -616,6 +616,45 @@ Adapt it to your stack:
 
 ---
 
+## Working as a team
+
+Two or more people, each with their own clone or cloud session running Claude Code, integrate
+through branches and PRs. What already merges cleanly: the record store (`merge=union`,
+content-hash ids), the shared `.claude/settings.json`, tree-keyed verdict reuse, and the CI
+gates. What the template adds for a team (docs/plans/planning-upgrade/03-multi-developer.md):
+
+- **Node ids never collide.** New plan nodes get `LP-<6 hex>` from `pnpm trace plan-id
+  "<description>"` (a hash of description, creator and time); legacy `LP-NNN` ids stay valid.
+  If two branches still add one id, `plan-lint` fails `[duplicate-id]` after the merge.
+- **Claims have owners.** A dispatched node's notes carry `claim:<owner>@<run-id>`
+  (`pnpm trace claim-token`; owner = `LOOP_OWNER`, else your git `user.email` local part).
+  Re-plan never resets another owner's node: it is stale only once that owner's run-log
+  entry closed (`[in-progress-claimed]` warns until then); two owners on one node fail
+  `[claim-conflict]` in CI.
+- **One loop per branch.** On a shared branch, commit and push the claim rows before
+  dispatching (only when you allowed the loop to commit and push); a rejected push means
+  someone else moved the plan: fetch, re-read, re-plan — never force. Otherwise give each
+  person's loop its own branch.
+- **Append-only logs merge as a union.** `loop-run-log.md` and `.claude/memory/log.md` are
+  `merge=union` in `.gitattributes`, like the record store, so two appended entries never
+  conflict.
+- **Merge commits, not squash.** Squash merges orphan the commits TRACE records cite:
+  disable squash merging (see *Continuous integration*); the warn-only `provenance` CI job
+  lists any record whose commit is gone.
+- **Plans live in the repo.** Loop work goes into `loop-plan.md` through `/plan-nodes`; a
+  `/multi-agent-dev` plan is a step list in `docs/plans/<slug>/steps.md` (id, description,
+  scope, check, after, status, commit). A plan only in a personal scratchpad is invisible to
+  the other developer.
+- **Story statuses:** run `/sync-story-status` on `main` (or one status PR at a time), and
+  re-sync after merging two status PRs; `story-lint`'s `[latest]` stays a warning.
+- **The wiki:** run `/dream` through PRs too; `wiki-check` in CI is the post-merge gate, and a
+  retire/cite collision is resolved by a new revising record, never a hand-edited store.
+
+What stays personal: `.claude/settings.local.json` (git-ignored allows), your worktrees and
+`/workflows` runs, and your scratchpad.
+
+---
+
 ## Multi-agent orchestration (Workflows)
 
 The critic-bearing commands don't simulate critics in one context — they invoke

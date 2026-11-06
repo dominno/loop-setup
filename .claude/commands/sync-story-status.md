@@ -5,6 +5,12 @@ argument-hint: [scope, e.g. "current branch"]
 
 Synchronize user story status with current implementation and tests.
 
+**With more than one developer, run it on `main`** (after the work merged), or keep one
+status PR open at a time: two branches that each set a status write two story records that
+both claim "latest", and `story-lint`'s `[latest]` (a warning) only reports the order after a
+union merge. If two status PRs did merge, re-sync after merging two status PRs, so one new
+record settles each story.
+
 Scope:
 $ARGUMENTS
 
