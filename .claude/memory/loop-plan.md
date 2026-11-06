@@ -25,6 +25,10 @@ One row per node in the table below:
 | `origin` | Where it came from: a confirmed critic finding (cite its record id), a re-plan, or a human. |
 | `notes` | Evidence / decision trail (attempt count, escalation reason). |
 
+Not adopted for this plan, deliberately (a JSON plan, epic/parent containers, a complexity
+score, a new node status, bd-style commands): see `.claude/memory/topics/workflow.md`,
+*Not adopted (plan)*, which also says what evidence would reopen each.
+
 **Status meaning**
 - `ready` — all `after:` deps are `done`; eligible for dispatch this iteration.
 - `blocked` — has an unmet `after:` dep (compute, don't hand-set, when deps are open).

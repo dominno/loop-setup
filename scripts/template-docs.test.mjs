@@ -62,6 +62,22 @@ describe("loop.md consumer procedure", () => {
   });
 });
 
+describe("planning upgrade (docs/plans/planning-upgrade/04-spec.md)", () => {
+  it("W0: L2 needs one logged L1 iteration with a re-plan delta and a passing pre-dispatch plan-lint", () => {
+    const checklist = prose(".claude/loop-checklist.md");
+    const anchors = ["**(before L2)**", "at least one L1 iteration logged in `loop-run-log.md` with a re-plan delta", "`pnpm trace plan-lint --pre-dispatch` passed on a non-empty plan"];
+    expect(anchors.filter((a) => !checklist.includes(a))).toEqual([]);
+  });
+
+  it("the not-adopted plan borrowings are written down once, each with what would reopen it, and loop-plan.md points there", () => {
+    const page = section(read(".claude/memory/topics/workflow.md"), "## Not adopted (plan)");
+    for (const item of ["JSON plan", "epic/parent", "complexity score", "new node status"]) expect(page, item).toContain(item);
+    expect((page.match(/Reopen when/g) || []).length).toBeGreaterThanOrEqual(4);
+    expect(page).toContain("plan-items item shape");
+    expect(prose(".claude/memory/loop-plan.md")).toContain("*Not adopted (plan)*");
+  });
+});
+
 describe("shared permissions (.claude/settings.json)", () => {
   const allow = () => JSON.parse(read(".claude/settings.json")).permissions?.allow ?? [];
 

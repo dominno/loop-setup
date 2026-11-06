@@ -47,6 +47,10 @@ this repo from the "loop engineering" loop-design checklist
 - [ ] **No durable state change without a record:** every node status change cites a
       TRACE-lite record (`done` = accept/qualify + `CLEAR`); `deferred`/`escalated` nodes
       name their `missing`; `pnpm trace lint` passes; `pnpm trace plan-lint` passes
+- [ ] **(before L2)** the plan has been exercised: at least one L1 iteration logged in
+      `loop-run-log.md` with a re-plan delta, and `pnpm trace plan-lint --pre-dispatch` passed
+      on a non-empty plan (L1 runs re-plan in step 9 before step 10's no-dispatch rule, so an
+      L1 run can supply both)
 
 **6. Human handoff**
 - [ ] Escalation triggers explicit (max attempts, risk paths, ambiguity)
