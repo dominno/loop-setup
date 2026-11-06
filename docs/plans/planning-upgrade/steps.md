@@ -14,6 +14,7 @@ column is filled from `git log` once a step lands. Spec: `04-spec.md`.
 | S05 | W2.1 `scope` and `check` columns | scripts/trace/plan.mjs, .claude/memory/loop-plan.md, .claude/loop.md | `vitest run scripts/trace` | S04 | done | 29d2119 |
 | S06 | W2.2 `[oversize]` + trust ceilings | scripts/trace/plan.mjs, .claude/loop-checklist.md | `vitest run scripts/trace/plan.test.mjs` | S05 | done | 5631e6e |
 | S07 | W2.3 `plan-ready --batch N` (conflict-free by scope) | scripts/trace/plan.mjs, scripts/trace/cli.mjs, .claude/loop.md | `vitest run scripts/trace` | S05 | done | 2d51317 |
+| S07.1 | Critic-round fix: brace/bracket scope globs fail closed; braces never split the scope cell | scripts/trace/plan.mjs | `vitest run scripts/trace/plan.test.mjs` | S07 | done | d7ceb47 |
 | S08 | W2.4 "done when" clause | scripts/trace/plan.mjs, .claude/loop.md | `vitest run scripts/trace/plan.test.mjs` | S05 | done | 4205cbf |
 | S09 | W3 split on failure (`dropped` + `split from`) | scripts/trace/plan.mjs, .claude/memory/loop-plan.md, .claude/loop.md | `vitest run scripts/trace/plan.test.mjs` | S01, S05 | done | 0a8d19c |
 | S10 | W4.1 `/plan-nodes` command (+ /write-goal plan rows) | .claude/commands/plan-nodes.md, .claude/skills-index.md, .claude/commands/write-goal.md | `vitest run scripts/trace/config.test.mjs scripts/trace/workflows.test.mjs` | S05 | done | e4eca71 |
