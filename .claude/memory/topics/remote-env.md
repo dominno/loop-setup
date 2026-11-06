@@ -26,5 +26,11 @@
   container's 4 CPUs at ~99% for hours (observed once, 2026-10-31). Find them with
   `ps -eo pid,ppid,pcpu,args` and `readlink /proc/<pid>/cwd`, and remove them by PID only.
   <!-- rec:TR-feb3bd831b17 -->
+- Observed 2026-11-06 (one container; the image can change again): `/opt/pw-browsers` held
+  Chromium build **1243**, not the 1194 that the pinned Playwright 1.56.0 launches, so
+  `pnpm test:e2e` failed with "Executable doesn't exist … headless_shell-1194". A scratchpad
+  `PLAYWRIGHT_BROWSERS_PATH` with `chromium_headless_shell-1194/chrome-linux/headless_shell`
+  symlinked to the 1243 binary (plus `ffmpeg-1011`) passed all 16 E2E tests with no repo change.
+  <!-- rec:TR-e7829fbc9fc1 -->
 
 Related: [tooling](./tooling.md) · [testing](./testing.md) · [build-and-verify](./build-and-verify.md)

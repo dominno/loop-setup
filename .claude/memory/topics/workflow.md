@@ -153,6 +153,12 @@
 
 Related: [build-and-verify](./build-and-verify.md) · [testing](./testing.md) · [trace](./trace.md)
 
+- **Plan node contract:** `loop-plan.md`'s table has 10 columns (`… | notes | scope | check |`)
+  and the legacy 8-column header still parses; plan-lint's node-contract rules (`[check]`,
+  `[oversize]`, `[scope]`, `[done-when]`, `[origin]`) run only with `--pre-dispatch`
+  (`--max-scope 1` at L3); new ids come from `pnpm trace plan-id` (`LP-<6 hex>`), and
+  `plan-ready --batch N` picks a conflict-free set by scope. <!-- rec:TR-8a89f665cbf8 -->
+
 ## Not adopted (plan)
 Borrowings the planning research and critic council (docs/plans/planning-upgrade/) weighed
 for `loop-plan.md` and turned down. Each says what would reopen it, so this is not permanent.
