@@ -44,7 +44,7 @@ import {
   wikiViolations,
   writeRecords,
 } from "./lib.mjs";
-import { DEFAULT_PLAN, MAX_SCOPE, parsePlan, planItems, planViolations, readyIds } from "./plan.mjs";
+import { DEFAULT_PLAN, MAX_SCOPE, conflictFreeBatch, parsePlan, planItems, planViolations, readyIds } from "./plan.mjs";
 import { STORY_MAP, STORY_MAP_PATHS, storyMapViolations } from "./story-map.mjs";
 
 const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (policy: .claude/memory/topics/trace.md)
@@ -66,10 +66,12 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
                                        every path git's own parser finds in it (git apply --numstat) — exit 1 on a hit,
                                        exit 2 when it cannot be verified (git error, no paths)
   pnpm trace lint                      replay the whole store and check every contract invariant (exit 1 on error)
-  pnpm trace plan-ready [--max N] [--json] [--plan p]
+  pnpm trace plan-ready [--max N | --batch N] [--json] [--plan p]
                                        the loop plan's ready node ids as a JSON array (loop-plan.md's ready-node rule),
                                        ranked by the origin record's severity (blocker, important, the rest), table order
-                                       breaking ties; --max N keeps the first N; --json prints those rows in full — exit 1
+                                       breaking ties; --max N keeps the first N; --batch N keeps a greedy set whose scopes do
+                                       not overlap (an empty scope goes alone), then the first N, naming each skipped id on
+                                       stderr; --json prints those rows in full — exit 1
                                        and no ids when the plan table does not parse, 2 when the store does not replay
   pnpm trace plan-lint [--pre-dispatch [--max-scope N]] [--plan p]
                                        check the plan against its contract and the record store (consistency, not truth):
@@ -354,9 +356,11 @@ async function main() {
   }
 
   if (cmd === "plan-ready") {
-    const max = flags.max !== undefined ? (/^[1-9]\d*$/.test(String(flags.max)) ? Number(flags.max) : NaN) : undefined;
-    if (flags.plan === true || Number.isNaN(max)) {
-      out("usage: pnpm trace plan-ready [--max N] [--json] [--plan p]   (N a positive integer)");
+    const positive = (v) => (v !== undefined ? (/^[1-9]\d*$/.test(String(v)) ? Number(v) : NaN) : undefined);
+    const max = positive(flags.max);
+    const batchN = positive(flags.batch);
+    if (flags.plan === true || Number.isNaN(max) || Number.isNaN(batchN) || (max !== undefined && batchN !== undefined)) {
+      out("usage: pnpm trace plan-ready [--max N | --batch N] [--json] [--plan p]   (N a positive integer)");
       return 2;
     }
     // The ranking reads the origin records' severity, so a store that does not replay yields no ids.
@@ -366,7 +370,12 @@ async function main() {
     }
     const plan = readPlan();
     if (unparsed(plan)) return 1;
-    const ids = readyIds(plan.nodes, { max, state });
+    let ids = readyIds(plan.nodes, { max, state });
+    if (batchN !== undefined) {
+      const { batch, skipped } = conflictFreeBatch(plan.nodes, ids, batchN);
+      for (const k of skipped) process.stderr.write(`skip: ${k.id} conflicts with ${k.conflictsWith} (overlapping scope; it waits for a later call)\n`);
+      ids = batch;
+    }
     if (flags.json) {
       const byId = new Map(plan.nodes.map((n) => [n.id, n]));
       out(ids.map((id) => byId.get(id)), true);

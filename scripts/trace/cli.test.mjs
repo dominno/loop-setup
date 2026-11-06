@@ -269,6 +269,18 @@ describe("plan commands (CLI process)", () => {
     expect(trace(["plan-lint", "--pre-dispatch", "--max-scope", "4", "--plan", p]).status).toBe(2);
   });
 
+  it("plan-ready --batch N prints a conflict-free batch by scope and names each skipped id on stderr; --batch with --max is a usage error", () => {
+    const H10 = "| id | description | after | status | record | missing | origin | notes | scope | check |\n|---|---|---|---|---|---|---|---|---|---|";
+    const p = join(dir, "loop-plan-batch.md");
+    writeFileSync(p, `## Plan\n\n${H10}\n| LP-001 | a | — | ready | | | human | | src/a.ts | pnpm test |\n| LP-002 | b | — | ready | | | human | | src/a.ts | pnpm test |\n| LP-003 | c | — | ready | | | human | | src/c.ts | pnpm test |\n`);
+    const out = trace(["plan-ready", "--batch", "5", "--plan", p]);
+    expect(out.status).toBe(0);
+    expect(JSON.parse(out.stdout)).toEqual(["LP-001", "LP-003"]);
+    expect(out.stderr).toMatch(/skip: LP-002 conflicts with LP-001/);
+    expect(trace(["plan-ready", "--batch", "5", "--max", "2", "--plan", p]).status).toBe(2);
+    expect(trace(["plan-ready", "--batch", "0", "--plan", p]).status).toBe(2);
+  });
+
   it("plan-lint exits 1 naming the rule when a done node cites a defer record, 0 on a consistent plan, and 2 when the store does not replay", () => {
     expect(trace(["write", "-"], draft({ writer_id: "loop-iteration/verify:LP-001-0", claim_id: "loop:lp-001", claim_type: "practical", final_status: "defer", missing: ["a unit test run"], evidence: [] })).status).toBe(0);
     const id = JSON.parse(trace(["query", "--json"]).stdout)[0].record_id;

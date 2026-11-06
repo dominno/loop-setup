@@ -182,6 +182,61 @@ export function readyIds(nodes, { max, state } = {}) {
   return Number.isInteger(max) && max >= 0 ? ready.slice(0, max) : ready;
 }
 
+// --- scope overlap (plan-ready --batch): conservative, so an uncertain pair counts as overlapping ---
+const GLOB_CHARS = /[*?[{]/;
+const normPath = (p) => String(p).trim().replace(/^\.\//, "").replace(/\/+$/, "");
+const staticPrefix = (g) => g.slice(0, g.search(GLOB_CHARS));
+const globRegex = (g) =>
+  new RegExp(
+    "^" +
+      g
+        .split(/(\*\*\/|\*\*|\*|\?)/)
+        .map((t) => ({ "**/": "(?:.*/)?", "**": ".*", "*": "[^/]*", "?": "[^/]" })[t] ?? t.replace(/[.+^${}()|[\]\\]/g, "\\$&"))
+        .join("") +
+      "$",
+  );
+function pathsOverlap(x, y) {
+  const a = normPath(x);
+  const b = normPath(y);
+  const ga = GLOB_CHARS.test(a);
+  const gb = GLOB_CHARS.test(b);
+  if (!ga && !gb) return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+  if (ga && gb) {
+    const [sa, sb] = [staticPrefix(a), staticPrefix(b)];
+    return sa.startsWith(sb) || sb.startsWith(sa);
+  }
+  const [g, l] = ga ? [a, b] : [b, a];
+  const sg = staticPrefix(g);
+  if (globRegex(g).test(l)) return true;
+  // A literal whose last segment has an extension is a file: only the glob's own match decides.
+  if (/\.[^/]+$/.test(l.split("/").pop())) return false;
+  return sg.startsWith(`${l}/`) || (g.includes("**") && l.startsWith(sg)); // a directory: conservative
+}
+/** Whether two scope lists can touch the same file. An empty scope overlaps everything (fail closed). */
+export function scopesOverlap(a, b) {
+  if (!a.length || !b.length) return true;
+  return a.some((x) => b.some((y) => pathsOverlap(x, y)));
+}
+
+/**
+ * `pnpm trace plan-ready --batch N`: from ready ids in priority order, a greedy set whose scopes do
+ * not overlap, truncated to N only after the conflict filter. A node with an empty scope conflicts
+ * with everything, so it goes alone. → { batch, skipped: [{ id, conflictsWith }] }.
+ */
+export function conflictFreeBatch(nodes, ids, n) {
+  const byId = indexById(nodes);
+  const batch = [];
+  const skipped = [];
+  for (const id of ids) {
+    if (batch.length >= n) break;
+    const scope = byId.get(id)?.scope || [];
+    const hit = batch.find((other) => scopesOverlap(scope, byId.get(other)?.scope || []));
+    if (hit) skipped.push({ id, conflictsWith: hit });
+    else batch.push(id);
+  }
+  return { batch, skipped };
+}
+
 /** Every node that depends on `id` through `after` edges, directly or transitively (cycle-safe; `id` excluded). */
 export function dependents(nodes, id) {
   const reverse = new Map();

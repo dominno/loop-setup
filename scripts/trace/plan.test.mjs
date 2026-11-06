@@ -6,7 +6,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendActions, loadEntries, loadSchema, readPolicyVersion, replay, writeRecords } from "./lib.mjs";
-import { DEFAULT_PLAN, NOT_READY, STATUSES, dependents, parsePlan, planItems, planViolations, readyIds } from "./plan.mjs";
+import { DEFAULT_PLAN, NOT_READY, STATUSES, conflictFreeBatch, dependents, scopesOverlap, parsePlan, planItems, planViolations, readyIds } from "./plan.mjs";
 
 const HEADER = "| id | description | after | status | record | missing | origin | notes |\n|---|---|---|---|---|---|---|---|";
 const planText = (...rows) => `# Loop Plan\n\n## Plan\n_Some prose before the table._\n\n${HEADER}\n${rows.join("\n")}\n`;
@@ -170,6 +170,36 @@ describe("readyIds (loop-plan.md's ready-node rule, in table order)", () => {
     const p = plan(row("LP-001", { status: "todo" }), row("LP-002", { status: "Ready" }), row("LP-003", { status: "in progress" }), row("LP-004"));
     expect(readyIds(p.nodes)).toEqual(["LP-004"]);
     for (const status of NOT_READY) expect(readyIds(plan(row("LP-001", { status })).nodes), status).toEqual([]);
+  });
+});
+
+describe("conflictFreeBatch (plan-ready --batch N)", () => {
+  const H10 = "| id | description | after | status | record | missing | origin | notes | scope | check |\n|---|---|---|---|---|---|---|---|---|---|";
+  const nodesOf = (...pairs) => parsePlan(`## Plan\n\n${H10}\n${pairs.map(([id, scope]) => `| ${id} | w | — | ready | | | human | | ${scope} | pnpm test |`).join("\n")}\n`).nodes;
+
+  it("overlap: the same file, a directory and a file in it, a glob and a file it matches, two globs with nested static prefixes", () => {
+    expect(scopesOverlap(["src/a.ts"], ["./src/a.ts"])).toBe(true);
+    expect(scopesOverlap(["src/lib"], ["src/lib/x.ts"])).toBe(true);
+    expect(scopesOverlap(["src/**/*.ts"], ["src/lib/x.ts"])).toBe(true);
+    expect(scopesOverlap(["src/*.css"], ["src/lib/x.ts"])).toBe(false);
+    expect(scopesOverlap(["src/lib/*"], ["src/**/*.test.ts"])).toBe(true);
+    expect(scopesOverlap(["src/a.ts"], ["src/ab.ts"])).toBe(false);
+    expect(scopesOverlap(["e2e/x.spec.ts"], ["src/a.ts", "src/b.ts"])).toBe(false);
+  });
+
+  it("filters conflicts greedily in priority order and only then truncates to N, naming what each skipped id conflicts with", () => {
+    const nodes = nodesOf(["LP-001", "src/a.ts"], ["LP-002", "src/a.ts, src/b.ts"], ["LP-003", "src/c.ts"], ["LP-004", "src/**/*.css"], ["LP-005", "e2e/x.spec.ts"]);
+    const { batch, skipped } = conflictFreeBatch(nodes, ["LP-001", "LP-002", "LP-003", "LP-004", "LP-005"], 3);
+    expect(batch).toEqual(["LP-001", "LP-003", "LP-004"]); // LP-002 is filtered first, then the batch is cut at 3
+    expect(skipped).toEqual([{ id: "LP-002", conflictsWith: "LP-001" }]);
+  });
+
+  it("an empty scope conflicts with everything: such a node is dispatched alone (fail closed)", () => {
+    const nodes = nodesOf(["LP-001", "—"], ["LP-002", "src/a.ts"], ["LP-003", "src/b.ts"]);
+    expect(conflictFreeBatch(nodes, ["LP-001", "LP-002", "LP-003"], 5).batch).toEqual(["LP-001"]);
+    const later = conflictFreeBatch(nodes, ["LP-002", "LP-001", "LP-003"], 5);
+    expect(later.batch).toEqual(["LP-002", "LP-003"]);
+    expect(later.skipped).toEqual([{ id: "LP-001", conflictsWith: "LP-002" }]);
   });
 });
 

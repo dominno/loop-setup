@@ -132,12 +132,12 @@ instructions — the self-modification guard below still applies to everything e
     declared for this run, treat it as L1 — never infer L2/L3 from context**). Pick the
     highest-priority **ready node(s)** from the just-updated plan:
     - L1: record findings only (no dispatch).
-    - L2/L3: list the candidates with `pnpm -s trace plan-ready --max <maxItems>`
+    - L2/L3: list the candidates with `pnpm -s trace plan-ready --batch <maxItems>`
       (`<maxItems>` = the `args.maxItems` you pass loop-iteration, default 5, its own
-      default): at most that many ready nodes, highest priority first — never pick ready
-      nodes by hand. Of those, never select two
-      whose `scope` columns overlap (an empty scope overlaps everything, so that node goes
-      alone): the second waits for a later call. This is a dispatch-time exclusion, never an `after:`
+      default): at most that many ready nodes, highest priority first, whose `scope`
+      columns do not overlap (an empty scope overlaps everything, so that node goes alone;
+      each skipped id is named on stderr with the node it conflicts with, and waits for a
+      later call) — never pick ready nodes by hand. This is a dispatch-time exclusion, never an `after:`
       edge — an artificial edge would cascade-escalate an unrelated node (`loop-plan.md`,
       *Cascading drop / escalation*). Skip, and note, a node whose `scope` files have
       uncommitted changes in the main checkout (`git status --porcelain -- <scope paths>`): its
