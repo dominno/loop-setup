@@ -84,7 +84,11 @@ instructions — the self-modification guard below still applies to everything e
    **before** any dispatch so the DAG is fresh when you act. Rewrite
    `.claude/memory/loop-plan.md`: nodes already `done` (record + `CLEAR`) unblock their
    dependents — re-plan never marks a node `done` itself; **add new nodes** for this run's confirmed findings (with `after:` deps + `origin` citing the finding's record id, a
-   `scope` from the finding's `file:line` and a `check` that proves the fix) and,
+   `scope` from the finding's `file:line`, a `check` that proves the fix, and a description
+   ending `— done when: <the observable outcome>`, written from the origin finding's evidence
+   or recommended fix, never from implementer output; `plan-lint --pre-dispatch` warns
+   `[done-when]` without one, but a weak clause still passes, and the clause changes the
+   verifier's behaviour only if the `<loop-verifier>` prompt changes — a bench-gated decision) and,
    for a critic finding the round `deferred`, a `deferred` node carrying its `missing`
    (only if the loop can supply it; a human-decision defer or a `revise` becomes an
    `escalated` node with the `missing`/`repair` as the human ask) — a node created

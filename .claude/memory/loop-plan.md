@@ -20,7 +20,7 @@ an empty scope and check.
 | Field | Meaning |
 |---|---|
 | `id` | Stable node id, `LP-NNN` (never reused after `done`/`dropped`). |
-| `description` | One line — the bounded unit of work. |
+| `description` | One line — the bounded unit of work, ending `— done when: <observable outcome>` (from the origin finding's evidence or fix; `[done-when]` warns under `--pre-dispatch` without it). |
 | `after` | Comma-separated `id`s this node depends on; empty = no deps. |
 | `status` | `ready` · `blocked` · `in-progress` · `deferred` · `done` · `escalated` · `dropped`. |
 | `record` | The TRACE-lite `record_id` behind the node's latest status change (`pnpm trace show <id>`): the node's own `loop:<id>` record; for a node created `deferred`/`escalated` from a critic finding, that critic record, HOLDed for the node (`pnpm trace act <record> loop HOLD --ref <id>`); for a cascade-escalated node, its escalated ancestor's HOLDed record. Empty only while `ready`/`blocked` with no verdict yet. |

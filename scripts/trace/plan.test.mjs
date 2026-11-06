@@ -273,6 +273,20 @@ describe("plan-lint: structural rules", () => {
     expect(flagged(planViolations(p, undefined, { preDispatch: true, maxScope: 1 }).errors, "oversize")).toEqual(["LP-001", "LP-002", "LP-005"]); // a glob is never 1 file
   });
 
+  it("[done-when]: under --pre-dispatch, a ready or blocked node whose description has no 'done when:' clause warns (any case, any dash before it)", () => {
+    const p = plan(
+      row("LP-001", { description: "Fix the empty-name crash — done when: an empty name renders the fallback" }),
+      row("LP-002", { description: "Fix the empty-name crash - Done When: the unit test for '' passes" }),
+      row("LP-003", { description: "Fix the empty-name crash" }),
+      row("LP-004", { description: "Add the E2E", status: "blocked", after: "LP-003" }),
+      row("LP-005", { description: "Old work", status: "dropped" }),
+    );
+    expect(planViolations(p)).toEqual({ errors: [], warnings: [] });
+    const pre = planViolations(p, undefined, { preDispatch: true });
+    expect(flagged(pre.warnings, "done-when")).toEqual(["LP-003", "LP-004"]);
+    expect(rulesOf(pre.errors).filter((r) => r === "done-when")).toEqual([]); // never an error
+  });
+
   it("stranded: in the chain A (escalated) ← B ← C, B and C are flagged, while a deferred ancestor strands nothing", () => {
     const chain = (status) =>
       lint(row("LP-001", { status, missing: "a human decision on the auth flow" }), row("LP-002", { after: "LP-001", status: "blocked" }), row("LP-003", { after: "LP-002", status: "blocked" }));

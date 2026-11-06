@@ -28,6 +28,8 @@ const ID_RE = /^LP-\d{3,}$/;
 const RECORD_RE = /^TR-[0-9a-f]{12}$/;
 const CITED_RE = /\bTR-[0-9a-f]{12}\b/g;
 const EMPTY_CELLS = ["", "—", "–", "-"];
+/** A node's checkable acceptance clause, in its description (case-insensitive, any dash before it). */
+const DONE_WHEN = /(^|[\s—–-])done when:/i;
 /**
  * The attempt budget (loop.md step 9, the >3-attempts red flag): every attempt on a node counts —
  * each defer (an agent-failed one included) and each revise (a verifier's, or the Lead's failed
@@ -321,6 +323,9 @@ export function planViolations(plan, state = EMPTY_STATE, { preDispatch = false,
     }
     if (n.status === "ready" && !(n.scope || []).length && preDispatch) {
       warnings.push(`[scope] ${at(n)}: ready with an empty scope — list the files it may touch (from its origin finding's file:line); an empty scope dispatches alone`);
+    }
+    if (["ready", "blocked"].includes(n.status) && preDispatch && !DONE_WHEN.test(n.description)) {
+      warnings.push(`[done-when] ${at(n)}: its description has no "done when: …" clause — re-plan writes one from the origin finding's evidence or recommended fix (never from implementer output)`);
     }
     if ((n.status === "deferred" || n.status === "escalated") && !n.missing) {
       errors.push(`[missing] ${at(n)}: ${n.status} with an empty missing — name the evidence or human decision that would unblock it`);
