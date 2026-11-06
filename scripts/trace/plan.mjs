@@ -382,15 +382,7 @@ export function planViolations(plan, state = EMPTY_STATE, { preDispatch = false,
   }
 
   // --- TRACE cross-checks ---
-  const attemptsOf = new Map(); // claim_id → how many defer/revise records it has (each one an attempt)
-  for (const r of state.records.values()) if (ATTEMPT_VERDICTS.includes(r.final_status)) attemptsOf.set(r.claim_id, (attemptsOf.get(r.claim_id) || 0) + 1);
-  // A split child inherits its parent's attempts plus one for the split itself (summed over the lineage).
-  const lineageAttempts = (n, depth = 0) => {
-    const own = attemptsOf.get(claimOf(n.id)) || 0;
-    const from = SPLIT_FROM_RE.exec(n.origin || "");
-    const parent = from && byId.get(from[1]);
-    return parent && parent !== n && depth <= MAX_SPLIT_DEPTH + 1 ? own + 1 + lineageAttempts(parent, depth + 1) : own;
-  };
+  const lineageAttempts = attemptCounter(nodes, state);
   splitViolations(nodes, byId, state, errors);
   const cleared = new Map(); // claim_id → a record of it that carries a CLEAR (for loop:<id>, that node was done)
   for (const r of state.records.values()) if (actionsOn(r.record_id, "CLEAR").length) cleared.set(r.claim_id, r.record_id);
@@ -497,6 +489,62 @@ export function planViolations(plan, state = EMPTY_STATE, { preDispatch = false,
     }
   }
   return { errors, warnings };
+}
+
+/**
+ * The attempt count of a node (the budget, MAX_ATTEMPTS): its own loop:<id> defers and revises,
+ * and for a split child its parent's count plus one for the split, summed over the lineage.
+ * → a function node → attempts.
+ */
+export function attemptCounter(nodes, state = EMPTY_STATE) {
+  const byId = indexById(nodes);
+  const attemptsOf = new Map(); // claim_id → how many defer/revise records it has (each one an attempt)
+  for (const r of state.records.values()) if (ATTEMPT_VERDICTS.includes(r.final_status)) attemptsOf.set(r.claim_id, (attemptsOf.get(r.claim_id) || 0) + 1);
+  const lineage = (n, depth = 0) => {
+    const own = attemptsOf.get(claimOf(n.id)) || 0;
+    const from = SPLIT_FROM_RE.exec(n.origin || "");
+    const parent = from && byId.get(from[1]);
+    return parent && parent !== n && depth <= MAX_SPLIT_DEPTH + 1 ? own + 1 + lineage(parent, depth + 1) : own;
+  };
+  return lineage;
+}
+
+/** A node's claim tokens in its notes: `claim:<owner>@<run-id>` (run-id = the run-log entry's YYYYMMDD-HHMM). */
+const CLAIM_RE = /\bclaim:([a-z0-9][a-z0-9._-]*)@(\d{8}-\d{4})\b/gi;
+export const claimsOf = (notes) => [...String(notes || "").matchAll(CLAIM_RE)].map((m) => ({ owner: m[1].toLowerCase(), runId: m[2] }));
+const runIdTime = (runId) => {
+  const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})$/.exec(runId);
+  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]) : NaN;
+};
+
+/**
+ * `pnpm trace status`: a read-only rollup of the plan — nodes per status, open/done nodes per
+ * story, in-progress claims with their age, ready nodes over the scope ceiling, and live nodes'
+ * attempts. It reports consistency, not truth, and is never evidence in a record.
+ */
+export function planStatus(nodes, state = EMPTY_STATE, { now = new Date() } = {}) {
+  const byStatus = {};
+  for (const n of nodes) byStatus[n.status] = (byStatus[n.status] || 0) + 1;
+  const byStory = {};
+  for (const n of nodes) {
+    for (const l of n.story || storyLinks(n.origin)) {
+      byStory[l.id] ??= { open: [], done: [] };
+      if (LIVE.includes(n.status) && !byStory[l.id].open.includes(n.id)) byStory[l.id].open.push(n.id);
+      if (n.status === "done" && !byStory[l.id].done.includes(n.id)) byStory[l.id].done.push(n.id);
+    }
+  }
+  const claims = nodes
+    .filter((n) => n.status === "in-progress")
+    .flatMap((n) => claimsOf(n.notes).map((c) => ({ id: n.id, ...c, ageHours: Math.round(((now.getTime() - runIdTime(c.runId)) / 36e5) * 10) / 10 })));
+  const count = attemptCounter(nodes, state);
+  return {
+    note: "read-only rollup: consistency, not truth — never cite it as evidence in a TRACE record or use it to license a status",
+    byStatus,
+    byStory,
+    claims,
+    oversize: nodes.filter((n) => n.status === "ready" && (n.scope || []).length > MAX_SCOPE).map((n) => n.id),
+    attempts: nodes.filter((n) => LIVE.includes(n.status)).map((n) => ({ id: n.id, attempts: count(n) })).filter((a) => a.attempts > 0),
+  };
 }
 
 /**

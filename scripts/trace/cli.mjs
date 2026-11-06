@@ -44,7 +44,7 @@ import {
   wikiViolations,
   writeRecords,
 } from "./lib.mjs";
-import { DEFAULT_PLAN, MAX_SCOPE, conflictFreeBatch, parsePlan, planDrift, planItems, planViolations, readyIds } from "./plan.mjs";
+import { DEFAULT_PLAN, MAX_SCOPE, conflictFreeBatch, parsePlan, planDrift, planStatus, planItems, planViolations, readyIds } from "./plan.mjs";
 import { STORY_MAP, STORY_MAP_PATHS, parseStory, storyMapViolations } from "./story-map.mjs";
 
 const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (policy: .claude/memory/topics/trace.md)
@@ -78,6 +78,9 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
                                        exit 1 on an error, 2 when the store does not replay; --pre-dispatch also fails on
                                        an in-progress node, a ready node with no check, and one whose scope lists more
                                        than N paths (default 3; L3 passes 1) — run it before every dispatch
+  pnpm trace status [--plan p]       read-only rollup of the plan: nodes per status, open/done nodes per story, in-progress
+                                       claims and their age, oversize ready nodes, attempts — consistency, not truth; never
+                                       evidence in a record (exit 2 when the store does not replay)
   pnpm trace plan-drift [--base <ref> | --base-plan <file>] [--plan p]
                                        advisory, exit 0: done nodes whose CLEARed diff touched paths outside their scope,
                                        and the nodes added, removed or moved since the base plan (default: the plan at
@@ -421,6 +424,17 @@ async function main() {
     for (const e of errors) process.stderr.write(`error: ${e}\n`);
     out({ ok: errors.length === 0, errors: errors.length, warnings: warnings.length, nodes: plan.nodes.length, preDispatch, plan: planPath, store: storePath }, true);
     return errors.length ? 1 : 0;
+  }
+
+  if (cmd === "status") {
+    if (state.errors.length) {
+      out({ ok: false, error: `the record store does not replay (${state.errors.length} error(s)); run pnpm trace lint`, store: storePath }, true);
+      return 2;
+    }
+    const plan = readPlan();
+    if (unparsed(plan)) return 1;
+    out(planStatus(plan.nodes, state, { now: new Date() }), true);
+    return 0;
   }
 
   if (cmd === "plan-drift") {

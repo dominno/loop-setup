@@ -301,6 +301,15 @@ describe("plan commands (CLI process)", () => {
     expect(j.note).toMatch(/consistency, not truth/);
   });
 
+  it("status prints the read-only rollup (exit 0), and exits 2 when the store does not replay", () => {
+    const p = writePlan("| LP-001 | a | — | ready | | | human | |", "| LP-002 | b | LP-001 | blocked | | | human | |");
+    const out = trace(["status", "--plan", p]);
+    expect(out.status).toBe(0);
+    expect(JSON.parse(out.stdout)).toMatchObject({ byStatus: { ready: 1, blocked: 1 }, note: expect.stringMatching(/consistency, not truth/) });
+    writeFileSync(store, "not json\n", { flag: "a" });
+    expect(trace(["status", "--plan", p]).status).toBe(2);
+  });
+
   it("plan-lint exits 1 naming the rule when a done node cites a defer record, 0 on a consistent plan, and 2 when the store does not replay", () => {
     expect(trace(["write", "-"], draft({ writer_id: "loop-iteration/verify:LP-001-0", claim_id: "loop:lp-001", claim_type: "practical", final_status: "defer", missing: ["a unit test run"], evidence: [] })).status).toBe(0);
     const id = JSON.parse(trace(["query", "--json"]).stdout)[0].record_id;

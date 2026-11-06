@@ -6,7 +6,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendActions, loadEntries, loadSchema, readPolicyVersion, replay, writeRecords } from "./lib.mjs";
-import { DEFAULT_PLAN, NOT_READY, STATUSES, conflictFreeBatch, dependents, planDrift, scopesOverlap, parsePlan, planItems, planViolations, readyIds } from "./plan.mjs";
+import { DEFAULT_PLAN, NOT_READY, STATUSES, conflictFreeBatch, dependents, planDrift, planStatus, scopesOverlap, parsePlan, planItems, planViolations, readyIds } from "./plan.mjs";
 
 const HEADER = "| id | description | after | status | record | missing | origin | notes |\n|---|---|---|---|---|---|---|---|";
 const planText = (...rows) => `# Loop Plan\n\n## Plan\n_Some prose before the table._\n\n${HEADER}\n${rows.join("\n")}\n`;
@@ -862,6 +862,27 @@ describe("plan-lint: TRACE cross-checks (a temp store written by writeRecords / 
       changed: [{ id: "LP-002", from: "ready", to: "done" }],
     });
     expect(planDrift(now, null, replayed())).toMatchObject({ added: [], removed: [], changed: [] }); // no base: only the scope drift
+  });
+
+  it("planStatus: a read-only rollup per status and story, with claims and their age, oversize nodes and attempts, labelled consistency, not truth", () => {
+    const H10 = "| id | description | after | status | record | missing | origin | notes | scope | check |\n|---|---|---|---|---|---|---|---|---|---|";
+    write(deferRec("LP-002", "evidence 0"));
+    const nodes = parsePlan(
+      `## Plan\n\n${H10}\n` +
+        [
+          "| LP-001 | a | — | in-progress | | | story:US-001#AC1 | claim:ana@20261106-1000 | src/a.ts | pnpm test |",
+          "| LP-002 | b | — | ready | | | story:US-001#AC2 | | a, b, c, d | pnpm test |",
+          "| LP-003 | c | — | done | | | story:US-002 | | src/c.ts | pnpm test |",
+        ].join("\n") +
+        "\n",
+    ).nodes;
+    const st = planStatus(nodes, replayed(), { now: new Date(Date.UTC(2026, 10, 6, 12, 30)) });
+    expect(st.note).toMatch(/consistency, not truth/);
+    expect(st.byStatus).toEqual({ "in-progress": 1, ready: 1, done: 1 });
+    expect(st.byStory).toEqual({ "US-001": { open: ["LP-001", "LP-002"], done: [] }, "US-002": { open: [], done: ["LP-003"] } });
+    expect(st.claims).toEqual([{ id: "LP-001", owner: "ana", runId: "20261106-1000", ageHours: 2.5 }]);
+    expect(st.oversize).toEqual(["LP-002"]);
+    expect(st.attempts).toEqual([{ id: "LP-002", attempts: 1 }]);
   });
 
   it("in-progress is a warning by default and an error with preDispatch", () => {
