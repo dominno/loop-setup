@@ -103,8 +103,10 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
                                        over every manifest fixture in every repeat (no --only subset), with no F0, F3
                                        or F4 in its failed_gates, and names the current <loop-verifier> block by its
                                        sha256 — exit 0 when all hold, else exit 1 listing every unmet condition
-  pnpm trace reaudit [--act]           licensing records whose file evidence changed since their commit; one whose
-                                       commit the repo no longer has (squashed away) is listed apart, as unreachable
+  pnpm trace reaudit [--claim-prefix P] [--act]
+                                       licensing records whose file evidence changed since their commit; one whose
+                                       commit the repo no longer has (squashed away) is listed apart, as unreachable;
+                                       --claim-prefix keeps the claims starting with P (story: = story statuses)
   pnpm trace metrics                   store-level consumer-value metrics
   pnpm trace rotate [--max 500] [--keep 200]   lossless move of old lines into <YYYY>.jsonl archives
   pnpm trace bench-args [--arms verifier,single-pass,panel] [--repeat N] [--critics a,b] [--only B01-x,G01-y]
@@ -600,7 +602,12 @@ async function main() {
   }
 
   if (cmd === "reaudit") {
-    const cands = reauditCandidates(state.records, state.superseded, changedSince, reachable);
+    if (flags["claim-prefix"] === true) {
+      out("usage: pnpm trace reaudit [--claim-prefix <prefix>] [--act]   (e.g. --claim-prefix story:)");
+      return 2;
+    }
+    const prefix = typeof flags["claim-prefix"] === "string" ? flags["claim-prefix"] : "";
+    const cands = reauditCandidates(state.records, state.superseded, changedSince, reachable).filter((c) => String(c.claim_id).startsWith(prefix));
     if (flags.act && cands.length) {
       const note = (c) => (c.unreachable ? `provenance commit ${c.unreachable} is unreachable — re-verify: ${c.paths.join(", ")}` : `evidence changed: ${c.changed.join(", ")}`);
       const res = appendActions(

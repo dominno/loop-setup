@@ -1097,6 +1097,29 @@ describe("CLI wiring, end to end in a throwaway repo", () => {
     }
   });
 
+  it("reaudit --claim-prefix story: lists (and --act notes) only the story-status claims whose evidence changed", () => {
+    const r = tempRepo();
+    try {
+      mkdirSync(join(r.d, "src"), { recursive: true });
+      writeFileSync(join(r.d, "src", "a.ts"), "export const a = 1;\n");
+      r.git("add", "-A");
+      r.git("commit", "-qm", "cited file");
+      const fact = (claim) => JSON.stringify({ writer_id: "test", claim_id: claim, claim_text: claim, claim_type: "factual", evidence: [{ kind: "file_line", ref: "src/a.ts:1" }], final_status: "accept", reason: "r", provenance: { workflow: "test" } });
+      for (const c of ["story:us-001:status", "cli:other"]) expect(r.cli(["write", "-"], fact(c)).status).toBe(0);
+      writeFileSync(join(r.d, "src", "a.ts"), "export const a = 2;\n");
+      expect(JSON.parse(r.cli(["reaudit"]).stdout).map((c) => c.claim_id).sort()).toEqual(["cli:other", "story:us-001:status"]);
+      const only = r.cli(["reaudit", "--claim-prefix", "story:"]);
+      expect(only.status).toBe(0);
+      expect(JSON.parse(only.stdout).map((c) => c.claim_id)).toEqual(["story:us-001:status"]);
+      expect(r.cli(["reaudit", "--claim-prefix", "story:", "--act"]).status).toBe(0);
+      const acted = readFileSync(join(r.d, "store.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l)).filter((e) => e.kind === "action");
+      expect(acted).toHaveLength(1);
+      expect(r.cli(["reaudit", "--claim-prefix"]).status).toBe(2); // a missing prefix is a usage error
+    } finally {
+      r.cleanup();
+    }
+  });
+
   it("reaudit lists a record whose commit was squashed away as `unreachable`, apart from changed evidence, and --act notes it so", () => {
     const r = tempRepo();
     try {

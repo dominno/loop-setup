@@ -101,7 +101,10 @@ whose fix would touch a denylist path is escalated, never auto-applied.
 against the record store: statuses, `after:` edges, cycles, stranded nodes, and each node's
 record and consumer actions. It checks consistency, not truth: it shows that the table and
 the records agree, not that a fix is right or that a `missing` was really supplied. A table
-that does not parse fails closed (exit 1, no ids).
+that does not parse fails closed (exit 1, no ids). `pnpm trace status` is a read-only rollup
+(nodes per status and story, in-progress claims and their age, oversize nodes, attempts) and
+`pnpm trace plan-drift` an advisory diff against the previous run's plan; both report
+consistency, not truth, and neither is ever evidence in a record.
 
 **Stale `in-progress` recovery:** `in-progress` means "dispatched this iteration" and
 normally resolves to `done`/`escalated` in the same iteration. A node still `in-progress`
