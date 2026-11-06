@@ -206,6 +206,16 @@ describe("conflictFreeBatch (plan-ready --batch N)", () => {
     expect(scopesOverlap(["e2e/x.spec.ts"], ["src/a.ts", "src/b.ts"])).toBe(false);
   });
 
+  it("brace and bracket globs fail closed (they overlap whatever shares their static prefix), and a brace's commas never split the scope cell", () => {
+    expect(scopesOverlap(["src/{a,b}.ts"], ["src/a.ts"])).toBe(true);
+    expect(scopesOverlap(["src/[ab].ts"], ["src/a.ts"])).toBe(true);
+    expect(scopesOverlap(["src/{a,b}/**"], ["src/a/x.ts"])).toBe(true);
+    expect(scopesOverlap(["src/{a,b}.ts"], ["e2e/x.spec.ts"])).toBe(false); // a different static prefix still never overlaps
+    const nodes = nodesOf(["LP-001", "src/{a,b}.ts, e2e/x.ts"], ["LP-002", "src/a.ts"]);
+    expect(nodes[0].scope).toEqual(["src/{a,b}.ts", "e2e/x.ts"]);
+    expect(conflictFreeBatch(nodes, ["LP-001", "LP-002"], 5).batch).toEqual(["LP-001"]);
+  });
+
   it("filters conflicts greedily in priority order and only then truncates to N, naming what each skipped id conflicts with", () => {
     const nodes = nodesOf(["LP-001", "src/a.ts"], ["LP-002", "src/a.ts, src/b.ts"], ["LP-003", "src/c.ts"], ["LP-004", "src/**/*.css"], ["LP-005", "e2e/x.spec.ts"]);
     const { batch, skipped } = conflictFreeBatch(nodes, ["LP-001", "LP-002", "LP-003", "LP-004", "LP-005"], 3);

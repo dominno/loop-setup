@@ -142,7 +142,8 @@ export function parsePlan(text) {
       continue;
     }
     const c = cells.map((x) => (EMPTY_CELLS.includes(x) ? "" : x));
-    const list = (v) => String(v ?? "").split(",").map((x) => x.trim()).filter((x) => !EMPTY_CELLS.includes(x));
+    // Comma-separated, except inside a glob's braces ({a,b} is one entry).
+    const list = (v) => String(v ?? "").split(/,(?![^{]*})/).map((x) => x.trim()).filter((x) => !EMPTY_CELLS.includes(x));
     const node = {
       id: c[0],
       description: c[1],
@@ -237,6 +238,8 @@ function pathsOverlap(x, y) {
   }
   const [g, l] = ga ? [a, b] : [b, a];
   const sg = staticPrefix(g);
+  // Brace and bracket syntax is not expanded by globRegex: fail closed on the static prefix alone.
+  if (/[[{]/.test(g)) return l.startsWith(sg) || sg.startsWith(`${l}/`);
   if (globRegex(g).test(l)) return true;
   // A literal whose last segment has an extension is a file: only the glob's own match decides.
   if (/\.[^/]+$/.test(l.split("/").pop())) return false;
