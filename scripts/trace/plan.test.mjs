@@ -791,6 +791,16 @@ describe("plan-lint: TRACE cross-checks (a temp store written by writeRecords / 
       expect(lint(chained).errors).toEqual([]);
     });
 
+    it("a split into hex ids that start with digits (LP-123abc) parses whole: no false [split] error", () => {
+      const t = setup();
+      const rows = [
+        row("LP-001", { status: "dropped", record: t, notes: "split into LP-123abc, LP-456def" }),
+        row("LP-123abc", { origin: `split from LP-001 rec:${t}` }),
+        row("LP-456def", { origin: `split from LP-001 rec:${t}` }),
+      ];
+      expect(lint(rows).errors).toEqual([]);
+    });
+
     it("[split]: the parent must be dropped, list 2–4 children that exist and name it; a dependent may not point at only part of an unchained set", () => {
       const t = setup();
       const errs = (rows) => flagged(lint(rows).errors, "split");

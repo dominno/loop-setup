@@ -29,7 +29,8 @@ const LIVE = ["ready", "blocked", "in-progress", "deferred"];
 const ID_TOKEN = "LP-(?:\\d{3,}|[0-9a-f]{4,6})";
 const ID_RE = new RegExp(`^${ID_TOKEN}$`);
 const SPLIT_FROM_RE = new RegExp(`\\bsplit from (${ID_TOKEN})\\b`);
-const SPLIT_INTO_RE = new RegExp(`\\bsplit into ((?:${ID_TOKEN})(?:\\s*,\\s*${ID_TOKEN})*)`);
+// Each id ends at a word boundary, so a hex id that starts with digits (LP-123abc) is never cut at its digits.
+const SPLIT_INTO_RE = new RegExp(`\\bsplit into ((?:${ID_TOKEN}\\b)(?:\\s*,\\s*${ID_TOKEN}\\b)*)`);
 const CASCADE_FROM_RE = new RegExp(`\\bcascade from (${ID_TOKEN})\\b`);
 /** A split (loop-plan.md, Split on failure): 2–4 children, at most 2 levels deep. */
 const SPLIT_CHILDREN = [2, 4];
