@@ -151,6 +151,19 @@ describe("M7-M10: two developers on one project", () => {
   });
 });
 
+describe("planning guide (docs/planning-guide.md)", () => {
+  it("documents every plan command the trace CLI offers, and README shows the planning infographic (SVG source + PNG)", () => {
+    const guide = read("docs/planning-guide.md");
+    const help = read("scripts/trace/cli.mjs");
+    const cmds = ["plan-lint", "plan-ready", "plan-items", "plan-id", "claim-token", "status", "plan-drift", "story-lint", "reaudit"];
+    for (const c of cmds) expect(help, c).toContain(`pnpm trace ${c}`);
+    expect(cmds.filter((c) => !guide.includes(`pnpm trace ${c}`))).toEqual([]);
+    for (const f of ["docs/infographic-5-planning.svg", "docs/infographic-5-planning.png"]) expect(existsSync(join(ROOT, f)), f).toBe(true);
+    expect(read("README.md")).toContain("(docs/infographic-5-planning.png)");
+    expect(guide).toContain("(infographic-5-planning.png)");
+  });
+});
+
 describe("shared permissions (.claude/settings.json)", () => {
   const allow = () => JSON.parse(read(".claude/settings.json")).permissions?.allow ?? [];
 

@@ -618,6 +618,8 @@ Adapt it to your stack:
 
 ## Working as a team
 
+(How a single person plans and dispatches work is in [`planning-guide.md`](planning-guide.md).)
+
 Two or more people, each with their own clone or cloud session running Claude Code, integrate
 through branches and PRs. What already merges cleanly: the record store (`merge=union`,
 content-hash ids), the shared `.claude/settings.json`, tree-keyed verdict reuse, and the CI

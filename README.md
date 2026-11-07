@@ -30,6 +30,10 @@ The workflow starts with critique, not coding — and ends with proof, not confi
 
 ![/loop trust levels L0-L3, denylist, loop iteration, and six adoption steps with the first-session commands](docs/infographic-4-loop-and-adoption.png)
 
+**5. Planning and task status** — how work becomes plan nodes, how a node moves through its statuses (with split on failure and the attempt budget), and how the loop dispatches safely, also with two developers. How to use it: [`docs/planning-guide.md`](docs/planning-guide.md).
+
+![Planning and task status: /plan-nodes and the node row, the status lifecycle with split on failure and the attempt budget, and safe dispatch with plan-lint --pre-dispatch, plan-ready --batch, the two-developer rules and the commands](docs/infographic-5-planning.png)
+
 ## What's in this setup
 
 ```txt
@@ -78,6 +82,7 @@ CLAUDE.md                         Project rules + multi-agent workflow + doc-sca
 scripts/trace/                    `pnpm trace …` — record writer, linter, re-audit, metrics, bench scoring, loop-plan DAG checks, story-map lint, wiki check
 docs/
   adoption-guide.md               How to adopt this template in a real project
+  planning-guide.md               How to plan, track and dispatch work with the loop plan (/plan-nodes, statuses, commands)
   loop-integration-guide.md       How to add hardened recurring /loop automations to a project
   prd.md                          Product requirements (source of record for stories)
   product-docs-index.md           Source documents scanned

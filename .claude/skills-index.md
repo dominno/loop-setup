@@ -15,7 +15,7 @@ catalog so both you and Claude can route to the right command.
 ## Pick by intent
 - **Start a non-trivial task — let Claude write the goal** → `/write-goal`
 - **Build or change something non-trivial** → `/multi-agent-dev`
-- **Plan work for the loop (story/spec → plan nodes, confirmed one by one)** → `/plan-nodes`
+- **Plan work for the loop (story/spec → plan nodes, confirmed one by one)** → `/plan-nodes` (how-to: `docs/planning-guide.md`)
 - **Just review, don't change code** → `/critic-round`
 - **Add/expand end-to-end tests** → `/multi-agent-e2e`
 - **localhost is broken** → `/fix-localhost`
