@@ -164,6 +164,36 @@ describe("planning guide (docs/planning-guide.md)", () => {
   });
 });
 
+describe("README infographics stay true to the repo", () => {
+  const svg = (n) => read(`docs/${n}.svg`);
+  const NAMES = ["infographic-1-task-cycle", "infographic-2-multi-agent-workflows", "infographic-3-components", "infographic-4-loop-and-adoption", "infographic-5-planning"];
+
+  it("each README infographic has its SVG source next to the PNG", () => {
+    for (const n of NAMES) {
+      expect(existsSync(join(ROOT, `docs/${n}.svg`)), n).toBe(true);
+      expect(read("README.md"), n).toContain(`(docs/${n}.png)`);
+    }
+  });
+
+  it("the counts drawn on them match the commands and workflows on disk", () => {
+    const commands = readdirSync(join(ROOT, ".claude/commands")).filter((f) => f.endsWith(".md")).length;
+    const workflows = readdirSync(join(ROOT, ".claude/workflows")).filter((f) => f.endsWith(".js")).length;
+    expect(svg("infographic-3-components")).toContain(`commands/ — ${commands} commands`);
+    expect(svg("infographic-3-components")).toContain(`workflows/ — ${workflows} workflows`);
+    expect(svg("infographic-2-multi-agent-workflows")).toContain(`${workflows} MULTI-AGENT WORKFLOWS`);
+    for (const f of readdirSync(join(ROOT, ".claude/workflows")).filter((x) => x.endsWith(".js"))) {
+      expect(svg("infographic-2-multi-agent-workflows"), f).toContain(f.replace(/\.js$/, ""));
+    }
+  });
+
+  it("the story-map files drawn on infographic 3 exist", () => {
+    for (const f of ["prd.md", "user-stories.md", "implementation-status.md", "e2e-coverage-map.md", "story-verification-log.md", "gaps-and-risks.md"]) {
+      expect(svg("infographic-3-components"), f).toContain(f);
+      expect(existsSync(join(ROOT, "docs", f)), f).toBe(true);
+    }
+  });
+});
+
 describe("shared permissions (.claude/settings.json)", () => {
   const allow = () => JSON.parse(read(".claude/settings.json")).permissions?.allow ?? [];
 

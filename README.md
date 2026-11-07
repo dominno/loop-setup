@@ -16,17 +16,19 @@ The workflow starts with critique, not coding — and ends with proof, not confi
 
 **1. The task cycle** — from intent to proof, looping until there are zero blockers.
 
-![Task cycle: intent, /write-goal, pre-critique, plan, TDD implementation, verify, post-critique, 0 blockers?, /qa-pass, /dream](docs/infographic-1-task-cycle.png)
+![Task cycle: intent, /write-goal, pre-critique, plan blockers and related important findings, TDD implementation, verify, post-critique, 0 blockers? (at most 3 rounds), /qa-pass, /dream](docs/infographic-1-task-cycle.png)
 
-**2. The multi-agent workflows** — six of the seven workflows (`trace-bench`, added later, is drawn in [`docs/workflow-graphs.md`](docs/workflow-graphs.md)); each node is a subagent with its own context.
+**2. The multi-agent workflows** — all seven; each node is a subagent with its own context (node-level graphs: [`docs/workflow-graphs.md`](docs/workflow-graphs.md)).
 
-![Six of the seven multi-agent workflows: critic-panel, scan-docs, gap-analysis, e2e-design, loop-iteration, improve-skills — trace-bench, added later, is drawn in docs/workflow-graphs.md](docs/infographic-2-multi-agent-workflows.png)
+![The seven multi-agent workflows: critic-panel (lens fan-out or one all-lens reviewer, dedup, skeptics, matrix), scan-docs, gap-analysis, e2e-design, loop-iteration, improve-skills and trace-bench](docs/infographic-2-multi-agent-workflows.png)
 
 **3. The components** — four layers of files, and the evidence-based story statuses.
 
-![Components in four layers: contract, machinery, memory, evidence; story status ladder from Not started to Done](docs/infographic-3-components.png)
+![Components in four layers: contract (with the shared settings.json), machinery (14 commands, 7 workflows), memory (wiki, TRACE store, loop state), evidence (story map); story status ladder from Not started to Done](docs/infographic-3-components.png)
 
 **4. `/loop` and adoption** — trust levels, the denylist, one loop iteration, and the six adoption steps.
+
+Every infographic is drawn as an SVG next to its PNG (`docs/infographic-*.svg`); edit the SVG and re-render the PNG at 2736×1536.
 
 ![/loop trust levels L0-L3, denylist, loop iteration, and six adoption steps with the first-session commands](docs/infographic-4-loop-and-adoption.png)
 

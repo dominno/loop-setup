@@ -1,0 +1,146 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1368 768" width="1368" height="768" font-family="DejaVu Sans, Arial, Helvetica, sans-serif">
+  <title>/loop and adopting it in a new project</title>
+  <desc>The four trust levels (L0 draft to L3 unattended, which needs the whole checklist and a measured checker), the denylist the loop never touches on its own, one loop iteration in six steps, and the six adoption steps with the first-session commands.</desc>
+  <defs>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="#e3eaf3" stroke-width="1"/></pattern>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1b2f52"/></marker>
+    <style>
+      .t{fill:#0f2347;font-weight:800}
+      .h{fill:#0f2347;font-weight:800;font-size:22px}
+      .b{fill:#1b2f52;font-size:13.5px}
+      .s{fill:#3c4f6e;font-size:11.5px}
+      .m{font-family:"DejaVu Sans Mono",Menlo,Consolas,monospace}
+      .ln{stroke:#1b2f52;stroke-width:2.2;fill:none}
+      .chip{fill:#fff;stroke:#d23b3b;stroke-width:2}
+      .ct{fill:#b42525;font-size:12.5px;font-weight:700}
+    </style>
+  </defs>
+  <rect width="1368" height="768" fill="#f7fafd"/><rect width="1368" height="768" fill="url(#grid)"/>
+  <text x="28" y="56" class="t" font-size="38">/LOOP AND ADOPTING IT IN A NEW PROJECT</text>
+  <line x1="466" y1="90" x2="466" y2="748" stroke="#1b2f52" stroke-width="1.5" stroke-dasharray="6 6"/>
+  <line x1="938" y1="90" x2="938" y2="748" stroke="#1b2f52" stroke-width="1.5" stroke-dasharray="6 6"/>
+
+  <!-- ===== trust levels ===== -->
+  <text x="28" y="112" class="h">TRUST LEVELS</text>
+  <g>
+    <rect x="28" y="352" width="104" height="92" rx="12" fill="#fff" stroke="#1b2f52" stroke-width="2.5"/>
+    <circle cx="50" cy="374" r="15" fill="#0f2347"/><text x="50" y="379" text-anchor="middle" fill="#fff" font-weight="800" font-size="13">L0</text>
+    <text x="80" y="408" text-anchor="middle" class="b" font-weight="700">Draft</text><text x="80" y="426" text-anchor="middle" class="s">intent only</text>
+
+    <rect x="134" y="284" width="104" height="92" rx="12" fill="#fff" stroke="#0f2347" stroke-width="2.5"/>
+    <circle cx="156" cy="306" r="15" fill="#0f2347"/><text x="156" y="311" text-anchor="middle" fill="#fff" font-weight="800" font-size="13">L1</text>
+    <text x="186" y="340" text-anchor="middle" class="b" font-weight="700">Report</text><text x="186" y="358" text-anchor="middle" class="s">no code changes</text>
+
+    <rect x="240" y="216" width="104" height="92" rx="12" fill="#fff" stroke="#11807a" stroke-width="2.5"/>
+    <circle cx="262" cy="238" r="15" fill="#11807a"/><text x="262" y="243" text-anchor="middle" fill="#fff" font-weight="800" font-size="13">L2</text>
+    <text x="292" y="272" text-anchor="middle" fill="#11807a" font-weight="700" font-size="13.5">Fixes +</text><text x="292" y="290" text-anchor="middle" fill="#11807a" font-weight="700" font-size="13.5">verifier</text>
+
+    <rect x="346" y="148" width="104" height="92" rx="12" fill="#fff" stroke="#5b3fb5" stroke-width="2.5"/>
+    <circle cx="368" cy="170" r="15" fill="#5b3fb5"/><text x="368" y="175" text-anchor="middle" fill="#fff" font-weight="800" font-size="13">L3</text>
+    <text x="398" y="204" text-anchor="middle" fill="#5b3fb5" font-weight="700" font-size="13.5">Unattended</text><text x="398" y="222" text-anchor="middle" class="s">no human</text>
+  </g>
+  <g class="s">
+    <text x="28" y="470">L2 needs §1–7 of loop-checklist.md and one</text>
+    <text x="28" y="486">logged L1 run first · never auto-merge</text>
+    <text x="28" y="508">L3 needs every section, plus a measured checker:</text>
+    <text x="28" y="524"><tspan class="m">pnpm trace l3-check</tspan> after <tspan class="m">/bench-checkers</tspan></text>
+  </g>
+
+  <rect x="28" y="546" width="424" height="202" rx="14" fill="#fff6f6" stroke="#d23b3b" stroke-width="2.5"/>
+  <path d="M58 568L74 596H42Z" fill="none" stroke="#d23b3b" stroke-width="2.5"/><path d="M58 578V587" stroke="#d23b3b" stroke-width="2.5"/><circle cx="58" cy="592" r="1.6" fill="#d23b3b"/>
+  <text x="86" y="592" fill="#b42525" font-weight="800" font-size="22">NEVER AUTONOMOUS</text>
+  <text x="44" y="616" class="s">a hit escalates to you — even at L3</text>
+  <g class="ct">
+    <rect x="44" y="628" width="64" height="28" rx="14" class="chip"/><text x="76" y="647" text-anchor="middle">auth</text>
+    <rect x="116" y="628" width="94" height="28" rx="14" class="chip"/><text x="163" y="647" text-anchor="middle">payments</text>
+    <rect x="218" y="628" width="112" height="28" rx="14" class="chip"/><text x="274" y="647" text-anchor="middle">secrets/.env</text>
+    <rect x="338" y="628" width="98" height="28" rx="14" class="chip"/><text x="387" y="647" text-anchor="middle">infra</text>
+    <rect x="44" y="664" width="92" height="28" rx="14" class="chip"/><text x="90" y="683" text-anchor="middle">CI config</text>
+    <rect x="144" y="664" width="104" height="28" rx="14" class="chip"/><text x="196" y="683" text-anchor="middle">migrations</text>
+    <rect x="256" y="664" width="80" height="28" rx="14" class="chip"/><text x="296" y="683" text-anchor="middle" class="m" font-size="12">.claude/</text>
+    <rect x="344" y="664" width="92" height="28" rx="14" class="chip"/><text x="390" y="683" text-anchor="middle" class="m" font-size="12">CLAUDE.md</text>
+    <rect x="44" y="700" width="84" height="28" rx="14" class="chip"/><text x="86" y="719" text-anchor="middle" class="m" font-size="12">scripts/</text>
+    <rect x="136" y="700" width="116" height="28" rx="14" class="chip"/><text x="194" y="719" text-anchor="middle" class="m" font-size="12">package.json</text>
+    <rect x="260" y="700" width="176" height="28" rx="14" class="chip"/><text x="348" y="719" text-anchor="middle" font-size="12">test/lint/ts configs</text>
+  </g>
+
+  <!-- ===== one iteration ===== -->
+  <text x="490" y="112" class="h">ONE ITERATION</text>
+  <g>
+    <circle cx="702" cy="208" r="72" fill="#fff" stroke="#1b2f52" stroke-width="2.5"/>
+    <circle cx="702" cy="160" r="15" fill="#0f2347"/><text x="702" y="165" text-anchor="middle" fill="#fff" font-weight="800" font-size="14">1</text>
+    <text x="702" y="200" text-anchor="middle" class="b" font-weight="700">read plan +</text><text x="702" y="218" text-anchor="middle" class="b" font-weight="700">run-log</text><text x="702" y="238" text-anchor="middle" class="s">budget check</text>
+
+    <circle cx="856" cy="320" r="68" fill="#fff" stroke="#1b2f52" stroke-width="2.5"/>
+    <circle cx="856" cy="274" r="15" fill="#0f2347"/><text x="856" y="279" text-anchor="middle" fill="#fff" font-weight="800" font-size="14">2</text>
+    <text x="856" y="314" text-anchor="middle" class="b" font-weight="700">observe</text><text x="856" y="332" text-anchor="middle" class="b" font-weight="700">localhost</text><text x="856" y="350" text-anchor="middle" class="s">console, network</text>
+
+    <circle cx="840" cy="510" r="68" fill="#fff" stroke="#11807a" stroke-width="2.5"/>
+    <circle cx="840" cy="464" r="15" fill="#11807a"/><text x="840" y="469" text-anchor="middle" fill="#fff" font-weight="800" font-size="14">3</text>
+    <text x="840" y="506" text-anchor="middle" fill="#11807a" font-weight="800" font-size="14">critic-panel</text><text x="840" y="526" text-anchor="middle" class="s">records written</text>
+
+    <circle cx="702" cy="640" r="72" fill="#fff" stroke="#5b3fb5" stroke-width="2.5"/>
+    <circle cx="702" cy="590" r="15" fill="#5b3fb5"/><text x="702" y="595" text-anchor="middle" fill="#fff" font-weight="800" font-size="14">4</text>
+    <text x="702" y="630" text-anchor="middle" fill="#5b3fb5" font-weight="800" font-size="14">re-plan</text>
+    <text x="702" y="650" text-anchor="middle" class="s m" font-size="10.5">plan-lint</text><text x="702" y="664" text-anchor="middle" class="s m" font-size="10.5">--pre-dispatch</text>
+
+    <rect x="490" y="452" width="150" height="110" rx="16" fill="#fff" stroke="#c48a0e" stroke-width="2.5"/>
+    <line x1="565" y1="452" x2="565" y2="530" stroke="#c48a0e" stroke-width="2"/>
+    <circle cx="565" cy="452" r="15" fill="#0f2347"/><text x="565" y="457" text-anchor="middle" fill="#fff" font-weight="800" font-size="14">5</text>
+    <text x="528" y="500" text-anchor="middle" fill="#8a5f00" font-weight="800" font-size="13">maker</text><text x="528" y="518" text-anchor="middle" class="s">worktree</text>
+    <text x="602" y="500" text-anchor="middle" fill="#5b3fb5" font-weight="800" font-size="13">checker</text><text x="602" y="518" text-anchor="middle" class="s">verdict</text>
+    <text x="565" y="550" text-anchor="middle" class="s m" font-size="10.5">plan-ready --batch</text>
+
+    <circle cx="560" cy="300" r="66" fill="#fff" stroke="#1b2f52" stroke-width="2.5"/>
+    <circle cx="560" cy="256" r="15" fill="#0f2347"/><text x="560" y="261" text-anchor="middle" fill="#fff" font-weight="800" font-size="14">6</text>
+    <text x="560" y="296" text-anchor="middle" class="b" font-weight="700">append</text><text x="560" y="314" text-anchor="middle" class="b" font-weight="700">run-log</text><text x="560" y="334" text-anchor="middle" class="s">CLEAR or HOLD</text>
+  </g>
+  <path class="ln" d="M770 232L808 262" marker-end="url(#a)"/>
+  <path class="ln" d="M858 390L852 438" marker-end="url(#a)"/>
+  <path class="ln" d="M790 560L760 592" marker-end="url(#a)"/>
+  <path class="ln" d="M630 640H596V568" marker-end="url(#a)"/>
+  <path class="ln" d="M548 450L554 370" marker-end="url(#a)"/>
+  <path class="ln" d="M600 248L636 222" marker-end="url(#a)"/>
+  <text x="490" y="738" class="s">no ready node → self-stop · every L2/L3 action is a ready plan node</text>
+
+  <!-- ===== adoption ===== -->
+  <text x="962" y="112" class="h">6 ADOPTION STEPS</text>
+  <g>
+    <g font-size="13.5" fill="#1b2f52">
+      <rect x="962" y="130" width="382" height="56" rx="12" fill="#fff" stroke="#1b2f52" stroke-width="2"/>
+      <circle cx="990" cy="158" r="16" fill="#0f2347"/><text x="990" y="164" text-anchor="middle" fill="#fff" font-weight="800" font-size="15">1</text>
+      <text x="1020" y="154" font-weight="700">Check command names, then copy</text><text x="1020" y="172" class="s">CLAUDE.md, .claude/, scripts/trace/, docs/</text>
+
+      <rect x="962" y="194" width="382" height="56" rx="12" fill="#fff" stroke="#1b2f52" stroke-width="2"/>
+      <circle cx="990" cy="222" r="16" fill="#11807a"/><text x="990" y="228" text-anchor="middle" fill="#fff" font-weight="800" font-size="15">2</text>
+      <text x="1020" y="218" font-weight="700">Wire verify to your scripts</text><text x="1020" y="236" class="s">CLAUDE.md Main commands + package.json</text>
+
+      <rect x="962" y="258" width="382" height="56" rx="12" fill="#fff" stroke="#1b2f52" stroke-width="2"/>
+      <circle cx="990" cy="286" r="16" fill="#5b3fb5"/><text x="990" y="292" text-anchor="middle" fill="#fff" font-weight="800" font-size="15">3</text>
+      <text x="1020" y="282" font-weight="700">Start memory empty</text><text x="1020" y="300" class="s">clear seeded facts, empty TRACE store + quarantine</text>
+
+      <rect x="962" y="322" width="382" height="56" rx="12" fill="#fff" stroke="#1b2f52" stroke-width="2"/>
+      <circle cx="990" cy="350" r="16" fill="#c48a0e"/><text x="990" y="356" text-anchor="middle" fill="#fff" font-weight="800" font-size="15">4</text>
+      <text x="1020" y="346" font-weight="700">Start an empty story map</text><text x="1020" y="364" class="s">formats kept, content cleared</text>
+
+      <rect x="962" y="386" width="382" height="56" rx="12" fill="#fff" stroke="#1b2f52" stroke-width="2"/>
+      <circle cx="990" cy="414" r="16" fill="#2f8a4b"/><text x="990" y="420" text-anchor="middle" fill="#fff" font-weight="800" font-size="15">5</text>
+      <text x="1020" y="410" font-weight="700">Merge settings.json</text><text x="1020" y="428" class="s">your real commands allowed, the denies kept</text>
+
+      <rect x="962" y="450" width="382" height="56" rx="12" fill="#fff" stroke="#1b2f52" stroke-width="2"/>
+      <circle cx="990" cy="478" r="16" fill="#0f2347"/><text x="990" y="484" text-anchor="middle" fill="#fff" font-weight="800" font-size="15">6</text>
+      <text x="1020" y="474" font-weight="700">First session</text><text x="1020" y="492" class="s">the commands below, then pnpm test green</text>
+    </g>
+  </g>
+  <rect x="962" y="522" width="382" height="226" rx="14" fill="#14284a"/>
+  <circle cx="984" cy="542" r="5.5" fill="#ff5f57"/><circle cx="1002" cy="542" r="5.5" fill="#febc2e"/><circle cx="1020" cy="542" r="5.5" fill="#28c840"/>
+  <g class="m" font-size="13.5" fill="#e8eef8">
+    <text x="984" y="576">pnpm verify</text>
+    <text x="984" y="600">/scan-project-docs</text>
+    <text x="984" y="624">/write-goal &lt;task&gt;</text>
+    <text x="984" y="648">/multi-agent-dev &lt;task&gt;</text>
+    <text x="984" y="672">/qa-pass</text>
+    <text x="984" y="696">/dream</text>
+  </g>
+  <text x="984" y="730" class="m" font-size="11.5" fill="#9fb1cc">guide: docs/adoption-guide.md</text>
+</svg>

@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1368 768" width="1368" height="768" font-family="DejaVu Sans, Arial, Helvetica, sans-serif">
+  <title>Components in four layers</title>
+  <desc>What to copy into a repo, in four layers: contract (CLAUDE.md, package.json verify, the CI workflow, the shared settings.json), machinery (14 commands, 7 workflows, the loop files, skills-index, the pnpm trace scripts), memory (the always-loaded index, topic pages, log, the TRACE record store, quarantine, and the loop's plan and run log), and evidence (the PRD and the story map), plus the story status ladder.</desc>
+  <defs>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="#e3eaf3" stroke-width="1"/></pattern>
+    <marker id="at" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#11807a"/></marker><marker id="ap" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#5b3fb5"/></marker><marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#2f8a4b"/></marker>
+    <style>
+      .t{fill:#0f2347;font-weight:800}
+      .s{fill:#3c4f6e;font-size:12px}
+      .m{font-family:"DejaVu Sans Mono",Menlo,Consolas,monospace}
+      .it{font-size:13px;fill:#1b2f52}
+      .sub{font-size:10.5px;fill:#56647a}
+    </style>
+  </defs>
+  <rect width="1368" height="768" fill="#f7fafd"/><rect width="1368" height="768" fill="url(#grid)"/>
+  <text x="28" y="56" class="t" font-size="38">COMPONENTS — 4 LAYERS</text>
+  <text x="30" y="84" fill="#1b2f52" font-size="17">what to copy into your repo</text>
+
+  <!-- 1 CONTRACT -->
+  <g>
+    <rect x="24" y="104" width="316" height="440" rx="16" fill="#fff" stroke="#0f2347" stroke-width="2.5"/>
+    <circle cx="52" cy="132" r="17" fill="#0f2347"/><text x="52" y="138" text-anchor="middle" fill="#fff" font-weight="800" font-size="17">1</text>
+    <rect x="160" y="118" width="44" height="54" rx="6" fill="none" stroke="#0f2347" stroke-width="2.5"/><path d="M170 134H194M170 146H194M170 158H186" stroke="#0f2347" stroke-width="2.5"/>
+    <text x="182" y="206" text-anchor="middle" fill="#0f2347" font-weight="800" font-size="24">CONTRACT</text>
+    <line x1="44" y1="222" x2="320" y2="222" stroke="#0f2347" stroke-width="2"/>
+    <g class="m">
+      <rect x="44" y="238" width="276" height="40" rx="10" fill="#fff" stroke="#0f2347" stroke-width="1.8"/><text x="58" y="263" class="it">CLAUDE.md</text>
+      <rect x="44" y="290" width="276" height="40" rx="10" fill="#fff" stroke="#0f2347" stroke-width="1.8"/><text x="58" y="315" class="it">package.json → verify</text>
+      <rect x="44" y="342" width="276" height="40" rx="10" fill="#fff" stroke="#0f2347" stroke-width="1.8"/><text x="58" y="367" class="it">verify.yml (CI)</text>
+      <rect x="44" y="394" width="276" height="48" rx="10" fill="#fff" stroke="#0f2347" stroke-width="1.8"/><text x="58" y="414" class="it">.claude/settings.json</text><text x="58" y="432" class="sub">shared allows + denies</text>
+    </g>
+    <text x="44" y="474" class="s">personal, git-ignored:</text>
+    <text x="44" y="492" class="s m">settings.local.json</text>
+    <text x="44" y="520" class="s">CLAUDE.md governs every session</text>
+  </g>
+
+  <!-- 2 MACHINERY -->
+  <g>
+    <rect x="356" y="104" width="316" height="440" rx="16" fill="#fff" stroke="#11807a" stroke-width="2.5"/>
+    <circle cx="384" cy="132" r="17" fill="#11807a"/><text x="384" y="138" text-anchor="middle" fill="#fff" font-weight="800" font-size="17">2</text>
+    <circle cx="514" cy="146" r="22" fill="none" stroke="#11807a" stroke-width="3"/><circle cx="514" cy="146" r="8" fill="none" stroke="#11807a" stroke-width="3"/>
+    <path d="M514 116V124M514 168V176M484 146H492M536 146H544M493 125L499 131M529 161L535 167M493 167L499 161M529 131L535 125" stroke="#11807a" stroke-width="4"/>
+    <text x="514" y="206" text-anchor="middle" fill="#11807a" font-weight="800" font-size="24">MACHINERY</text>
+    <line x1="376" y1="222" x2="652" y2="222" stroke="#11807a" stroke-width="2"/>
+    <g class="m">
+      <rect x="376" y="234" width="276" height="38" rx="10" fill="#fff" stroke="#11807a" stroke-width="1.8"/><text x="390" y="258" class="it">commands/ — 14 commands</text>
+      <rect x="376" y="280" width="276" height="38" rx="10" fill="#fff" stroke="#11807a" stroke-width="1.8"/><text x="390" y="304" class="it">workflows/ — 7 workflows</text>
+      <rect x="376" y="326" width="276" height="38" rx="10" fill="#fff" stroke="#11807a" stroke-width="1.8"/><text x="390" y="350" class="it">loop.md</text>
+      <rect x="376" y="372" width="276" height="38" rx="10" fill="#fff" stroke="#11807a" stroke-width="1.8"/><text x="390" y="396" class="it">loop-checklist.md</text>
+      <rect x="376" y="418" width="276" height="38" rx="10" fill="#fff" stroke="#11807a" stroke-width="1.8"/><text x="390" y="442" class="it">skills-index.md</text>
+      <rect x="376" y="464" width="276" height="48" rx="10" fill="#fff" stroke="#11807a" stroke-width="1.8"/><text x="390" y="484" class="it">scripts/trace/</text><text x="390" y="502" class="sub">pnpm trace: records, plan, story-lint</text>
+    </g>
+  </g>
+
+  <!-- 3 MEMORY -->
+  <g>
+    <rect x="688" y="104" width="316" height="440" rx="16" fill="#fff" stroke="#5b3fb5" stroke-width="2.5"/>
+    <circle cx="716" cy="132" r="17" fill="#5b3fb5"/><text x="716" y="138" text-anchor="middle" fill="#fff" font-weight="800" font-size="17">3</text>
+    <path d="M812 132C812 116 842 112 846 130C850 112 880 116 880 132V164C870 156 852 156 846 168C840 156 822 156 812 164Z" fill="none" stroke="#5b3fb5" stroke-width="3"/>
+    <text x="846" y="206" text-anchor="middle" fill="#5b3fb5" font-weight="800" font-size="24">MEMORY</text>
+    <line x1="708" y1="222" x2="984" y2="222" stroke="#5b3fb5" stroke-width="2"/>
+    <g class="m">
+      <rect x="708" y="232" width="276" height="44" rx="10" fill="#fff" stroke="#5b3fb5" stroke-width="1.8"/><text x="722" y="251" class="it">memory/index.md</text><text x="722" y="267" class="sub">always loaded (@import)</text>
+      <rect x="708" y="282" width="276" height="44" rx="10" fill="#fff" stroke="#5b3fb5" stroke-width="1.8"/><text x="722" y="301" class="it">topics/*.md</text><text x="722" y="317" class="sub">read on demand</text>
+      <rect x="708" y="332" width="134" height="36" rx="10" fill="#fff" stroke="#5b3fb5" stroke-width="1.8"/><text x="722" y="355" class="it">log.md</text>
+      <rect x="850" y="332" width="134" height="36" rx="10" fill="#fff" stroke="#5b3fb5" stroke-width="1.8"/><text x="862" y="355" class="it" font-size="12">quarantine.md</text>
+      <rect x="708" y="374" width="276" height="44" rx="10" fill="#efeafb" stroke="#5b3fb5" stroke-width="1.8"/><text x="722" y="393" class="it">trace/records.jsonl</text><text x="722" y="409" class="sub">TRACE records, only via pnpm trace</text>
+    </g>
+    <text x="708" y="440" class="s" font-weight="700">loop state (not wiki):</text>
+    <g class="m">
+      <rect x="708" y="448" width="276" height="36" rx="10" fill="#fff" stroke="#5b3fb5" stroke-width="1.8" stroke-dasharray="6 4"/><text x="722" y="471" class="it">loop-plan.md</text>
+      <rect x="708" y="490" width="276" height="36" rx="10" fill="#fff" stroke="#5b3fb5" stroke-width="1.8" stroke-dasharray="6 4"/><text x="722" y="513" class="it">loop-run-log.md</text>
+    </g>
+  </g>
+
+  <!-- 4 EVIDENCE -->
+  <g>
+    <rect x="1020" y="104" width="324" height="440" rx="16" fill="#fff" stroke="#2f8a4b" stroke-width="2.5"/>
+    <circle cx="1048" cy="132" r="17" fill="#2f8a4b"/><text x="1048" y="138" text-anchor="middle" fill="#fff" font-weight="800" font-size="17">4</text>
+    <rect x="1162" y="118" width="44" height="54" rx="6" fill="none" stroke="#2f8a4b" stroke-width="2.5"/><circle cx="1204" cy="166" r="13" fill="#fff" stroke="#2f8a4b" stroke-width="2.5"/><path d="M1197 166L1202 171L1211 161" fill="none" stroke="#2f8a4b" stroke-width="2.5"/>
+    <text x="1182" y="206" text-anchor="middle" fill="#2f8a4b" font-weight="800" font-size="24">EVIDENCE</text>
+    <line x1="1040" y1="222" x2="1324" y2="222" stroke="#2f8a4b" stroke-width="2"/>
+    <g class="m">
+      <rect x="1040" y="234" width="284" height="38" rx="10" fill="#fff" stroke="#2f8a4b" stroke-width="1.8"/><text x="1054" y="258" class="it">prd.md</text>
+      <rect x="1040" y="280" width="284" height="44" rx="10" fill="#fff" stroke="#2f8a4b" stroke-width="1.8"/><text x="1054" y="299" class="it">user-stories.md</text><text x="1054" y="315" class="sub">index → stories/US-*.md</text>
+      <rect x="1040" y="332" width="284" height="38" rx="10" fill="#fff" stroke="#2f8a4b" stroke-width="1.8"/><text x="1054" y="356" class="it">implementation-status.md</text>
+      <rect x="1040" y="378" width="284" height="38" rx="10" fill="#fff" stroke="#2f8a4b" stroke-width="1.8"/><text x="1054" y="402" class="it">e2e-coverage-map.md</text>
+      <rect x="1040" y="424" width="284" height="38" rx="10" fill="#fff" stroke="#2f8a4b" stroke-width="1.8"/><text x="1054" y="448" class="it">story-verification-log.md</text>
+      <rect x="1040" y="470" width="284" height="38" rx="10" fill="#fff" stroke="#2f8a4b" stroke-width="1.8"/><text x="1054" y="494" class="it">gaps-and-risks.md</text>
+    </g>
+    <text x="1040" y="530" class="s">pnpm trace story-lint keeps them in step</text>
+  </g>
+
+  <!-- captions -->
+  <g font-size="13" font-weight="700">
+    <path d="M514 588V552" stroke="#11807a" stroke-width="2.5" marker-end="url(#at)"/>
+    <text x="514" y="606" text-anchor="middle" fill="#11807a">commands invoke workflows</text>
+    <path d="M846 588V552" stroke="#5b3fb5" stroke-width="2.5" marker-end="url(#ap)"/>
+    <text x="846" y="606" text-anchor="middle" fill="#5b3fb5">only index.md is @imported · /dream writes</text>
+    <path d="M1182 588V552" stroke="#2f8a4b" stroke-width="2.5" marker-end="url(#ag)"/>
+    <text x="1182" y="606" text-anchor="middle" fill="#2f8a4b">/scan-project-docs · /sync-story-status</text>
+    <text x="182" y="606" text-anchor="middle" fill="#0f2347">the gates every change passes</text>
+  </g>
+
+  <!-- status ladder -->
+  <g font-size="13.5" font-weight="700">
+    <path d="M24 640H196L218 668L196 696H24Z" fill="#d5dbe5"/><text x="110" y="673" text-anchor="middle" fill="#1b2f52">Not started</text>
+    <path d="M202 640H374L396 668L374 696H202L224 668Z" fill="#c7d0dd"/><text x="302" y="666" text-anchor="middle" fill="#1b2f52" font-size="12.5">Partially</text><text x="302" y="682" text-anchor="middle" fill="#1b2f52" font-size="12.5">implemented</text>
+    <path d="M380 640H552L574 668L552 696H380L402 668Z" fill="#bde6dc"/><text x="480" y="673" text-anchor="middle" fill="#0f4d45">Implemented</text>
+    <path d="M558 640H730L752 668L730 696H558L580 668Z" fill="#94d4c0"/><text x="658" y="673" text-anchor="middle" fill="#0f4d45">Unit tested</text>
+    <path d="M736 640H908L930 668L908 696H736L758 668Z" fill="#6cc09c"/><text x="836" y="673" text-anchor="middle" fill="#fff">E2E tested</text>
+    <path d="M914 640H1086L1108 668L1086 696H914L936 668Z" fill="#3fa06a"/><text x="1014" y="666" text-anchor="middle" fill="#fff" font-size="12.5">Browser</text><text x="1014" y="682" text-anchor="middle" fill="#fff" font-size="12.5">verified</text>
+    <path d="M1092 640H1264L1286 668L1264 696H1092L1114 668Z" fill="#23803f"/><text x="1192" y="673" text-anchor="middle" fill="#fff">✓ Done</text>
+  </g>
+  <text x="1296" y="664" class="s">+ Blocked</text><text x="1296" y="680" class="s">Deprecated</text>
+  <line x1="60" y1="728" x2="340" y2="728" stroke="#1b2f52" stroke-width="1.5"/>
+  <text x="684" y="733" text-anchor="middle" fill="#1b2f52" font-size="15" font-weight="700">a status moves only with a TRACE record — Done needs recorded evidence</text>
+  <line x1="1028" y1="728" x2="1308" y2="728" stroke="#1b2f52" stroke-width="1.5"/>
+</svg>

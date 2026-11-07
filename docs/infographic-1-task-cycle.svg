@@ -1,0 +1,149 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1368 768" width="1368" height="768" font-family="DejaVu Sans, Arial, Helvetica, sans-serif">
+  <title>Loop setup task cycle</title>
+  <desc>Ten steps from intent to proof: intent, /write-goal, pre-implementation critic round, plan of blockers and related important findings, TDD implementation, verify, post-implementation critic round, a zero-blockers gate that loops back at most three rounds, /qa-pass and /dream, with the evidence store and the wiki memory.</desc>
+  <defs>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="#e3eaf3" stroke-width="1"/></pattern>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1b2f52"/></marker>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#d23b3b"/></marker>
+    <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#2f8a4b"/></marker>
+    <marker id="ap" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#5b3fb5"/></marker>
+    <style>
+      .t{fill:#0f2347;font-weight:800}
+      .b{fill:#1b2f52;font-size:14px}
+      .s{fill:#3c4f6e;font-size:12px}
+      .m{font-family:"DejaVu Sans Mono",Menlo,Consolas,monospace}
+      .box{fill:#fff;stroke:#1b2f52;stroke-width:2.5}
+      .teal{fill:#fff;stroke:#11807a;stroke-width:2.5}
+      .purp{fill:#fff;stroke:#5b3fb5;stroke-width:2.5}
+      .grn{fill:#fff;stroke:#2f8a4b;stroke-width:2.5}
+      .ln{stroke:#1b2f52;stroke-width:2.5;fill:none}
+      .num{fill:#0f2347}
+      .nt{fill:#fff;font-weight:800;font-size:15px}
+      .agent{fill:#e6f4f3;stroke:#11807a;stroke-width:1.5}
+    </style>
+  </defs>
+  <rect width="1368" height="768" fill="#f7fafd"/><rect width="1368" height="768" fill="url(#grid)"/>
+  <text x="28" y="58" class="t" font-size="40">LOOP SETUP — TASK CYCLE</text>
+  <text x="30" y="88" fill="#1b2f52" font-size="19">Starts with critique, ends with proof</text>
+
+  <!-- top row: 1..5 -->
+  <g>
+    <rect x="28" y="120" width="190" height="150" rx="14" class="box"/>
+    <circle cx="52" cy="144" r="14" class="num"/><text x="52" y="149" text-anchor="middle" class="nt">1</text>
+    <rect x="88" y="150" width="70" height="46" rx="12" fill="none" stroke="#1b2f52" stroke-width="2.5"/>
+    <circle cx="108" cy="173" r="3.5" fill="#1b2f52"/><circle cx="123" cy="173" r="3.5" fill="#1b2f52"/><circle cx="138" cy="173" r="3.5" fill="#1b2f52"/>
+    <text x="123" y="232" text-anchor="middle" class="b" font-weight="700" font-size="16">Intent</text>
+    <text x="123" y="252" text-anchor="middle" class="s">what should be true</text>
+
+    <rect x="260" y="120" width="190" height="150" rx="14" class="box"/>
+    <circle cx="284" cy="144" r="14" class="num"/><text x="284" y="149" text-anchor="middle" class="nt">2</text>
+    <circle cx="355" cy="178" r="30" fill="none" stroke="#1b2f52" stroke-width="2.5"/><circle cx="355" cy="178" r="18" fill="none" stroke="#1b2f52" stroke-width="2.5"/><circle cx="355" cy="178" r="6" fill="#1b2f52"/>
+    <text x="355" y="232" text-anchor="middle" class="b m" font-weight="700" font-size="15">/write-goal</text>
+    <text x="355" y="252" text-anchor="middle" class="s">a /goal with checks + budget</text>
+
+    <rect x="492" y="120" width="300" height="150" rx="14" class="teal"/>
+    <circle cx="516" cy="144" r="14" fill="#11807a"/><text x="516" y="149" text-anchor="middle" class="nt">3</text>
+    <g>
+      <circle cx="642" cy="214" r="5" fill="#11807a"/>
+      <path d="M642 214L560 176M642 214L585 160M642 214L614 150M642 214L642 147M642 214L670 150M642 214L699 160M642 214L724 176" stroke="#11807a" stroke-width="1.2" stroke-dasharray="3 3"/>
+      <circle cx="560" cy="176" r="10" class="agent"/><circle cx="585" cy="160" r="10" class="agent"/><circle cx="614" cy="150" r="10" class="agent"/><circle cx="642" cy="147" r="10" class="agent"/><circle cx="670" cy="150" r="10" class="agent"/><circle cx="699" cy="160" r="10" class="agent"/><circle cx="724" cy="176" r="10" class="agent"/>
+    </g>
+    <text x="642" y="240" text-anchor="middle" fill="#11807a" font-weight="800" font-size="16">Pre-critique</text>
+    <text x="642" y="258" text-anchor="middle" class="s">critic-panel · typed TRACE verdicts</text>
+
+    <rect x="834" y="120" width="230" height="150" rx="14" class="box"/>
+    <circle cx="858" cy="144" r="14" class="num"/><text x="858" y="149" text-anchor="middle" class="nt">4</text>
+    <rect x="924" y="140" width="50" height="62" rx="6" fill="none" stroke="#1b2f52" stroke-width="2.5"/>
+    <path d="M934 158H964M934 172H964M934 186H956" stroke="#1b2f52" stroke-width="2.5"/>
+    <text x="949" y="224" text-anchor="middle" class="b" font-weight="700" font-size="15">Plan: blockers +</text>
+    <text x="949" y="242" text-anchor="middle" class="b" font-weight="700" font-size="15">related important</text>
+    <text x="949" y="260" text-anchor="middle" class="s">nice-to-haves wait</text>
+
+    <rect x="1106" y="120" width="234" height="150" rx="14" class="box"/>
+    <circle cx="1130" cy="144" r="14" class="num"/><text x="1130" y="149" text-anchor="middle" class="nt">5</text>
+    <text x="1223" y="190" text-anchor="middle" fill="#1b2f52" font-weight="800" font-size="34" class="m">&lt;/&gt;</text>
+    <circle cx="1203" cy="208" r="7" fill="#d23b3b"/><circle cx="1243" cy="208" r="7" fill="#2f8a4b"/><path d="M1212 208H1234" stroke="#1b2f52" stroke-width="2" marker-end="url(#a)"/>
+    <text x="1223" y="240" text-anchor="middle" class="b" font-weight="700" font-size="16">TDD implementation</text>
+    <text x="1223" y="258" text-anchor="middle" class="s">failing test first, then the fix</text>
+  </g>
+  <path class="ln" d="M220 195H256" marker-end="url(#a)"/>
+  <path class="ln" d="M452 195H488" marker-end="url(#a)"/>
+  <path class="ln" d="M794 195H830" marker-end="url(#a)"/>
+  <path class="ln" d="M1066 195H1102" marker-end="url(#a)"/>
+  <path class="ln" d="M1290 272V420" marker-end="url(#a)"/>
+
+  <!-- bottom row: 10..6 (right to left) -->
+  <rect x="1150" y="424" width="190" height="160" rx="14" class="grn"/>
+  <circle cx="1174" cy="448" r="14" fill="#2f8a4b"/><text x="1174" y="453" text-anchor="middle" class="nt">6</text>
+  <g class="b" font-size="14">
+    <text x="1214" y="454">✓ typecheck</text><text x="1214" y="476">✓ lint</text><text x="1214" y="498">✓ test</text><text x="1214" y="520">✓ build</text><text x="1214" y="542">✓ e2e</text>
+  </g>
+  <text x="1245" y="570" text-anchor="middle" fill="#2f8a4b" font-weight="800" font-size="16">Verify</text>
+
+  <rect x="850" y="424" width="262" height="160" rx="14" class="teal"/>
+  <circle cx="874" cy="448" r="14" fill="#11807a"/><text x="874" y="453" text-anchor="middle" class="nt">7</text>
+  <g>
+    <circle cx="981" cy="518" r="5" fill="#11807a"/>
+    <path d="M981 518L912 484M981 518L934 468M981 518L958 458M981 518L981 455M981 518L1004 458M981 518L1028 468M981 518L1050 484" stroke="#11807a" stroke-width="1.2" stroke-dasharray="3 3"/>
+    <circle cx="912" cy="484" r="10" class="agent"/><circle cx="934" cy="468" r="10" class="agent"/><circle cx="958" cy="458" r="10" class="agent"/><circle cx="981" cy="455" r="10" class="agent"/><circle cx="1004" cy="458" r="10" class="agent"/><circle cx="1028" cy="468" r="10" class="agent"/><circle cx="1050" cy="484" r="10" class="agent"/>
+  </g>
+  <text x="981" y="550" text-anchor="middle" fill="#11807a" font-weight="800" font-size="16">Post-critique</text>
+  <text x="981" y="568" text-anchor="middle" class="s">the separate checker (records written)</text>
+  <path class="ln" d="M1148 504H1116" marker-end="url(#a)"/>
+
+  <g>
+    <path d="M700 430L790 504L700 578L610 504Z" fill="#fff" stroke="#1b2f52" stroke-width="2.5"/>
+    <circle cx="640" cy="448" r="14" class="num"/><text x="640" y="453" text-anchor="middle" class="nt">8</text>
+    <text x="700" y="500" text-anchor="middle" fill="#0f2347" font-weight="800" font-size="22">0</text>
+    <text x="700" y="522" text-anchor="middle" class="b" font-weight="700">blockers?</text>
+  </g>
+  <path class="ln" d="M848 504H794" marker-end="url(#a)"/>
+  <path d="M700 428V360H1180V276" fill="none" stroke="#d23b3b" stroke-width="2.5" stroke-dasharray="8 6" marker-end="url(#ar)"/>
+  <text x="740" y="350" fill="#d23b3b" font-weight="800" font-size="16">NO → fix and re-run (at most 3 rounds)</text>
+
+  <rect x="370" y="424" width="190" height="160" rx="14" class="grn"/>
+  <circle cx="394" cy="448" r="14" fill="#2f8a4b"/><text x="394" y="453" text-anchor="middle" class="nt">9</text>
+  <path d="M465 450L495 462V492C495 512 480 524 465 530C450 524 435 512 435 492V462Z" fill="none" stroke="#2f8a4b" stroke-width="3"/>
+  <path d="M451 490L462 501L481 480" fill="none" stroke="#2f8a4b" stroke-width="3.5"/>
+  <text x="465" y="556" text-anchor="middle" fill="#2f8a4b" font-weight="800" font-size="16" class="m">/qa-pass</text>
+  <text x="465" y="574" text-anchor="middle" class="s">pre-ship gate</text>
+  <path d="M606 504H564" stroke="#2f8a4b" stroke-width="2.5" stroke-dasharray="7 5" marker-end="url(#ag)"/>
+  <text x="585" y="494" text-anchor="middle" fill="#2f8a4b" font-weight="800" font-size="15">YES</text>
+
+  <rect x="28" y="424" width="300" height="160" rx="14" class="purp"/>
+  <circle cx="52" cy="448" r="14" fill="#5b3fb5"/><text x="52" y="453" text-anchor="middle" class="nt">10</text>
+  <path d="M120 470C120 455 150 452 158 468C166 452 196 455 196 470V505C186 498 168 498 158 508C148 498 130 498 120 505Z" fill="none" stroke="#5b3fb5" stroke-width="3"/>
+  <text x="178" y="550" text-anchor="middle" fill="#5b3fb5" font-weight="800" font-size="16" class="m">/dream</text>
+  <text x="178" y="568" text-anchor="middle" class="s">admit durable facts — each with a record</text>
+  <path class="ln" d="M368 504H332" marker-end="url(#a)"/>
+
+  <path d="M100 422V284" fill="none" stroke="#1b2f52" stroke-width="2.5" stroke-dasharray="8 6" marker-end="url(#a)"/>
+  <text x="112" y="350" class="b" font-weight="700">next task</text>
+  <text x="112" y="368" class="b" font-weight="700">starts smarter</text>
+
+  <!-- stores -->
+  <g>
+    <ellipse cx="300" cy="660" rx="140" ry="16" fill="#fff" stroke="#5b3fb5" stroke-width="2.5"/>
+    <path d="M160 660V720C160 742 440 742 440 720V660" fill="#fff" stroke="#5b3fb5" stroke-width="2.5"/>
+    <ellipse cx="300" cy="660" rx="140" ry="16" fill="#fff" stroke="#5b3fb5" stroke-width="2.5"/>
+    <text x="300" y="700" text-anchor="middle" fill="#5b3fb5" font-weight="700" font-size="15">Wiki memory</text>
+    <text x="300" y="720" text-anchor="middle" class="s m" fill="#5b3fb5">.claude/memory/ + TRACE store</text>
+  </g>
+  <path d="M90 586V690H156" fill="none" stroke="#5b3fb5" stroke-width="2.5" stroke-dasharray="7 5" marker-end="url(#ap)"/>
+  <g>
+    <ellipse cx="880" cy="660" rx="140" ry="16" fill="#fff" stroke="#2f8a4b" stroke-width="2.5"/>
+    <path d="M740 660V720C740 742 1020 742 1020 720V660" fill="#fff" stroke="#2f8a4b" stroke-width="2.5"/>
+    <ellipse cx="880" cy="660" rx="140" ry="16" fill="#fff" stroke="#2f8a4b" stroke-width="2.5"/>
+    <text x="880" y="700" text-anchor="middle" fill="#2f8a4b" font-weight="700" font-size="15">Evidence</text>
+    <text x="880" y="720" text-anchor="middle" class="s m" fill="#2f8a4b">docs/ story map</text>
+  </g>
+  <path d="M1245 586V690H1024" fill="none" stroke="#2f8a4b" stroke-width="2.5" marker-end="url(#ag)"/>
+
+  <rect x="466" y="618" width="246" height="128" rx="12" fill="#fff" stroke="#1b2f52" stroke-width="2"/>
+  <g font-size="13" fill="#1b2f52">
+    <rect x="482" y="638" width="30" height="5" fill="#11807a"/><text x="522" y="644">teal = fan-out critic</text>
+    <rect x="482" y="664" width="30" height="5" fill="#5b3fb5"/><text x="522" y="670">indigo = memory / judge</text>
+    <rect x="482" y="690" width="30" height="5" fill="#d23b3b"/><text x="522" y="696">red = blocker loop</text>
+    <rect x="482" y="716" width="30" height="5" fill="#2f8a4b"/><text x="522" y="722">green = evidence</text>
+  </g>
+</svg>

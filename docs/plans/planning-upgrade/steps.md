@@ -31,6 +31,7 @@ column is filled from `git log` once a step lands. Spec: `04-spec.md`.
 | S20 | M6 merge-commit policy + CI reaudit warning | .github/workflows/verify.yml, scripts/trace/cli.mjs | `vitest run scripts/trace/cli.test.mjs` | — | done | 1db1137 |
 | S21 | M7–M10 team docs: shared planning surface, story sync on main, /dream via PRs, "Working as a team" | docs/adoption-guide.md, .claude/commands/sync-story-status.md, .claude/commands/dream.md | `vitest run scripts/template-docs.test.mjs` | S18 | done | eaccaa7 |
 | S21.1 | How-to guide `docs/planning-guide.md` + infographic 5 (SVG source, PNG) linked from README | docs/planning-guide.md, docs/infographic-5-planning.svg, docs/infographic-5-planning.png, README.md | `vitest run scripts/template-docs.test.mjs` | S21 | done | 593eb49 |
+| S21.2 | Redraw infographics 1–4 as SVG + PNG with current facts; drift test for counts and story-map files | docs/infographic-1..4 (.svg, .png), README.md, scripts/template-docs.test.mjs | `vitest run scripts/template-docs.test.mjs` | S21.1 | done | (see git log) |
 
 Notes (decisions recorded with the user during the run):
 - **W0 vs. 100%:** the W0 qualifier would postpone new plan-lint errors and columns until one
