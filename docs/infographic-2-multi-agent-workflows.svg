@@ -1,0 +1,206 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1368 768" width="1368" height="768" font-family="DejaVu Sans, Arial, Helvetica, sans-serif">
+  <title>The 7 multi-agent workflows</title>
+  <desc>critic-panel in detail (lens fan-out, or one all-lens reviewer for a code-only round, dedup, a separate skeptic per blocker and per important finding up to the cap, the matrix, completion and TRACE records), and the other six workflows: scan-docs, gap-analysis, e2e-design, loop-iteration, improve-skills and trace-bench, with the model-tier legend.</desc>
+  <defs>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="#e3eaf3" stroke-width="1"/></pattern>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1b2f52"/></marker>
+    <marker id="at" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#11807a"/></marker>
+    <marker id="ap" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#5b3fb5"/></marker>
+    <style>
+      .t{fill:#0f2347;font-weight:800}
+      .b{fill:#1b2f52;font-size:13px}
+      .s{fill:#3c4f6e;font-size:11.5px}
+      .m{font-family:"DejaVu Sans Mono",Menlo,Consolas,monospace}
+      .panel{fill:#fff;stroke:#1b2f52;stroke-width:2}
+      .tc{fill:#e6f4f3;stroke:#11807a;stroke-width:2}
+      .pc{fill:#efeafb;stroke:#5b3fb5;stroke-width:2}
+      .ac{fill:#fdf3dd;stroke:#c48a0e;stroke-width:2}
+      .dc{fill:#fff;stroke:#1b2f52;stroke-width:2}
+      .lt{stroke:#11807a;stroke-width:1.6;fill:none}
+      .lp{stroke:#5b3fb5;stroke-width:1.6;fill:none}
+      .ln{stroke:#1b2f52;stroke-width:1.8;fill:none}
+      .pill{fill:#0f2347}
+      .pt{fill:#fff;font-weight:800;font-size:14px}
+    </style>
+  </defs>
+  <rect width="1368" height="768" fill="#f7fafd"/><rect width="1368" height="768" fill="url(#grid)"/>
+  <text x="28" y="56" class="t" font-size="38">7 MULTI-AGENT WORKFLOWS</text>
+  <text x="30" y="84" fill="#1b2f52" font-size="17">node = subagent with its own context · every checker returns a typed TRACE verdict</text>
+
+  <!-- ================= critic-panel ================= -->
+  <rect x="24" y="104" width="636" height="560" rx="16" class="panel"/>
+  <rect x="40" y="118" width="130" height="32" rx="16" class="pill"/><text x="105" y="140" text-anchor="middle" class="pt">critic-panel</text>
+  <text x="182" y="140" class="s">/critic-round · /multi-agent-dev · /qa-pass · /loop</text>
+
+  <rect x="40" y="340" width="74" height="64" rx="12" class="dc"/><text x="77" y="368" text-anchor="middle" class="b" font-weight="700">focus</text><text x="77" y="386" text-anchor="middle" class="s">+ priors</text>
+
+  <g font-size="12" fill="#11807a" font-weight="700">
+    <rect x="150" y="166" width="150" height="28" rx="8" class="tc"/><text x="225" y="185" text-anchor="middle">First-Time User</text>
+    <rect x="150" y="200" width="150" height="28" rx="8" class="tc"/><text x="225" y="219" text-anchor="middle">UX Flow</text>
+    <rect x="150" y="234" width="150" height="28" rx="8" class="tc"/><text x="225" y="253" text-anchor="middle">Designer</text>
+    <rect x="150" y="268" width="150" height="28" rx="8" class="tc"/><text x="225" y="287" text-anchor="middle">Art Direction</text>
+    <rect x="150" y="302" width="150" height="28" rx="8" class="tc"/><text x="225" y="321" text-anchor="middle">Frontend Arch</text>
+    <rect x="150" y="336" width="150" height="28" rx="8" class="tc"/><text x="225" y="355" text-anchor="middle">QA / E2E</text>
+    <rect x="150" y="370" width="150" height="28" rx="8" class="tc"/><text x="225" y="389" text-anchor="middle">Accessibility</text>
+    <rect x="150" y="404" width="150" height="28" rx="8" class="tc"/><text x="225" y="423" text-anchor="middle">Performance</text>
+    <rect x="150" y="438" width="150" height="28" rx="8" class="tc"/><text x="225" y="457" text-anchor="middle">Security</text>
+    <rect x="150" y="472" width="150" height="28" rx="8" class="tc"/><text x="225" y="491" text-anchor="middle">Regression</text>
+  </g>
+  <g class="lt">
+    <path d="M114 372L150 180"/><path d="M114 372L150 214"/><path d="M114 372L150 248"/><path d="M114 372L150 282"/><path d="M114 372L150 316"/>
+    <path d="M114 372L150 350"/><path d="M114 372L150 384"/><path d="M114 372L150 418"/><path d="M114 372L150 452"/><path d="M114 372L150 486"/>
+    <path d="M300 180L346 362"/><path d="M300 214L346 364"/><path d="M300 248L346 366"/><path d="M300 282L346 368"/><path d="M300 316L346 370"/>
+    <path d="M300 350L346 372"/><path d="M300 384L346 374"/><path d="M300 418L346 376"/><path d="M300 452L346 378"/><path d="M300 486L346 380"/>
+  </g>
+  <rect x="132" y="516" width="186" height="54" rx="10" fill="#fff" stroke="#11807a" stroke-width="2" stroke-dasharray="6 4"/>
+  <text x="225" y="537" text-anchor="middle" fill="#11807a" font-weight="700" font-size="12">code-only round:</text>
+  <text x="225" y="553" text-anchor="middle" fill="#11807a" font-weight="700" font-size="12">ONE all-lens reviewer</text>
+  <text x="225" y="586" text-anchor="middle" class="s">(uiInScope: false)</text>
+
+  <path d="M386 330L426 372L386 414L346 372Z" fill="#fff" stroke="#1b2f52" stroke-width="2"/>
+  <text x="386" y="376" text-anchor="middle" class="m" font-weight="700" font-size="11">dedup</text>
+  <text x="386" y="438" text-anchor="middle" class="s">plain code</text>
+
+  <g>
+    <rect x="452" y="230" width="104" height="48" rx="10" class="pc"/><text x="504" y="250" text-anchor="middle" fill="#5b3fb5" font-weight="700" font-size="12">skeptic</text><text x="504" y="266" text-anchor="middle" class="s">per blocker</text>
+    <rect x="452" y="348" width="104" height="48" rx="10" class="pc"/><text x="504" y="368" text-anchor="middle" fill="#5b3fb5" font-weight="700" font-size="12">skeptic</text><text x="504" y="384" text-anchor="middle" class="s">per important</text>
+    <rect x="452" y="466" width="104" height="48" rx="10" fill="#f2f4f8" stroke="#7a8aa3" stroke-width="1.5" stroke-dasharray="5 4"/><text x="504" y="486" text-anchor="middle" fill="#56647a" font-weight="700" font-size="12">past the cap</text><text x="504" y="502" text-anchor="middle" class="s">→ defer</text>
+  </g>
+  <path class="lp" d="M426 372L452 254" marker-end="url(#ap)"/>
+  <path class="lp" d="M426 372H448" marker-end="url(#ap)"/>
+  <path class="ln" d="M426 372L452 490" stroke-dasharray="5 4" marker-end="url(#a)"/>
+  <text x="504" y="226" text-anchor="middle" class="s">cap: 30 skeptics</text>
+
+  <rect x="572" y="206" width="78" height="330" rx="12" class="dc"/>
+  <text x="611" y="230" text-anchor="middle" class="b" font-weight="800">matrix</text>
+  <g font-size="11">
+    <circle cx="586" cy="252" r="6" fill="#d23b3b"/><text x="596" y="256" class="s">blocker</text>
+    <circle cx="586" cy="274" r="6" fill="#c48a0e"/><text x="596" y="278" class="s">import.</text>
+    <circle cx="586" cy="296" r="6" fill="#7a8aa3"/><text x="596" y="300" class="s">nice</text>
+  </g>
+  <line x1="580" y1="314" x2="642" y2="314" stroke="#d6dde8"/>
+  <text x="611" y="334" text-anchor="middle" class="s" font-weight="700">verdict</text>
+  <g font-size="10.5" class="m" fill="#1b2f52">
+    <text x="582" y="352">accept</text><text x="582" y="368">qualify</text><text x="582" y="384">revise</text><text x="582" y="400">defer</text><text x="582" y="416">reject</text>
+  </g>
+  <line x1="580" y1="430" x2="642" y2="430" stroke="#d6dde8"/>
+  <text x="611" y="450" text-anchor="middle" class="s" font-weight="700">records</text>
+  <text x="611" y="466" text-anchor="middle" class="s">pnpm trace</text>
+  <text x="611" y="482" text-anchor="middle" class="s">write</text>
+  <text x="611" y="508" text-anchor="middle" class="s" font-weight="700">completion</text>
+  <text x="611" y="524" text-anchor="middle" class="s m" font-size="10">accept?</text>
+  <path class="lp" d="M556 254H568" marker-end="url(#ap)"/>
+  <path class="lp" d="M556 372H568" marker-end="url(#ap)"/>
+  <path class="ln" d="M556 490H568" marker-end="url(#a)"/>
+
+  <text x="40" y="622" class="s">Clean only when completion is accept: no lens failed, no blocker confirmed, deferred or revised.</text>
+  <text x="40" y="640" class="s">Unchanged prior verdicts are reused on an identical tree (treeId) instead of re-verified.</text>
+
+  <!-- legend -->
+  <rect x="24" y="680" width="636" height="70" rx="14" class="panel"/>
+  <g font-size="13" fill="#1b2f52">
+    <rect x="44" y="700" width="30" height="6" fill="#11807a"/><text x="82" y="707">teal = sonnet (fan-out)</text>
+    <rect x="270" y="700" width="30" height="6" fill="#5b3fb5"/><text x="308" y="707">indigo = opus (judge)</text>
+    <rect x="44" y="726" width="30" height="6" fill="#c48a0e"/><text x="82" y="733">amber = session model</text>
+    <path d="M270 729L280 721L290 729L280 737Z" fill="#fff" stroke="#1b2f52" stroke-width="1.6"/><text x="308" y="733">diamond = plain code, no model</text>
+    <text x="556" y="720" class="s">override:</text><text x="556" y="736" class="s m">args.models</text>
+  </g>
+
+  <!-- ================= small panels ================= -->
+  <!-- 1 scan-docs -->
+  <rect x="680" y="104" width="326" height="204" rx="14" class="panel"/>
+  <circle cx="702" cy="130" r="13" class="pill"/><text x="702" y="135" text-anchor="middle" class="pt" font-size="13">1</text>
+  <rect x="722" y="116" width="102" height="28" rx="14" class="pill"/><text x="773" y="135" text-anchor="middle" class="pt" font-size="13">scan-docs</text>
+  <text x="834" y="135" class="s">per story</text>
+  <g>
+    <rect x="712" y="160" width="100" height="30" rx="8" class="tc"/><text x="762" y="180" text-anchor="middle" fill="#11807a" font-size="12" font-weight="700">evidence</text>
+    <rect x="712" y="200" width="100" height="30" rx="8" class="tc"/><text x="762" y="220" text-anchor="middle" fill="#11807a" font-size="12" font-weight="700">evidence</text>
+    <rect x="712" y="240" width="100" height="30" rx="8" class="tc"/><text x="762" y="260" text-anchor="middle" fill="#11807a" font-size="12" font-weight="700">evidence</text>
+    <rect x="862" y="160" width="128" height="30" rx="8" class="pc"/><text x="926" y="180" text-anchor="middle" fill="#5b3fb5" font-size="12" font-weight="700">status verifier</text>
+    <rect x="862" y="200" width="128" height="30" rx="8" class="pc"/><text x="926" y="220" text-anchor="middle" fill="#5b3fb5" font-size="12" font-weight="700">status verifier</text>
+    <rect x="862" y="240" width="128" height="30" rx="8" class="pc"/><text x="926" y="260" text-anchor="middle" fill="#5b3fb5" font-size="12" font-weight="700">status verifier</text>
+    <path class="ln" d="M814 175H858" marker-end="url(#a)"/><path class="ln" d="M814 215H858" marker-end="url(#a)"/><path class="ln" d="M814 255H858" marker-end="url(#a)"/>
+  </g>
+  <text x="696" y="294" class="s">/scan-project-docs · /sync-story-status</text>
+
+  <!-- 2 gap-analysis -->
+  <rect x="1022" y="104" width="326" height="204" rx="14" class="panel"/>
+  <circle cx="1044" cy="130" r="13" class="pill"/><text x="1044" y="135" text-anchor="middle" class="pt" font-size="13">2</text>
+  <rect x="1064" y="116" width="120" height="28" rx="14" class="pill"/><text x="1124" y="135" text-anchor="middle" class="pt" font-size="13">gap-analysis</text>
+  <g>
+    <rect x="1040" y="158" width="78" height="24" rx="7" class="tc"/><text x="1079" y="175" text-anchor="middle" fill="#11807a" font-size="11" font-weight="700">docs↔code</text>
+    <rect x="1040" y="188" width="78" height="24" rx="7" class="tc"/><text x="1079" y="205" text-anchor="middle" fill="#11807a" font-size="11" font-weight="700">edge cases</text>
+    <rect x="1040" y="218" width="78" height="24" rx="7" class="tc"/><text x="1079" y="235" text-anchor="middle" fill="#11807a" font-size="11" font-weight="700">UX/design</text>
+    <rect x="1040" y="248" width="78" height="24" rx="7" class="tc"/><text x="1079" y="265" text-anchor="middle" fill="#11807a" font-size="11" font-weight="700">ambiguity</text>
+    <rect x="1148" y="158" width="74" height="24" rx="7" class="pc"/><text x="1185" y="175" text-anchor="middle" fill="#5b3fb5" font-size="11" font-weight="700">skeptic</text>
+    <rect x="1148" y="188" width="74" height="24" rx="7" class="pc"/><text x="1185" y="205" text-anchor="middle" fill="#5b3fb5" font-size="11" font-weight="700">skeptic</text>
+    <rect x="1148" y="218" width="74" height="24" rx="7" class="pc"/><text x="1185" y="235" text-anchor="middle" fill="#5b3fb5" font-size="11" font-weight="700">skeptic</text>
+    <rect x="1148" y="248" width="74" height="24" rx="7" class="pc"/><text x="1185" y="265" text-anchor="middle" fill="#5b3fb5" font-size="11" font-weight="700">skeptic</text>
+    <path class="ln" d="M1118 170H1144" marker-end="url(#a)"/><path class="ln" d="M1118 200H1144" marker-end="url(#a)"/><path class="ln" d="M1118 230H1144" marker-end="url(#a)"/><path class="ln" d="M1118 260H1144" marker-end="url(#a)"/>
+    <rect x="1250" y="194" width="88" height="44" rx="9" class="pc"/><text x="1294" y="213" text-anchor="middle" fill="#5b3fb5" font-size="11.5" font-weight="700">synthesize</text><text x="1294" y="228" text-anchor="middle" class="s" font-size="10">order</text>
+    <path class="lp" d="M1222 170L1248 210"/><path class="lp" d="M1222 200L1248 212"/><path class="lp" d="M1222 230L1248 220"/><path class="lp" d="M1222 260L1248 226" marker-end="url(#ap)"/>
+  </g>
+  <text x="1038" y="294" class="s">/story-gap-analysis · licensed gaps only, advisory</text>
+
+  <!-- 3 e2e-design -->
+  <rect x="680" y="324" width="326" height="204" rx="14" class="panel"/>
+  <circle cx="702" cy="350" r="13" class="pill"/><text x="702" y="355" text-anchor="middle" class="pt" font-size="13">3</text>
+  <rect x="722" y="336" width="110" height="28" rx="14" class="pill"/><text x="777" y="355" text-anchor="middle" class="pt" font-size="13">e2e-design</text>
+  <g font-size="10.5" font-weight="700" fill="#11807a">
+    <rect x="696" y="380" width="66" height="22" rx="6" class="tc"/><text x="729" y="395" text-anchor="middle">happy</text>
+    <rect x="696" y="406" width="66" height="22" rx="6" class="tc"/><text x="729" y="421" text-anchor="middle">failure</text>
+    <rect x="696" y="432" width="66" height="22" rx="6" class="tc"/><text x="729" y="447" text-anchor="middle">edge</text>
+    <rect x="696" y="458" width="66" height="22" rx="6" class="tc"/><text x="729" y="473" text-anchor="middle">a11y</text>
+    <rect x="696" y="484" width="66" height="22" rx="6" class="tc"/><text x="729" y="499" text-anchor="middle">regression</text>
+  </g>
+  <path d="M812 403L840 431L812 459L784 431Z" fill="#fff" stroke="#1b2f52" stroke-width="2"/><text x="812" y="435" text-anchor="middle" class="m" font-size="9.5" font-weight="700">dedup</text>
+  <path class="lt" d="M762 391L786 425"/><path class="lt" d="M762 417L784 429"/><path class="lt" d="M762 443L784 433"/><path class="lt" d="M762 469L786 437"/><path class="lt" d="M762 495L788 441"/>
+  <rect x="862" y="410" width="74" height="42" rx="9" class="pc"/><text x="899" y="436" text-anchor="middle" fill="#5b3fb5" font-size="12" font-weight="700">judge</text>
+  <path class="ln" d="M840 431H858" marker-end="url(#a)"/>
+  <path class="ln" d="M936 431H952" marker-end="url(#a)"/><text x="956" y="428" class="s" font-size="10.5">licensed</text><text x="956" y="442" class="s" font-size="10.5">cases</text>
+  <text x="696" y="520" class="s">/multi-agent-e2e · only licensed cases are built</text>
+
+  <!-- 4 loop-iteration -->
+  <rect x="1022" y="324" width="326" height="204" rx="14" class="panel"/>
+  <circle cx="1044" cy="350" r="13" class="pill"/><text x="1044" y="355" text-anchor="middle" class="pt" font-size="13">4</text>
+  <rect x="1064" y="336" width="124" height="28" rx="14" class="pill"/><text x="1126" y="355" text-anchor="middle" class="pt" font-size="13">loop-iteration</text>
+  <text x="1196" y="355" class="s">per ready node</text>
+  <rect x="1040" y="394" width="92" height="56" rx="10" class="ac"/><text x="1086" y="418" text-anchor="middle" fill="#8a5f00" font-size="12" font-weight="700">implementer</text><text x="1086" y="436" text-anchor="middle" class="s" font-size="10.5">own worktree</text>
+  <path d="M1190 386L1228 422L1190 458L1152 422Z" fill="#fff" stroke="#1b2f52" stroke-width="2"/><text x="1190" y="419" text-anchor="middle" class="m" font-size="9" font-weight="700">denylist</text><text x="1190" y="431" text-anchor="middle" class="m" font-size="9" font-weight="700">+ base</text>
+  <rect x="1246" y="394" width="92" height="56" rx="10" class="pc"/><text x="1292" y="418" text-anchor="middle" fill="#5b3fb5" font-size="12" font-weight="700">verifier</text><text x="1292" y="436" text-anchor="middle" class="s" font-size="10.5">real diff</text>
+  <path class="ln" d="M1132 422H1148" marker-end="url(#a)"/><path class="ln" d="M1228 422H1242" marker-end="url(#a)"/>
+  <text x="1038" y="490" class="s">/loop at L2/L3 · items from pnpm trace plan-items</text>
+  <text x="1038" y="508" class="s">the Lead applies and CLEARs, never the maker</text>
+
+  <!-- 5 improve-skills -->
+  <rect x="680" y="544" width="326" height="206" rx="14" class="panel"/>
+  <circle cx="702" cy="570" r="13" class="pill"/><text x="702" y="575" text-anchor="middle" class="pt" font-size="13">5</text>
+  <rect x="722" y="556" width="124" height="28" rx="14" class="pill"/><text x="784" y="575" text-anchor="middle" class="pt" font-size="13">improve-skills</text>
+  <g font-size="11" font-weight="700" fill="#11807a">
+    <rect x="696" y="604" width="88" height="24" rx="7" class="tc"/><text x="740" y="621" text-anchor="middle">lens</text>
+    <rect x="696" y="634" width="88" height="24" rx="7" class="tc"/><text x="740" y="651" text-anchor="middle">lens</text>
+    <rect x="696" y="664" width="88" height="24" rx="7" class="tc"/><text x="740" y="681" text-anchor="middle">lens</text>
+  </g>
+  <rect x="820" y="614" width="80" height="54" rx="9" class="pc"/><text x="860" y="638" text-anchor="middle" fill="#5b3fb5" font-size="12" font-weight="700">skeptic</text><text x="860" y="654" text-anchor="middle" class="s" font-size="10">per finding</text>
+  <path class="lt" d="M784 616L818 632"/><path class="lt" d="M784 646H816" marker-end="url(#at)"/><path class="lt" d="M784 676L818 656"/>
+  <rect x="918" y="614" width="76" height="54" rx="9" class="dc"/><text x="956" y="638" text-anchor="middle" class="b" font-size="11.5" font-weight="700">proposed</text><text x="956" y="654" text-anchor="middle" class="b" font-size="11.5" font-weight="700">edits</text>
+  <path class="ln" d="M900 641H914" marker-end="url(#a)"/>
+  <text x="696" y="716" class="s">/improve-skills (manual-only) · our own prompts</text>
+  <text x="696" y="734" class="s">applied only after you confirm</text>
+
+  <!-- 6 trace-bench -->
+  <rect x="1022" y="544" width="326" height="206" rx="14" class="panel"/>
+  <circle cx="1044" cy="570" r="13" class="pill"/><text x="1044" y="575" text-anchor="middle" class="pt" font-size="13">6</text>
+  <rect x="1064" y="556" width="110" height="28" rx="14" class="pill"/><text x="1119" y="575" text-anchor="middle" class="pt" font-size="13">trace-bench</text>
+  <text x="1182" y="575" class="s">seeded fixtures</text>
+  <g font-size="11" font-weight="700">
+    <rect x="1040" y="600" width="118" height="26" rx="7" class="pc"/><text x="1099" y="618" text-anchor="middle" fill="#5b3fb5">loop verifier</text>
+    <rect x="1040" y="632" width="118" height="26" rx="7" class="tc"/><text x="1099" y="650" text-anchor="middle" fill="#11807a">single-pass</text>
+    <rect x="1040" y="664" width="118" height="26" rx="7" fill="#fff" stroke="#11807a" stroke-width="2" stroke-dasharray="5 4"/><text x="1099" y="682" text-anchor="middle" fill="#11807a">panel (opt-in)</text>
+  </g>
+  <path d="M1220 609L1258 645L1220 681L1182 645Z" fill="#fff" stroke="#1b2f52" stroke-width="2"/><text x="1220" y="642" text-anchor="middle" class="m" font-size="9" font-weight="700">bench-</text><text x="1220" y="654" text-anchor="middle" class="m" font-size="9" font-weight="700">score</text>
+  <path class="ln" d="M1158 613L1186 637"/><path class="ln" d="M1158 645H1180" marker-end="url(#a)"/><path class="ln" d="M1158 677L1186 653"/>
+  <path class="ln" d="M1258 645H1270" marker-end="url(#a)"/><text x="1274" y="640" class="s" font-size="10.5">flags,</text><text x="1274" y="654" class="s" font-size="10.5">record</text>
+  <text x="1038" y="716" class="s">/bench-checkers (manual-only) · blind to answers</text>
+  <text x="1038" y="734" class="s">pnpm trace l3-check gates L3</text>
+</svg>

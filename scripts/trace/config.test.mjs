@@ -3,6 +3,7 @@
 // Portable: an adopter who copies scripts/trace/ keeps these checks; the settings checks skip
 // while the project has no .claude/settings.json, the routing checks without a skills index.
 import { describe, it, expect } from "vitest";
+import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ROOT } from "./lib.mjs";
@@ -173,3 +174,17 @@ describe.skipIf(!existsSync(SKILLS_INDEX) || !existsSync(COMMANDS))("manual-only
     expect(["dream.md", "multi-agent-dev.md"].filter((f) => existsSync(join(COMMANDS, f)) && manualOnly(f))).toEqual([]);
   });
 });
+
+// M4 (docs/plans/planning-upgrade/03-multi-developer.md): the append-only logs merge as a union,
+// like the record store, so two branches that each append an entry never conflict.
+describe("union merge for the append-only files (.gitattributes)", () => {
+  const attr = (path) => spawnSync("git", ["check-attr", "merge", "--", path], { cwd: ROOT, encoding: "utf8" });
+  const inGit = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], { cwd: ROOT, encoding: "utf8" }).stdout?.trim() === "true";
+
+  it.skipIf(!inGit)("the record store, the loop run log and the wiki log are merge=union", () => {
+    for (const p of [".claude/memory/trace/records.jsonl", ".claude/memory/loop-run-log.md", ".claude/memory/log.md"]) {
+      expect(attr(p).stdout.trim(), p).toBe(`${p}: merge: union`);
+    }
+  });
+});
+

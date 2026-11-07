@@ -6,7 +6,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendActions, loadEntries, loadSchema, readPolicyVersion, replay, writeRecords } from "./lib.mjs";
-import { DEFAULT_PLAN, NOT_READY, STATUSES, dependents, parsePlan, planItems, planViolations, readyIds } from "./plan.mjs";
+import { DEFAULT_PLAN, NOT_READY, STATUSES, conflictFreeBatch, newNodeId, parseRunLog, dependents, planDrift, planStatus, scopesOverlap, parsePlan, planItems, planViolations, readyIds } from "./plan.mjs";
 
 const HEADER = "| id | description | after | status | record | missing | origin | notes |\n|---|---|---|---|---|---|---|---|";
 const planText = (...rows) => `# Loop Plan\n\n## Plan\n_Some prose before the table._\n\n${HEADER}\n${rows.join("\n")}\n`;
@@ -18,7 +18,7 @@ const row = (id, cells = {}) => {
 const plan = (...rows) => parsePlan(planText(...rows));
 // Every lint message starts with its rule tag, then the node id when it is about one node.
 const rulesOf = (msgs) => msgs.map((m) => /^\[([a-z-]+)\]/.exec(m)?.[1]);
-const flagged = (msgs, rule) => [...new Set(msgs.filter((m) => m.startsWith(`[${rule}] `)).map((m) => /^\[[a-z-]+\] (LP-\d+)/.exec(m)?.[1]))];
+const flagged = (msgs, rule) => [...new Set(msgs.filter((m) => m.startsWith(`[${rule}] `)).map((m) => /^\[[a-z-]+\] (LP-[0-9a-f]+)/.exec(m)?.[1]))];
 
 describe("parsePlan", () => {
   it("the committed plan parses, and only rows under its '## Plan' heading are nodes (its schema table and fenced example are not)", () => {
@@ -57,6 +57,19 @@ describe("parsePlan", () => {
     }
   });
 
+  it("the 10-column header adds scope (comma-separated paths) and check; the legacy 8-column header stays valid (back-compat)", () => {
+    const H10 = "| id | description | after | status | record | missing | origin | notes | scope | check |\n|---|---|---|---|---|---|---|---|---|---|";
+    const p = parsePlan(`## Plan\n\n${H10}\n| LP-001 | fix it | — | ready | | | human | | src/a.ts, src/a.test.ts | pnpm vitest run src/a.test.ts |\n`);
+    expect(p.errors).toEqual([]);
+    expect(p.nodes[0]).toMatchObject({ id: "LP-001", scope: ["src/a.ts", "src/a.test.ts"], check: "pnpm vitest run src/a.test.ts" });
+    const legacy = plan(row("LP-001"));
+    expect(legacy.errors).toEqual([]);
+    expect(legacy.nodes[0]).toMatchObject({ scope: [], check: "" });
+    expect(planViolations(legacy).errors).toEqual([]);
+    // A 10-column table needs 10 cells per row.
+    expect(rulesOf(parsePlan(`## Plan\n\n${H10}\n${row("LP-001")}\n`).errors)).toEqual(["cells"]);
+  });
+
   it("a row without 8 cells is an error and is not read as a node", () => {
     const p = plan(row("LP-001"), "| LP-002 | too few | ready |");
     expect(rulesOf(p.errors)).toEqual(["cells"]);
@@ -66,6 +79,25 @@ describe("parsePlan", () => {
   it("an id that is not LP- and 3 or more digits, or a duplicate id, is an error", () => {
     const p = plan(row("LP-001"), row("LP-1"), row("lp-002"), row("LP-001"), row("LP-1000"));
     expect(rulesOf(p.errors).sort()).toEqual(["duplicate-id", "id", "id"]);
+  });
+
+  it("M1: a collision-free LP-<4-6 hex> id is valid next to legacy LP-NNN ids; two branches that both add one id fail [duplicate-id] after the merge", () => {
+    const p = plan(row("LP-001"), row("LP-a3f9c2"), row("LP-0b1e", { after: "LP-a3f9c2", status: "blocked" }));
+    expect(p.errors).toEqual([]);
+    expect(planViolations(p).errors).toEqual([]);
+    for (const bad of ["LP-A3F9", "LP-a3f", "LP-a3f9c2d", "LP-g123"]) expect(rulesOf(plan(row(bad)).errors), bad).toEqual(["id"]);
+    // Branch A and branch B each append "the next" sequential id; the union of their tables holds it twice.
+    const merged = plan(row("LP-001"), row("LP-002"), row("LP-004", { description: "A's node" }), row("LP-004", { description: "B's node" }));
+    expect(rulesOf(merged.errors)).toEqual(["duplicate-id"]);
+  });
+
+  it("newNodeId hashes the description, creator and time into LP-<6 hex>, and steps past an id already taken", () => {
+    const at = "2026-11-06T12:00:00.000Z";
+    const a = newNodeId("Fix the empty-name crash", { owner: "ana", now: at });
+    expect(a).toMatch(/^LP-[0-9a-f]{6}$/);
+    expect(newNodeId("Fix the empty-name crash", { owner: "ana", now: at })).toBe(a); // deterministic
+    expect(newNodeId("Fix the empty-name crash", { owner: "ben", now: at })).not.toBe(a); // two people never collide on one description
+    expect(newNodeId("Fix the empty-name crash", { owner: "ana", now: at, taken: new Set([a]) })).not.toBe(a);
   });
 
   it("fails closed without a '## Plan' table, and on rows split off the table by a blank line", () => {
@@ -123,7 +155,8 @@ describe("readyIds (loop-plan.md's ready-node rule, in table order)", () => {
     const doc = readFileSync(DEFAULT_PLAN, "utf8");
     const example = /## Example[^\n]*\n```\n([\s\S]*?)\n```/.exec(doc)?.[1].split("\n") ?? [];
     expect(example).toHaveLength(4);
-    const p = plan(...example);
+    const H10 = "| id | description | after | status | record | missing | origin | notes | scope | check |\n|---|---|---|---|---|---|---|---|---|---|";
+    const p = parsePlan(`## Plan\n\n${H10}\n${example.join("\n")}\n`);
     expect(p.errors).toEqual([]);
     expect(readyIds(p.nodes)).toEqual(["LP-002"]);
   });
@@ -156,6 +189,46 @@ describe("readyIds (loop-plan.md's ready-node rule, in table order)", () => {
     const p = plan(row("LP-001", { status: "todo" }), row("LP-002", { status: "Ready" }), row("LP-003", { status: "in progress" }), row("LP-004"));
     expect(readyIds(p.nodes)).toEqual(["LP-004"]);
     for (const status of NOT_READY) expect(readyIds(plan(row("LP-001", { status })).nodes), status).toEqual([]);
+  });
+});
+
+describe("conflictFreeBatch (plan-ready --batch N)", () => {
+  const H10 = "| id | description | after | status | record | missing | origin | notes | scope | check |\n|---|---|---|---|---|---|---|---|---|---|";
+  const nodesOf = (...pairs) => parsePlan(`## Plan\n\n${H10}\n${pairs.map(([id, scope]) => `| ${id} | w | — | ready | | | human | | ${scope} | pnpm test |`).join("\n")}\n`).nodes;
+
+  it("overlap: the same file, a directory and a file in it, a glob and a file it matches, two globs with nested static prefixes", () => {
+    expect(scopesOverlap(["src/a.ts"], ["./src/a.ts"])).toBe(true);
+    expect(scopesOverlap(["src/lib"], ["src/lib/x.ts"])).toBe(true);
+    expect(scopesOverlap(["src/**/*.ts"], ["src/lib/x.ts"])).toBe(true);
+    expect(scopesOverlap(["src/*.css"], ["src/lib/x.ts"])).toBe(false);
+    expect(scopesOverlap(["src/lib/*"], ["src/**/*.test.ts"])).toBe(true);
+    expect(scopesOverlap(["src/a.ts"], ["src/ab.ts"])).toBe(false);
+    expect(scopesOverlap(["e2e/x.spec.ts"], ["src/a.ts", "src/b.ts"])).toBe(false);
+  });
+
+  it("brace and bracket globs fail closed (they overlap whatever shares their static prefix), and a brace's commas never split the scope cell", () => {
+    expect(scopesOverlap(["src/{a,b}.ts"], ["src/a.ts"])).toBe(true);
+    expect(scopesOverlap(["src/[ab].ts"], ["src/a.ts"])).toBe(true);
+    expect(scopesOverlap(["src/{a,b}/**"], ["src/a/x.ts"])).toBe(true);
+    expect(scopesOverlap(["src/{a,b}.ts"], ["e2e/x.spec.ts"])).toBe(false); // a different static prefix still never overlaps
+    const nodes = nodesOf(["LP-001", "src/{a,b}.ts, e2e/x.ts"], ["LP-002", "src/a.ts"]);
+    expect(nodes[0].scope).toEqual(["src/{a,b}.ts", "e2e/x.ts"]);
+    expect(conflictFreeBatch(nodes, ["LP-001", "LP-002"], 5).batch).toEqual(["LP-001"]);
+  });
+
+  it("filters conflicts greedily in priority order and only then truncates to N, naming what each skipped id conflicts with", () => {
+    const nodes = nodesOf(["LP-001", "src/a.ts"], ["LP-002", "src/a.ts, src/b.ts"], ["LP-003", "src/c.ts"], ["LP-004", "src/**/*.css"], ["LP-005", "e2e/x.spec.ts"]);
+    const { batch, skipped } = conflictFreeBatch(nodes, ["LP-001", "LP-002", "LP-003", "LP-004", "LP-005"], 3);
+    expect(batch).toEqual(["LP-001", "LP-003", "LP-004"]); // LP-002 is filtered first, then the batch is cut at 3
+    expect(skipped).toEqual([{ id: "LP-002", conflictsWith: "LP-001" }]);
+  });
+
+  it("an empty scope conflicts with everything: such a node is dispatched alone (fail closed)", () => {
+    const nodes = nodesOf(["LP-001", "—"], ["LP-002", "src/a.ts"], ["LP-003", "src/b.ts"]);
+    expect(conflictFreeBatch(nodes, ["LP-001", "LP-002", "LP-003"], 5).batch).toEqual(["LP-001"]);
+    const later = conflictFreeBatch(nodes, ["LP-002", "LP-001", "LP-003"], 5);
+    expect(later.batch).toEqual(["LP-002", "LP-003"]);
+    expect(later.skipped).toEqual([{ id: "LP-001", conflictsWith: "LP-002" }]);
   });
 });
 
@@ -209,6 +282,54 @@ describe("plan-lint: structural rules", () => {
   it("deferred or escalated with an empty missing", () => {
     const { errors } = lint(row("LP-001", { status: "deferred" }), row("LP-002", { status: "escalated" }), row("LP-003", { status: "deferred", missing: "a unit test run" }));
     expect(flagged(errors, "missing")).toEqual(["LP-001", "LP-002"]);
+  });
+
+  it("[check]: a ready node with an empty check fails --pre-dispatch; [scope]: an empty scope on a ready node warns there", () => {
+    const H10 = "| id | description | after | status | record | missing | origin | notes | scope | check |\n|---|---|---|---|---|---|---|---|---|---|";
+    const p = parsePlan(`## Plan\n\n${H10}\n| LP-001 | a | — | ready | | | human | | src/a.ts | pnpm vitest run src/a.test.ts |\n| LP-002 | b | — | ready | | | human | | src/b.ts | — |\n| LP-003 | c | — | ready | | | human | | — | pnpm lint |\n| LP-004 | d | LP-002 | blocked | | | human | | — | — |\n`);
+    expect(planViolations(p)).toEqual({ errors: [], warnings: [] }); // both are dispatch-time rules
+    const pre = planViolations(p, undefined, { preDispatch: true });
+    expect(flagged(pre.errors, "check")).toEqual(["LP-002"]);
+    expect(flagged(pre.warnings, "scope")).toEqual(["LP-003"]);
+  });
+
+  it("[oversize]: a ready node whose scope lists more than 3 paths fails --pre-dispatch (maxScope 1 at L3)", () => {
+    const H10 = "| id | description | after | status | record | missing | origin | notes | scope | check |\n|---|---|---|---|---|---|---|---|---|---|";
+    const r = (id, scope, status = "ready") => `| ${id} | w | — | ${status} | | | human | | ${scope} | pnpm test |`;
+    const p = parsePlan(`## Plan\n\n${H10}\n${[r("LP-001", "a, b, c"), r("LP-002", "a, b, c, d"), r("LP-003", "a, b, c, d, e", "blocked"), r("LP-004", "src/x.ts"), r("LP-005", "src/*.ts")].join("\n")}\n`);
+    expect(planViolations(p).errors).toEqual([]);
+    expect(flagged(planViolations(p, undefined, { preDispatch: true }).errors, "oversize")).toEqual(["LP-002"]);
+    expect(flagged(planViolations(p, undefined, { preDispatch: true, maxScope: 1 }).errors, "oversize")).toEqual(["LP-001", "LP-002", "LP-005"]); // a glob is never 1 file
+  });
+
+  it("[done-when]: under --pre-dispatch, a ready or blocked node whose description has no 'done when:' clause warns (any case, any dash before it)", () => {
+    const p = plan(
+      row("LP-001", { description: "Fix the empty-name crash — done when: an empty name renders the fallback" }),
+      row("LP-002", { description: "Fix the empty-name crash - Done When: the unit test for '' passes" }),
+      row("LP-003", { description: "Fix the empty-name crash" }),
+      row("LP-004", { description: "Add the E2E", status: "blocked", after: "LP-003" }),
+      row("LP-005", { description: "Old work", status: "dropped" }),
+    );
+    expect(planViolations(p)).toEqual({ errors: [], warnings: [] });
+    const pre = planViolations(p, undefined, { preDispatch: true });
+    expect(flagged(pre.warnings, "done-when")).toEqual(["LP-003", "LP-004"]);
+    expect(rulesOf(pre.errors).filter((r) => r === "done-when")).toEqual([]); // never an error
+  });
+
+  it("story tokens: origin 'story:US-NNN#ACk' parses to node.story; [story-dangling] warns on an unknown story or AC, only when story ids are passed in", () => {
+    const p = plan(
+      row("LP-001", { origin: "plan:docs/stories/US-001 2026-11-06 story:US-001#AC2" }),
+      row("LP-002", { origin: "story:US-009#AC1" }),
+      row("LP-003", { origin: "story:US-001#AC7" }),
+      row("LP-004", { origin: "story:US-001" }),
+    );
+    expect(p.nodes[0].story).toEqual([{ id: "US-001", ac: 2 }]);
+    expect(p.nodes[3].story).toEqual([{ id: "US-001", ac: null }]);
+    expect(planViolations(p)).toEqual({ errors: [], warnings: [] }); // no story ids passed in: nothing checked
+    const stories = new Map([["US-001", new Set([1, 2, 3, 4])]]);
+    const { errors, warnings } = planViolations(p, undefined, { stories });
+    expect(errors).toEqual([]);
+    expect(flagged(warnings, "story-dangling")).toEqual(["LP-002", "LP-003"]);
   });
 
   it("stranded: in the chain A (escalated) ← B ← C, B and C are flagged, while a deferred ancestor strands nothing", () => {
@@ -349,7 +470,8 @@ describe("plan-lint: TRACE cross-checks (a temp store written by writeRecords / 
     // accept and the node goes back to ready with that revise. Left on the accept, the next verdict would fork the chain.
     const failedCheck = (id) => {
       const applied = write(loopRec(id));
-      const revise = write(loopRec(id, { final_status: "revise", repair: "the unit test still fails on an empty name", reason: "the smallest relevant check failed after the apply", revises: applied }));
+      // The Lead writes this revise (writer loop/post-apply:<node>), so plan-lint can tell it from a verifier's revise.
+      const revise = write(loopRec(id, { writer_id: `loop/post-apply:${id}`, final_status: "revise", repair: "the unit test still fails on an empty name", reason: "the smallest relevant check failed after the apply", revises: applied }));
       act(revise, "HOLD", id);
       return { applied, revise };
     };
@@ -523,6 +645,347 @@ describe("plan-lint: TRACE cross-checks (a temp store written by writeRecords / 
     ]);
     expect(rulesOf(errors)).toEqual(["attempts", "attempts", "attempts"]);
     expect(flagged(errors, "attempts")).toEqual(["LP-001", "LP-004", "LP-005"]);
+  });
+
+  it("the attempt budget counts every attempt: revises (a failed post-apply check, a released revise) count like defers, on any live node", () => {
+    const revRec = (id, repair, over = {}) => loopRec(id, { final_status: "revise", repair, reason: `not as written: ${repair}`, ...over });
+    // LP-001: 2 defers + 2 revises (one the Lead's failed post-apply check) = 4 attempts, still live.
+    write(deferRec("LP-001", "evidence 0"));
+    write(deferRec("LP-001", "evidence 1"));
+    write(revRec("LP-001", "keep the old key"));
+    const fourth = write(revRec("LP-001", "the post-apply check failed: unit", { writer_id: "loop/post-apply:LP-001" }));
+    act(fourth, "HOLD", "LP-001");
+    // LP-002: 2 defers + 1 revise = 3 attempts: within the budget.
+    write(deferRec("LP-002", "evidence 0"));
+    write(deferRec("LP-002", "evidence 1"));
+    const third = write(revRec("LP-002", "the post-apply check failed: lint", { writer_id: "loop/post-apply:LP-002" }));
+    act(third, "HOLD", "LP-002");
+    // LP-003: 4 attempts and in-progress — dispatching it a fifth time is past the budget too.
+    for (let i = 0; i < 4; i += 1) write(deferRec("LP-003", `evidence ${i}`));
+    const { errors } = lint([
+      row("LP-001", { record: fourth, missing: "the post-apply check failed: unit", notes: "attempt 4" }),
+      row("LP-002", { record: third, missing: "the post-apply check failed: lint", notes: "attempt 3" }),
+      row("LP-003", { status: "in-progress", notes: "attempt 5" }),
+    ]);
+    expect(flagged(errors, "attempts")).toEqual(["LP-001", "LP-003"]);
+    expect(errors.find((e) => e.startsWith("[attempts] LP-001"))).toContain("4 attempts");
+  });
+
+  it("[unsupported-reset]: a ready or blocked node may not cite a HOLDed escalation-grade record unless a human released it", () => {
+    const actNote = (record_id, action, ref, consumer, note) => {
+      const [res] = appendActions([{ record_id, consumer, action, ref, note }], ctx());
+      expect(res.validation).toBe("pass");
+    };
+    const revise = write(loopRec("LP-001", { final_status: "revise", repair: "keep the old key", reason: "not as written" }));
+    act(revise, "HOLD", "LP-001");
+    const reject = write(criticRec({ claim_id: "critic:security:x", final_status: "reject", reason: "refuted" }));
+    act(reject, "HOLD", "LP-002");
+    const human = write(deferRec("LP-003", "a human decision to change the storage key"));
+    act(human, "HOLD", "LP-003");
+    const denied = write(deferRec("LP-004", "escalate: denylist path", { writer_id: "loop-iteration/denylist-gate:LP-004-0" }));
+    act(denied, "HOLD", "LP-004");
+    const released = write(loopRec("LP-005", { final_status: "revise", repair: "split the change", reason: "not as written" }));
+    act(released, "HOLD", "LP-005");
+    actNote(released, "HOLD", "LP-005", "human", "release: retry with the smaller change");
+    const postApply = write(loopRec("LP-006", { final_status: "revise", repair: "the post-apply check failed: unit", reason: "check failed", writer_id: "loop/post-apply:LP-006" }));
+    act(postApply, "HOLD", "LP-006");
+    const { errors } = lint([
+      row("LP-001", { record: revise, missing: "keep the old key" }),
+      row("LP-002", { status: "blocked", after: "LP-006", record: reject, missing: "a human decision on: refuted", origin: `critic:security rec:${reject}` }),
+      row("LP-003", { record: human, missing: "a human decision to change the storage key" }),
+      row("LP-004", { record: denied, missing: "escalate: denylist path" }),
+      row("LP-005", { record: released, missing: "split the change", notes: "released by a human" }),
+      row("LP-006", { record: postApply, missing: "the post-apply check failed: unit" }),
+    ]);
+    expect(flagged(errors, "unsupported-reset")).toEqual(["LP-001", "LP-002", "LP-003", "LP-004"]);
+  });
+
+  it("[unsupported-reset]: a ready node on its own HOLDed defer must cite newer evidence, except for the infra-path resets", () => {
+    const plainDefer = (id) => {
+      const r = write(deferRec(id, "a unit test run"));
+      act(r, "HOLD", id);
+      return r;
+    };
+    const stale = plainDefer("LP-001");
+    const fresh = plainDefer("LP-002");
+    const newer = write(criticRec({ claim_id: "critic:qa-e2e:unit-run" })); // written after LP-002's defer
+    const older = write(criticRec({ claim_id: "critic:qa-e2e:older" }));
+    const tooOld = plainDefer("LP-003"); // LP-003 cites only a record written before its defer
+    const infra = write(deferRec("LP-004", "re-run the workflow", { failed_gates: ["agent-failed"] }));
+    act(infra, "HOLD", "LP-004");
+    const apply = write(deferRec("LP-005", "a diff based on the current tree", { writer_id: "loop/apply-check:LP-005" }));
+    act(apply, "HOLD", "LP-005");
+    const base = write(deferRec("LP-006", "a diff based on HEAD", { failed_gates: ["base-mismatch"] }));
+    act(base, "HOLD", "LP-006");
+    const logged = plainDefer("LP-007");
+    const { errors } = lint([
+      row("LP-001", { record: stale, missing: "a unit test run", notes: "reset" }),
+      row("LP-002", { record: fresh, missing: "a unit test run", notes: `reset citing ${newer}` }),
+      row("LP-003", { record: tooOld, missing: "a unit test run", notes: `reset citing ${older}` }),
+      row("LP-004", { record: infra, missing: "re-run the workflow", notes: `reset citing ${infra}` }),
+      row("LP-005", { record: apply, missing: "a diff based on the current tree" }),
+      row("LP-006", { record: base, missing: "a diff based on HEAD", notes: "worktree.baseRef set" }),
+      row("LP-007", { record: logged, missing: "a unit test run", notes: "infra error reset, run-log [2026-10-07 12:00]" }),
+    ]);
+    expect(flagged(errors, "unsupported-reset")).toEqual(["LP-001", "LP-003"]);
+  });
+
+  it("[reused-id] is an error when a node that is not done cites its own CLEARed record (a done node moved back)", () => {
+    const old = write(loopRec("LP-001"));
+    act(old, "CLEAR", "LP-001");
+    const { errors, warnings } = lint([row("LP-001", { record: old })]);
+    expect(flagged(errors, "reused-id")).toEqual(["LP-001"]);
+    expect(warnings.filter((w) => w.startsWith("[reused-id]"))).toEqual([]);
+  });
+
+  it("[verified-unlanded] warns on a live node whose newest own record is a verifier accept with no CLEAR and no HOLD", () => {
+    const orphan = write(loopRec("LP-001")); // accepted, then the run died before the apply
+    const held = write(loopRec("LP-002"));
+    act(held, "HOLD", "LP-002"); // HOLDed as orphaned: no longer looks like a live licence
+    const landed = write(loopRec("LP-003"));
+    act(landed, "CLEAR", "LP-003");
+    const { errors, warnings } = lint([
+      row("LP-001", { notes: "reset after an interrupted run" }),
+      row("LP-002", { notes: "orphaned accept HOLDed" }),
+      row("LP-003", { status: "done", record: landed }),
+    ]);
+    expect(errors).toEqual([]);
+    expect(flagged(warnings, "verified-unlanded")).toEqual(["LP-001"]);
+    const msg = warnings.find((w) => w.startsWith("[verified-unlanded]"));
+    expect(msg).toContain(orphan);
+    expect(msg).toContain("abc1234def56"); // the record's provenance commit: resume only when HEAD equals it
+  });
+
+  it("readyIds ranks by the origin record's severity (blocker, important, then the rest and human), table order breaking ties", () => {
+    const important = write(criticRec({ claim_id: "critic:a:important", severity: "important" }));
+    const blocker = write(criticRec({ claim_id: "critic:a:blocker", severity: "blocker" }));
+    const nice = write(criticRec({ claim_id: "critic:a:nice", severity: "nice-to-have" }));
+    const nodes = plan(
+      row("LP-001", { origin: "human" }),
+      row("LP-002", { origin: `critic:a rec:${important}` }),
+      row("LP-003", { origin: `critic:a rec:${nice}` }),
+      row("LP-004", { origin: `critic:a rec:${blocker}` }),
+      row("LP-005", { origin: `critic:a rec:${important}` }),
+      row("LP-006", { status: "blocked", after: "LP-001", origin: `critic:a rec:${blocker}` }),
+    ).nodes;
+    expect(readyIds(nodes)).toEqual(["LP-001", "LP-002", "LP-003", "LP-004", "LP-005"]); // no store: table order
+    expect(readyIds(nodes, { state: replayed() })).toEqual(["LP-004", "LP-002", "LP-005", "LP-001", "LP-003"]);
+    expect(readyIds(nodes, { state: replayed(), max: 2 })).toEqual(["LP-004", "LP-002"]);
+  });
+
+  describe("split on failure (dropped parent + 'split from' children)", () => {
+    const revRec = (id, repair) => loopRec(id, { final_status: "revise", repair, reason: "not as written" });
+    // A parent LP-001 whose own revise asks for a split, HOLDed for it, and two children LP-002/LP-003.
+    const setup = () => {
+      const trigger = write(revRec("LP-001", "too large: split the parser and the renderer"));
+      act(trigger, "HOLD", "LP-001");
+      return trigger;
+    };
+    const parent = (t, notes = "split into LP-002, LP-003") => row("LP-001", { status: "dropped", record: t, notes });
+    const child = (id, t, cells = {}) => row(id, { origin: `split from LP-001 rec:${t}`, ...cells });
+
+    it("a valid split lints clean, with dependents re-pointed to every child (or the last of a chained set)", () => {
+      const t = setup();
+      expect(lint([parent(t), child("LP-002", t), child("LP-003", t), row("LP-004", { status: "blocked", after: "LP-002, LP-003" })]).errors).toEqual([]);
+      const chained = [parent(t), child("LP-002", t), child("LP-003", t, { status: "blocked", after: "LP-002" }), row("LP-004", { status: "blocked", after: "LP-003" })];
+      expect(lint(chained).errors).toEqual([]);
+    });
+
+    it("a split into hex ids that start with digits (LP-123abc) parses whole: no false [split] error", () => {
+      const t = setup();
+      const rows = [
+        row("LP-001", { status: "dropped", record: t, notes: "split into LP-123abc, LP-456def" }),
+        row("LP-123abc", { origin: `split from LP-001 rec:${t}` }),
+        row("LP-456def", { origin: `split from LP-001 rec:${t}` }),
+      ];
+      expect(lint(rows).errors).toEqual([]);
+    });
+
+    it("[split]: the parent must be dropped, list 2–4 children that exist and name it; a dependent may not point at only part of an unchained set", () => {
+      const t = setup();
+      const errs = (rows) => flagged(lint(rows).errors, "split");
+      expect(errs([row("LP-001", { record: t, notes: "split into LP-002, LP-003" }), child("LP-002", t), child("LP-003", t)])).toContain("LP-001"); // not dropped
+      expect(errs([parent(t, "split into LP-002, LP-009"), child("LP-002", t)])).toContain("LP-001"); // LP-009 missing
+      expect(errs([parent(t, "split into LP-002"), child("LP-002", t)])).toContain("LP-001"); // one child is no split
+      expect(errs([parent(t), child("LP-002", t), child("LP-003", t), child("LP-005", t)])).toContain("LP-005"); // not listed by the parent
+      expect(errs([parent(t), child("LP-002", t), child("LP-003", t), row("LP-004", { status: "blocked", after: "LP-003" })])).toContain("LP-004"); // last of an unchained set
+    });
+
+    it("[split-origin]: the child cites the parent's own revise with a repair, or its defer naming scope — never a reject, a human-decision defer or another claim", () => {
+      const scoped = write(deferRec("LP-011", "a smaller scope: split the change"));
+      act(scoped, "HOLD", "LP-011");
+      const ok = [row("LP-011", { status: "dropped", record: scoped, notes: "split into LP-012, LP-013" }), row("LP-012", { origin: `split from LP-011 rec:${scoped}` }), row("LP-013", { origin: `split from LP-011 rec:${scoped}` })];
+      expect(lint(ok).errors).toEqual([]);
+      const rejected = write(loopRec("LP-021", { final_status: "reject", reason: "wrong approach" }));
+      act(rejected, "HOLD", "LP-021");
+      const human = write(deferRec("LP-031", "a human decision to change the storage key"));
+      act(human, "HOLD", "LP-031");
+      const other = write(criticRec());
+      const children = (pid, rec) => [row(`${pid.slice(0, 5)}8`, { origin: `split from ${pid} rec:${rec}` }), row(`${pid.slice(0, 5)}9`, { origin: `split from ${pid} rec:${rec}` })];
+      for (const [pid, rec] of [["LP-021", rejected], ["LP-031", human], ["LP-041", other]]) {
+        const rows = [row(pid, { status: "dropped", record: rec, notes: `split into ${pid.slice(0, 5)}8, ${pid.slice(0, 5)}9` }), ...children(pid, rec)];
+        expect(flagged(lint(rows).errors, "split-origin"), pid).toEqual([`${pid.slice(0, 5)}8`, `${pid.slice(0, 5)}9`]);
+      }
+    });
+
+    it("[split-depth]: a split of a split of a split is refused (at most 2 levels)", () => {
+      const t1 = setup();
+      const t2 = write(revRec("LP-002", "still too large"));
+      act(t2, "HOLD", "LP-002");
+      const t3 = write(revRec("LP-005", "still too large again"));
+      act(t3, "HOLD", "LP-005");
+      const rows = [
+        parent(t1),
+        child("LP-002", t1, { status: "dropped", record: t2, notes: "split into LP-005, LP-006" }),
+        child("LP-003", t1),
+        row("LP-005", { status: "dropped", record: t3, origin: `split from LP-002 rec:${t2}`, notes: "split into LP-007, LP-008" }),
+        row("LP-006", { origin: `split from LP-002 rec:${t2}` }),
+        row("LP-007", { origin: `split from LP-005 rec:${t3}` }),
+        row("LP-008", { origin: `split from LP-005 rec:${t3}` }),
+      ];
+      expect(flagged(lint(rows).errors, "split-depth")).toEqual(["LP-007", "LP-008"]);
+    });
+
+    it("children inherit the parent's attempts plus one for the split; [split-of] stops a drop-and-recreate from resetting them", () => {
+      const t = setup(); // 1 attempt on LP-001
+      write(deferRec("LP-002", "evidence 0"));
+      write(deferRec("LP-002", "evidence 1")); // LP-002: 2 own + 1 inherited + 1 split = 4 > 3
+      const rows = [parent(t), child("LP-002", t), child("LP-003", t)];
+      expect(flagged(lint(rows).errors, "attempts")).toEqual(["LP-002"]);
+      const finding = write(criticRec({ claim_id: "critic:qa-e2e:recreated" }));
+      write(deferRec("LP-051", "evidence 0"));
+      const recreated = [row("LP-051", { status: "dropped", origin: `critic:qa-e2e rec:${finding}` }), row("LP-052", { origin: `critic:qa-e2e rec:${finding}` })];
+      expect(flagged(lint(recreated).errors, "split-of")).toEqual(["LP-052"]);
+    });
+  });
+
+  it("[origin] (plan review gate): under --pre-dispatch a live node's origin is a licensing critic record, a valid cascade/split, a /plan-nodes entry or a human", () => {
+    const licensed = write(criticRec({ claim_id: "critic:a:licensed" }));
+    const deferred = write(criticRec({ claim_id: "critic:a:deferred", final_status: "defer", missing: ["an E2E run"] }));
+    act(deferred, "HOLD", "LP-005");
+    const unheld = write(criticRec({ claim_id: "critic:a:unheld", final_status: "defer", missing: ["an E2E run"] }));
+    const loopOwn = write(loopRec("LP-090"));
+    const rows = [
+      row("LP-001", { origin: `critic:a rec:${licensed}` }),
+      row("LP-002", { origin: "human" }),
+      row("LP-003", { origin: "human:goal 2026-11-06" }),
+      row("LP-004", { origin: "plan:docs/stories/US-001 2026-11-06 story:US-001#AC1" }),
+      row("LP-005", { record: deferred, missing: "an E2E run", origin: `critic:a rec:${deferred}`, notes: `reset citing ${licensed}` }),
+      row("LP-006", { origin: `critic:a rec:${unheld}` }),
+      row("LP-007", { origin: "re-plan" }),
+      row("LP-008", { origin: `loop rec:${loopOwn}` }),
+      row("LP-009", { status: "dropped", origin: "re-plan" }), // not live: not gated
+      row("LP-010", { status: "blocked", after: "LP-009", origin: "cascade from LP-099" }),
+    ];
+    expect(flagged(lint(rows).errors, "origin")).toEqual([]); // a dispatch-time gate
+    expect(flagged(lint(rows, { preDispatch: true }).errors, "origin")).toEqual(["LP-006", "LP-007", "LP-008", "LP-010"]);
+  });
+
+  it("planDrift (advisory): a done node's CLEARed diff paths outside its scope, and the nodes added, removed or moved since a base plan", () => {
+    const H10 = "| id | description | after | status | record | missing | origin | notes | scope | check |\n|---|---|---|---|---|---|---|---|---|---|";
+    const inScope = write(loopRec("LP-001", { evidence: [{ kind: "diff", ref: "src/a.ts, src/a.test.ts" }] }));
+    act(inScope, "CLEAR", "LP-001");
+    const drifted = write(loopRec("LP-002", { evidence: [{ kind: "diff", ref: "src/b.ts, src/lib/other.ts" }] }));
+    act(drifted, "CLEAR", "LP-002");
+    const t = (...rows) => parsePlan(`## Plan\n\n${H10}\n${rows.join("\n")}\n`).nodes;
+    const now = t(
+      `| LP-001 | a | — | done | ${inScope} | | human | | src/a.ts, src/a.test.ts | pnpm test |`,
+      `| LP-002 | b | — | done | ${drifted} | | human | | src/b.ts | pnpm test |`,
+      "| LP-004 | d | — | ready | | | human | | src/d.ts | pnpm test |",
+    );
+    const base = t("| LP-002 | b | — | ready | | | human | | src/b.ts | pnpm test |", "| LP-003 | c | — | ready | | | human | | src/c.ts | pnpm test |");
+    expect(planDrift(now, base, replayed())).toEqual({
+      outOfScope: [{ id: "LP-002", record: drifted, paths: ["src/lib/other.ts"] }],
+      added: ["LP-001", "LP-004"],
+      removed: ["LP-003"],
+      changed: [{ id: "LP-002", from: "ready", to: "done" }],
+    });
+    expect(planDrift(now, null, replayed())).toMatchObject({ added: [], removed: [], changed: [] }); // no base: only the scope drift
+  });
+
+  it("planStatus: a read-only rollup per status and story, with claims and their age, oversize nodes and attempts, labelled consistency, not truth", () => {
+    const H10 = "| id | description | after | status | record | missing | origin | notes | scope | check |\n|---|---|---|---|---|---|---|---|---|---|";
+    write(deferRec("LP-002", "evidence 0"));
+    const nodes = parsePlan(
+      `## Plan\n\n${H10}\n` +
+        [
+          "| LP-001 | a | — | in-progress | | | story:US-001#AC1 | claim:ana@20261106-1000 | src/a.ts | pnpm test |",
+          "| LP-002 | b | — | ready | | | story:US-001#AC2 | | a, b, c, d | pnpm test |",
+          "| LP-003 | c | — | done | | | story:US-002 | | src/c.ts | pnpm test |",
+        ].join("\n") +
+        "\n",
+    ).nodes;
+    const st = planStatus(nodes, replayed(), { now: new Date(Date.UTC(2026, 10, 6, 12, 30)) });
+    expect(st.note).toMatch(/consistency, not truth/);
+    expect(st.byStatus).toEqual({ "in-progress": 1, ready: 1, done: 1 });
+    expect(st.byStory).toEqual({ "US-001": { open: ["LP-001", "LP-002"], done: [] }, "US-002": { open: [], done: ["LP-003"] } });
+    expect(st.claims).toEqual([{ id: "LP-001", owner: "ana", runId: "20261106-1000", ageHours: 2.5 }]);
+    expect(st.oversize).toEqual(["LP-002"]);
+    expect(st.attempts).toEqual([{ id: "LP-002", attempts: 1 }]);
+  });
+
+  describe("M2/M5 owner-aware claims (claim:<owner>@<run-id> in notes)", () => {
+    const LOG = [
+      "# Loop run log",
+      "",
+      "## [2026-11-06 10:00] L2 | ana's closed run",
+      "- owner: ana",
+      "- next: stop",
+      "",
+      "## [2026-11-06 11:00] L2 | ben's open entry",
+      "- owner: ben",
+      "- actions: report only",
+      "",
+    ].join("\n");
+    const runs = parseRunLog(LOG);
+    const ip = (id, notes) => row(id, { status: "in-progress", notes });
+
+    it("parseRunLog keys each entry by owner@run-id (the header's timestamp) and says whether it closed (a next: line)", () => {
+      expect(runs.get("ana@20261106-1000")).toEqual({ closed: true });
+      expect(runs.get("ben@20261106-1100")).toEqual({ closed: false });
+    });
+
+    it("an own claim with no run entry, or a closed one, is stale; another owner's claim is live unless that owner's entry closed", () => {
+      const rows = [
+        ip("LP-001", "claim:ana@20261106-1000"), // own, run closed → stale
+        ip("LP-002", "claim:ana@20261106-1300"), // own, no entry (a crashed run) → stale
+        ip("LP-003", "claim:ben@20261106-1300"), // ben's, no entry yet (his run is live) → claimed
+        ip("LP-004", "claim:ben@20261106-1100"), // ben's, entry not closed → claimed
+        ip("LP-005", "attempt 1"), // unclaimed (legacy) → the plain rule
+      ];
+      const { errors, warnings } = lint(rows, { preDispatch: true, owner: "ana", runs });
+      expect(flagged(errors, "in-progress")).toEqual(["LP-001", "LP-002", "LP-005"]);
+      expect(flagged(warnings, "in-progress-claimed")).toEqual(["LP-003", "LP-004"]);
+      expect(warnings.find((w) => w.startsWith("[in-progress-claimed] LP-003"))).toMatch(/never reset another owner's node/);
+      // ben's closed run frees his node for anyone.
+      const closed = parseRunLog(`${LOG}\n## [2026-11-06 13:00] L2 | ben again\n- owner: ben\n- next: stop\n`);
+      expect(flagged(lint([ip("LP-003", "claim:ben@20261106-1300")], { preDispatch: true, owner: "ana", runs: closed }).errors, "in-progress")).toEqual(["LP-003"]);
+    });
+
+    it("[claim-conflict]: two owners claiming one node is an error, with or without --pre-dispatch", () => {
+      const { errors } = lint([ip("LP-001", "claim:ana@20261106-1000; claim:ben@20261106-1005"), ip("LP-002", "claim:ana@20261106-1000")], { owner: "ana", runs });
+      expect(flagged(errors, "claim-conflict")).toEqual(["LP-001"]);
+    });
+  });
+
+  it("back-compat: a legacy 8-column plan with LP-NNN ids in every status, and its existing records, lints clean and builds the same item shape", () => {
+    const accepted = write(loopRec("LP-001"));
+    act(accepted, "CLEAR", "LP-001");
+    const deferred = write(deferRec("LP-003", "a unit test run"));
+    act(deferred, "HOLD", "LP-003");
+    const escalated = write(loopRec("LP-004", { final_status: "reject", reason: "wrong approach" }));
+    act(escalated, "HOLD", "LP-004");
+    const rows = [
+      row("LP-001", { status: "done", record: accepted }),
+      row("LP-002", { status: "blocked", after: "LP-003" }),
+      row("LP-003", { status: "deferred", record: deferred, missing: "a unit test run" }),
+      row("LP-004", { status: "escalated", record: escalated, missing: "a human decision on: wrong approach" }),
+      row("LP-005", { status: "dropped" }),
+      row("LP-006", { after: "LP-001" }),
+    ];
+    expect(lint(rows)).toEqual({ errors: [], warnings: [] });
+    expect(replayed().errors).toEqual([]);
+    expect(planItems(plan(...rows).nodes, ["LP-006"], replayed()).items).toEqual([{ id: "LP-006", description: "work for LP-006" }]);
   });
 
   it("in-progress is a warning by default and an error with preDispatch", () => {

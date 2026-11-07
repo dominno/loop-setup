@@ -15,6 +15,7 @@ catalog so both you and Claude can route to the right command.
 ## Pick by intent
 - **Start a non-trivial task — let Claude write the goal** → `/write-goal`
 - **Build or change something non-trivial** → `/multi-agent-dev`
+- **Plan work for the loop (story/spec → plan nodes, confirmed one by one)** → `/plan-nodes` (how-to: `docs/planning-guide.md`)
 - **Just review, don't change code** → `/critic-round`
 - **Add/expand end-to-end tests** → `/multi-agent-e2e`
 - **localhost is broken** → `/fix-localhost`
@@ -58,6 +59,7 @@ catalog so both you and Claude can route to the right command.
 |---|---|---|
 | `/write-goal` | Start of a non-trivial task: turn a described outcome into a production-grade `/goal` (or `/loop`) prompt to review and run | `[outcome]` (say "loop" for a /loop) |
 | `/multi-agent-dev` | Default for any non-trivial feature, bug fix, or UI change; ends with browser + test evidence | `[task]` |
+| `/plan-nodes` | Turn a story, spec or goal into proposed loop-plan nodes (scope, check, after, story link); each is appended only after you confirm it — for work meant to run through `/loop` | `[story id \| spec path \| goal]` |
 | `/critic-round` | Read-only review of the current app/flow; returns a findings matrix, changes no code | `[focus]` |
 | `/multi-agent-e2e` | A user flow needs new or expanded Playwright E2E coverage | `[target flow]` |
 | `/qa-pass` | Final pre-ship gate before committing a change set | `[scope]` |

@@ -247,6 +247,90 @@ describe("plan commands (CLI process)", () => {
     expect(trace(["plan-ready", "--max", "0", "--plan", p]).status).toBe(2);
   });
 
+  it("plan-ready ranks the ready ids by their origin record's severity from the replayed store, and exits 2 when the store does not replay", () => {
+    expect(trace(["write", "-"], draft({ writer_id: "critic-panel/verify:a-0", claim_id: "critic:a:blocker", severity: "blocker" })).status).toBe(0);
+    const [blocker] = JSON.parse(trace(["query", "--json"]).stdout).map((r) => r.record_id);
+    const p = writePlan("| LP-001 | first | — | ready | | | human | |", `| LP-002 | second | — | ready | | | critic:a rec:${blocker} | |`);
+    expect(JSON.parse(trace(["plan-ready", "--plan", p]).stdout)).toEqual(["LP-002", "LP-001"]);
+    writeFileSync(store, `${readFileSync(store, "utf8")}not json\n`);
+    const broken = trace(["plan-ready", "--plan", p]);
+    expect(broken.status).toBe(2);
+    expect(broken.stdout).toBe("");
+  });
+
+  it("plan-lint --pre-dispatch --max-scope 1 (the L3 ceiling) fails a ready node with two scope paths; a value above 3 is a usage error", () => {
+    const H10 = "| id | description | after | status | record | missing | origin | notes | scope | check |\n|---|---|---|---|---|---|---|---|---|---|";
+    const p = join(dir, "loop-plan-scope.md");
+    writeFileSync(p, `## Plan\n\n${H10}\n| LP-001 | w | — | ready | | | human | | src/a.ts, src/a.test.ts | pnpm test |\n`);
+    expect(trace(["plan-lint", "--pre-dispatch", "--plan", p]).status).toBe(0);
+    const l3 = trace(["plan-lint", "--pre-dispatch", "--max-scope", "1", "--plan", p]);
+    expect(l3.status).toBe(1);
+    expect(l3.stderr).toMatch(/\[oversize\] LP-001/);
+    expect(trace(["plan-lint", "--pre-dispatch", "--max-scope", "4", "--plan", p]).status).toBe(2);
+  });
+
+  it("plan-ready --batch N prints a conflict-free batch by scope and names each skipped id on stderr; --batch with --max is a usage error", () => {
+    const H10 = "| id | description | after | status | record | missing | origin | notes | scope | check |\n|---|---|---|---|---|---|---|---|---|---|";
+    const p = join(dir, "loop-plan-batch.md");
+    writeFileSync(p, `## Plan\n\n${H10}\n| LP-001 | a | — | ready | | | human | | src/a.ts | pnpm test |\n| LP-002 | b | — | ready | | | human | | src/a.ts | pnpm test |\n| LP-003 | c | — | ready | | | human | | src/c.ts | pnpm test |\n`);
+    const out = trace(["plan-ready", "--batch", "5", "--plan", p]);
+    expect(out.status).toBe(0);
+    expect(JSON.parse(out.stdout)).toEqual(["LP-001", "LP-003"]);
+    expect(out.stderr).toMatch(/skip: LP-002 conflicts with LP-001/);
+    expect(trace(["plan-ready", "--batch", "5", "--max", "2", "--plan", p]).status).toBe(2);
+    expect(trace(["plan-ready", "--batch", "0", "--plan", p]).status).toBe(2);
+  });
+
+  it("plan-lint reads the story ids from docs/stories and warns [story-dangling]; story-lint --plan lists open nodes per story", () => {
+    const p = writePlan("| LP-001 | a | — | ready | | | story:US-001#AC1 | |", "| LP-002 | b | — | ready | | | story:US-999#AC1 | |");
+    const out = trace(["plan-lint", "--plan", p]);
+    expect(out.status).toBe(0);
+    expect(out.stderr).toMatch(/warn: \[story-dangling\] LP-002/);
+    expect(out.stderr).not.toMatch(/\[story-dangling\] LP-001/);
+    const stories = trace(["story-lint", "--plan", p]);
+    expect(stories.stderr).toMatch(/warn: \[plan-nodes\] US-001 .*LP-001/);
+  });
+
+  it("plan-drift is advisory: exit 0 with the drift JSON against --base-plan, labelled consistency, not truth", () => {
+    const now = writePlan("| LP-001 | a | — | ready | | | human | |", "| LP-002 | b | — | ready | | | human | |");
+    const base = writePlan("| LP-001 | a | — | blocked | | | human | |");
+    const out = trace(["plan-drift", "--plan", now, "--base-plan", base]);
+    expect(out.status).toBe(0);
+    const j = JSON.parse(out.stdout);
+    expect(j).toMatchObject({ added: ["LP-002"], removed: [], changed: [{ id: "LP-001", from: "blocked", to: "ready" }] });
+    expect(j.note).toMatch(/consistency, not truth/);
+  });
+
+  it("status prints the read-only rollup (exit 0), and exits 2 when the store does not replay", () => {
+    const p = writePlan("| LP-001 | a | — | ready | | | human | |", "| LP-002 | b | LP-001 | blocked | | | human | |");
+    const out = trace(["status", "--plan", p]);
+    expect(out.status).toBe(0);
+    expect(JSON.parse(out.stdout)).toMatchObject({ byStatus: { ready: 1, blocked: 1 }, note: expect.stringMatching(/consistency, not truth/) });
+    writeFileSync(store, "not json\n", { flag: "a" });
+    expect(trace(["status", "--plan", p]).status).toBe(2);
+  });
+
+  it("plan-id prints a fresh LP-<6 hex> id not in the plan or the store (owner from LOOP_OWNER)", () => {
+    const p = writePlan("| LP-001 | a | — | ready | | | human | |");
+    const out = spawnSync(process.execPath, [CLI, "plan-id", "Fix the empty-name crash", "--plan", p], { encoding: "utf8", env: { ...process.env, TRACE_STORE: store, LOOP_OWNER: "ana" } });
+    expect(out.status).toBe(0);
+    expect(out.stdout.trim()).toMatch(/^LP-[0-9a-f]{6}$/);
+    expect(trace(["plan-id"]).status).toBe(2); // a description is required
+  });
+
+  it("claim-token prints claim:<owner>@<YYYYMMDD-HHMM>; plan-lint reads --run-log to tell a live claim from a stale one", () => {
+    const env = { ...process.env, TRACE_STORE: store, LOOP_OWNER: "ana" };
+    const tok = spawnSync(process.execPath, [CLI, "claim-token"], { encoding: "utf8", env });
+    expect(tok.status).toBe(0);
+    expect(tok.stdout.trim()).toMatch(/^claim:ana@\d{8}-\d{4}$/);
+    const log = join(dir, "run-log.md");
+    writeFileSync(log, "## [2026-11-06 11:00] L2 | ben\n- owner: ben\n- actions: x\n");
+    const p = writePlan("| LP-001 | a | — | in-progress | | | human | claim:ben@20261106-1100 |");
+    const out = spawnSync(process.execPath, [CLI, "plan-lint", "--pre-dispatch", "--plan", p, "--run-log", log], { encoding: "utf8", env });
+    expect(out.status).toBe(0); // ben's live claim only warns: it is not ana's to reset
+    expect(out.stderr).toMatch(/\[in-progress-claimed\] LP-001/);
+  });
+
   it("plan-lint exits 1 naming the rule when a done node cites a defer record, 0 on a consistent plan, and 2 when the store does not replay", () => {
     expect(trace(["write", "-"], draft({ writer_id: "loop-iteration/verify:LP-001-0", claim_id: "loop:lp-001", claim_type: "practical", final_status: "defer", missing: ["a unit test run"], evidence: [] })).status).toBe(0);
     const id = JSON.parse(trace(["query", "--json"]).stdout)[0].record_id;
@@ -1034,6 +1118,29 @@ describe("CLI wiring, end to end in a throwaway repo", () => {
     }
   });
 
+  it("reaudit --claim-prefix story: lists (and --act notes) only the story-status claims whose evidence changed", () => {
+    const r = tempRepo();
+    try {
+      mkdirSync(join(r.d, "src"), { recursive: true });
+      writeFileSync(join(r.d, "src", "a.ts"), "export const a = 1;\n");
+      r.git("add", "-A");
+      r.git("commit", "-qm", "cited file");
+      const fact = (claim) => JSON.stringify({ writer_id: "test", claim_id: claim, claim_text: claim, claim_type: "factual", evidence: [{ kind: "file_line", ref: "src/a.ts:1" }], final_status: "accept", reason: "r", provenance: { workflow: "test" } });
+      for (const c of ["story:us-001:status", "cli:other"]) expect(r.cli(["write", "-"], fact(c)).status).toBe(0);
+      writeFileSync(join(r.d, "src", "a.ts"), "export const a = 2;\n");
+      expect(JSON.parse(r.cli(["reaudit"]).stdout).map((c) => c.claim_id).sort()).toEqual(["cli:other", "story:us-001:status"]);
+      const only = r.cli(["reaudit", "--claim-prefix", "story:"]);
+      expect(only.status).toBe(0);
+      expect(JSON.parse(only.stdout).map((c) => c.claim_id)).toEqual(["story:us-001:status"]);
+      expect(r.cli(["reaudit", "--claim-prefix", "story:", "--act"]).status).toBe(0);
+      const acted = readFileSync(join(r.d, "store.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l)).filter((e) => e.kind === "action");
+      expect(acted).toHaveLength(1);
+      expect(r.cli(["reaudit", "--claim-prefix"]).status).toBe(2); // a missing prefix is a usage error
+    } finally {
+      r.cleanup();
+    }
+  });
+
   it("reaudit lists a record whose commit was squashed away as `unreachable`, apart from changed evidence, and --act notes it so", () => {
     const r = tempRepo();
     try {
@@ -1056,6 +1163,10 @@ describe("CLI wiring, end to end in a throwaway repo", () => {
       expect(byClaim["cli:squashed"].changed).toBeUndefined();
       expect(byClaim["cli:changed"]).toMatchObject({ changed: ["src/b.ts"] });
       expect(byClaim["cli:changed"].unreachable).toBeUndefined();
+      // M6: --unreachable keeps only the squashed-away provenance; --annotate prints a GitHub warning per record, exit 0.
+      const unreach = r.cli(["reaudit", "--unreachable", "--annotate"]);
+      expect(unreach.status).toBe(0);
+      expect(unreach.stdout.trim().split("\n")).toEqual([expect.stringMatching(/^::warning title=TRACE provenance unreachable::cli:squashed .*squash/)]);
       expect(r.cli(["reaudit", "--act"]).status).toBe(0);
       const notes = readFileSync(join(r.d, "store.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l)).filter((e) => e.kind === "action").map((a) => a.note);
       expect(notes.sort()).toEqual(["evidence changed: src/b.ts", `provenance commit ${byClaim["cli:squashed"].unreachable} is unreachable — re-verify: src/a.ts`]);

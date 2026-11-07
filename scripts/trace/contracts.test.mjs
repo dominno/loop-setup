@@ -30,7 +30,7 @@ import {
   readPolicyVersion,
   replay,
 } from "./lib.mjs";
-import { DEFAULT_PLAN, NOT_READY, STATUSES, parsePlan, planViolations } from "./plan.mjs";
+import { DEFAULT_PLAN, NOT_READY, STATUSES, parsePlan, planViolations, PLAN_COLUMNS_FULL } from "./plan.mjs";
 import { STORY_MAP_PATHS, STORY_STATUSES, storyMapViolations } from "./story-map.mjs";
 
 const WF_DIR = join(ROOT, ".claude/workflows");
@@ -194,6 +194,12 @@ describe("committed loop plan ↔ plan.mjs", () => {
   it("the committed plan and store pass plan-lint with no errors", () => {
     const state = replay(loadEntries(DEFAULT_STORE), schema, readPolicyVersion());
     expect(planViolations(parsePlan(doc), state).errors).toEqual([]);
+  });
+
+  it("the Node schema table documents every column of the plan header, in order, and the live table uses the full header", () => {
+    const schemaTable = doc.slice(doc.indexOf("## Node schema"), doc.indexOf("**Status meaning**"));
+    expect([...schemaTable.matchAll(/^\| `([a-z]+)` \|/gm)].map((m) => m[1])).toEqual(PLAN_COLUMNS_FULL);
+    expect(doc).toContain(`| ${PLAN_COLUMNS_FULL.join(" | ")} |`);
   });
 
   it("the documented status list and the ready rule's excluded set match the plan.mjs constants", () => {

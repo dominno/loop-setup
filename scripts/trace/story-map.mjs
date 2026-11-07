@@ -132,7 +132,7 @@ function tableIn(file, need, errors) {
  * A second **Final status:** label is listed in extraFinal (the first one counts).
  */
 export function parseStory({ path, text }) {
-  const story = { id: FILE_RE.exec(String(path).split("/").pop())?.[1] ?? null, path, finalLine: null, status: null, record: null, unchecked: [], extraFinal: [] };
+  const story = { id: FILE_RE.exec(String(path).split("/").pop())?.[1] ?? null, path, finalLine: null, status: null, record: null, unchecked: [], acs: [], extraFinal: [] };
   const recordOf = (value, line) => {
     const v = norm(value);
     const ids = [...new Set(v.match(TR_RE) || [])];
@@ -157,6 +157,8 @@ export function parseStory({ path, text }) {
       continue;
     }
     if (section === "acceptance criteria" && UNCHECKED_RE.test(t)) story.unchecked.push({ line: l.line, text: t });
+    const ac = section === "acceptance criteria" ? /^[-*+]\s+\[[ xX]\]\s+AC(\d+)\b/.exec(t) : null;
+    if (ac) story.acs.push(Number(ac[1]));
     if (!inFinal() || !t) continue;
     const rec = RECORD_RE.exec(t);
     if (rec) story.record ??= recordOf(rec[1], l.line);
@@ -175,7 +177,7 @@ export function parseStory({ path, text }) {
  * highest status any of the three places claims, so a raised projection is checked for the evidence
  * and the licensing record it claims, not only reported as a mismatch.
  */
-export function storyMapViolations(map = {}, state = EMPTY_STATE, { specExists = () => false } = {}) {
+export function storyMapViolations(map = {}, state = EMPTY_STATE, { specExists = () => false, planNodes } = {}) {
   const errors = [];
   const warnings = [];
   const file = (key) => ({ path: map[key]?.path ?? STORY_MAP_PATHS[key], text: map[key]?.text ?? null });
@@ -321,6 +323,17 @@ export function storyMapViolations(map = {}, state = EMPTY_STATE, { specExists =
     const latest = state.latestOfClaim.get(claim);
     if (latest && latest !== c.id) {
       warnings.push(`[latest] ${c.story.id} (${c.at}): ${c.id} is not the newest record for claim ${claim} (${latest} is) — order-dependent (e.g. after a union merge); re-sync the story from the newest verdict`);
+    }
+  }
+  // --- the loop plan's nodes per story (warning only: plan and story statuses never move each other) ---
+  if (Array.isArray(planNodes)) {
+    const LIVE_NODE = ["ready", "blocked", "in-progress", "deferred"];
+    for (const s of stories.values()) {
+      const open = planNodes.filter((n) => LIVE_NODE.includes(n.status) && (n.story || []).some((l) => l.id === s.id));
+      if (!open.length) continue;
+      const list = open.map((n) => `${n.id} (${n.status})`).join(", ");
+      const done = s.status?.value === "Done";
+      warnings.push(`[plan-nodes] ${s.id} (${s.path}:1): open plan nodes ${list}${done ? " — the story is Done while a live node still delivers it: re-check the status with /sync-story-status, or drop the node" : ""}`);
     }
   }
   return { errors, warnings, stories: stories.size, absent: false };

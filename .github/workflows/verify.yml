@@ -28,6 +28,22 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm ${{ matrix.script }}
 
+  # Provenance (warn-only): TRACE records cite the commit they were written on. A squash merge
+  # orphans those commits, so `reaudit --unreachable` warns about every record whose provenance
+  # the full history no longer has (merge with a merge commit instead). It never fails the run.
+  provenance:
+    name: provenance
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/trace/cli.mjs reaudit --unreachable --annotate
+
   # E2E runs separately because it needs a real browser. GitHub Actions has no
   # pre-provisioned Chromium (unlike Claude Code on the web), so install it here.
   e2e:

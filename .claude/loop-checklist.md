@@ -47,6 +47,14 @@ this repo from the "loop engineering" loop-design checklist
 - [ ] **No durable state change without a record:** every node status change cites a
       TRACE-lite record (`done` = accept/qualify + `CLEAR`); `deferred`/`escalated` nodes
       name their `missing`; `pnpm trace lint` passes; `pnpm trace plan-lint` passes
+- [ ] **Size ceiling by trust level:** a dispatched node's `scope` lists at most 3 paths at L2
+      and exactly 1 literal file (no glob) at L3 — `pnpm trace plan-lint --pre-dispatch` (L2)
+      or `--pre-dispatch --max-scope 1` (L3) fails `[oversize]` otherwise; an oversize node is
+      split (loop-plan.md, *Split on failure*) or escalated, never dispatched
+- [ ] **(before L2)** the plan has been exercised: at least one L1 iteration logged in
+      `loop-run-log.md` with a re-plan delta, and `pnpm trace plan-lint --pre-dispatch` passed
+      on a non-empty plan (L1 runs re-plan in step 9 before step 10's no-dispatch rule, so an
+      L1 run can supply both)
 
 **6. Human handoff**
 - [ ] Escalation triggers explicit (max attempts, risk paths, ambiguity)

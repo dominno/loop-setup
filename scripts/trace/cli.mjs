@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { readdirSync, statSync, writeFileSync } from "node:fs";
-import { join, resolve, sep } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import {
   appendActions,
   BENCH_BUNDLE,
@@ -44,8 +44,8 @@ import {
   wikiViolations,
   writeRecords,
 } from "./lib.mjs";
-import { DEFAULT_PLAN, parsePlan, planItems, planViolations, readyIds } from "./plan.mjs";
-import { STORY_MAP, STORY_MAP_PATHS, storyMapViolations } from "./story-map.mjs";
+import { DEFAULT_PLAN, MAX_SCOPE, conflictFreeBatch, newNodeId, parsePlan, parseRunLog, planDrift, planStatus, planItems, planViolations, readyIds } from "./plan.mjs";
+import { STORY_MAP, STORY_MAP_PATHS, parseStory, storyMapViolations } from "./story-map.mjs";
 
 const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (policy: .claude/memory/topics/trace.md)
 
@@ -66,14 +66,30 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
                                        every path git's own parser finds in it (git apply --numstat) — exit 1 on a hit,
                                        exit 2 when it cannot be verified (git error, no paths)
   pnpm trace lint                      replay the whole store and check every contract invariant (exit 1 on error)
-  pnpm trace plan-ready [--max N] [--json] [--plan p]
-                                       the loop plan's ready node ids as a JSON array (loop-plan.md's ready-node rule, in
-                                       table order; --max N keeps the first N; --json prints those rows in full) — exit 1
-                                       and no ids when the plan table does not parse
-  pnpm trace plan-lint [--pre-dispatch] [--plan p]
+  pnpm trace plan-ready [--max N | --batch N] [--json] [--plan p]
+                                       the loop plan's ready node ids as a JSON array (loop-plan.md's ready-node rule),
+                                       ranked by the origin record's severity (blocker, important, the rest), table order
+                                       breaking ties; --max N keeps the first N; --batch N keeps a greedy set whose scopes do
+                                       not overlap (an empty scope goes alone), then the first N, naming each skipped id on
+                                       stderr; --json prints those rows in full — exit 1
+                                       and no ids when the plan table does not parse, 2 when the store does not replay
+  pnpm trace plan-lint [--pre-dispatch [--max-scope N]] [--plan p] [--run-log f]
                                        check the plan against its contract and the record store (consistency, not truth):
                                        exit 1 on an error, 2 when the store does not replay; --pre-dispatch also fails on
-                                       an in-progress node (run it before every dispatch)
+                                       an in-progress node, a ready node with no check, and one whose scope lists more
+                                       than N paths (default 3; L3 passes 1) — run it before every dispatch
+  pnpm trace claim-token                claim:<owner>@<YYYYMMDD-HHMM> (UTC now) for a dispatched node's notes; the run-log
+                                       entry's header carries the same time and a "- owner:" line
+  pnpm trace plan-id "<description>" [--plan p]
+                                       a fresh collision-free node id, LP-<6 hex> (description + owner + time), not used
+                                       in the plan or the store; owner = LOOP_OWNER, else git user.email's local part
+  pnpm trace status [--plan p]       read-only rollup of the plan: nodes per status, open/done nodes per story, in-progress
+                                       claims and their age, oversize ready nodes, attempts — consistency, not truth; never
+                                       evidence in a record (exit 2 when the store does not replay)
+  pnpm trace plan-drift [--base <ref> | --base-plan <file>] [--plan p]
+                                       advisory, exit 0: done nodes whose CLEARed diff touched paths outside their scope,
+                                       and the nodes added, removed or moved since the base plan (default: the plan at
+                                       the last commit of the run log) — consistency, not truth; never evidence
   pnpm trace plan-items <ids…> [--plan p]
                                        loop-iteration args.items for ready nodes: [{id, description, priorRecordId?,
                                        missing?}]; priorRecordId only for the node's own loop:<id> record, never a
@@ -82,7 +98,8 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
   pnpm trace story-lint [--root dir]   the story map (${STORY_MAP}/: story files, index, dashboard, verification log, E2E
                                        coverage map) against itself and the store (consistency, not truth): one status
                                        per story everywhere, plus the log row, coverage and licensing Record: line its
-                                       level needs — exit 1 on an error; an absent story map passes
+                                       level needs, and (warning) each story's open loop-plan nodes — exit 1 on an error;
+                                       an absent story map passes
   pnpm trace wiki-check                the memory wiki (.claude/memory) against the store (consistency, not truth): rec:
                                        comments, committed facts, quarantine rows, page sizes — JSON {ok, errors,
                                        warnings}; exit 1 on an error, 2 when the store does not replay
@@ -91,8 +108,12 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
                                        over every manifest fixture in every repeat (no --only subset), with no F0, F3
                                        or F4 in its failed_gates, and names the current <loop-verifier> block by its
                                        sha256 — exit 0 when all hold, else exit 1 listing every unmet condition
-  pnpm trace reaudit [--act]           licensing records whose file evidence changed since their commit; one whose
-                                       commit the repo no longer has (squashed away) is listed apart, as unreachable
+  pnpm trace reaudit [--claim-prefix P] [--unreachable] [--act | --annotate]
+                                       licensing records whose file evidence changed since their commit; one whose
+                                       commit the repo no longer has (squashed away) is listed apart, as unreachable;
+                                       --claim-prefix keeps the claims starting with P (story: = story statuses);
+                                       --unreachable keeps only the unreachable ones; --annotate prints one GitHub
+                                       ::warning:: line per record instead of JSON (CI's provenance job; exit 0)
   pnpm trace metrics                   store-level consumer-value metrics
   pnpm trace rotate [--max 500] [--keep 200]   lossless move of old lines into <YYYY>.jsonl archives
   pnpm trace bench-args [--arms verifier,single-pass,panel] [--repeat N] [--critics a,b] [--only B01-x,G01-y]
@@ -142,6 +163,13 @@ function git(args) {
   } catch {
     return null;
   }
+}
+
+/** Who runs this session: LOOP_OWNER, else the local part of git user.email (lowercased), else "unknown". */
+function currentOwner() {
+  const raw = process.env.LOOP_OWNER || (git(["config", "user.email"]) || "").split("@")[0];
+  const owner = String(raw || "").toLowerCase().replace(/[^a-z0-9._-]/g, "");
+  return owner || "unknown";
 }
 
 /** Concatenated product sources (see CODE_PATHS / patchOnlyTokens). */
@@ -235,22 +263,6 @@ async function main() {
     process.stderr.write(`${cmd}: the plan table does not parse — no ids (pnpm trace plan-lint lists every problem)\n`);
     return true;
   };
-
-  if (cmd === "plan-ready") {
-    const max = flags.max !== undefined ? (/^[1-9]\d*$/.test(String(flags.max)) ? Number(flags.max) : NaN) : undefined;
-    if (flags.plan === true || Number.isNaN(max)) {
-      out("usage: pnpm trace plan-ready [--max N] [--json] [--plan p]   (N a positive integer)");
-      return 2;
-    }
-    const plan = readPlan();
-    if (unparsed(plan)) return 1;
-    const ids = readyIds(plan.nodes, { max });
-    if (flags.json) {
-      const byId = new Map(plan.nodes.map((n) => [n.id, n]));
-      out(ids.map((id) => byId.get(id)), true);
-    } else process.stdout.write(JSON.stringify(ids) + "\n");
-    return 0;
-  }
 
   const schema = loadSchema();
   const policyVersion = readPolicyVersion();
@@ -367,9 +379,42 @@ async function main() {
     return state.errors.length ? 1 : 0;
   }
 
+  if (cmd === "plan-ready") {
+    const positive = (v) => (v !== undefined ? (/^[1-9]\d*$/.test(String(v)) ? Number(v) : NaN) : undefined);
+    const max = positive(flags.max);
+    const batchN = positive(flags.batch);
+    if (flags.plan === true || Number.isNaN(max) || Number.isNaN(batchN) || (max !== undefined && batchN !== undefined)) {
+      out("usage: pnpm trace plan-ready [--max N | --batch N] [--json] [--plan p]   (N a positive integer)");
+      return 2;
+    }
+    // The ranking reads the origin records' severity, so a store that does not replay yields no ids.
+    if (state.errors.length) {
+      process.stderr.write(`error: the record store does not replay (${state.errors.length} error(s)) — no ids; run pnpm trace lint\n`);
+      return 2;
+    }
+    const plan = readPlan();
+    if (unparsed(plan)) return 1;
+    let ids = readyIds(plan.nodes, { max, state });
+    if (batchN !== undefined) {
+      const { batch, skipped } = conflictFreeBatch(plan.nodes, ids, batchN);
+      for (const k of skipped) process.stderr.write(`skip: ${k.id} conflicts with ${k.conflictsWith} (overlapping scope; it waits for a later call)\n`);
+      ids = batch;
+    }
+    if (flags.json) {
+      const byId = new Map(plan.nodes.map((n) => [n.id, n]));
+      out(ids.map((id) => byId.get(id)), true);
+    } else process.stdout.write(JSON.stringify(ids) + "\n");
+    return 0;
+  }
+
   if (cmd === "plan-lint") {
     if (flags.plan === true) {
-      out("usage: pnpm trace plan-lint [--pre-dispatch] [--plan p] [--store s]");
+      out("usage: pnpm trace plan-lint [--pre-dispatch [--max-scope N]] [--plan p] [--store s]   (N 1..3)");
+      return 2;
+    }
+    const maxScope = flags["max-scope"] === undefined ? MAX_SCOPE : /^[1-3]$/.test(String(flags["max-scope"])) ? Number(flags["max-scope"]) : NaN;
+    if (Number.isNaN(maxScope)) {
+      out("usage: pnpm trace plan-lint [--pre-dispatch [--max-scope N]] [--plan p] [--store s]   (N 1..3)");
       return 2;
     }
     // The cross-checks read the store; one that does not replay cannot vouch for any node.
@@ -379,11 +424,92 @@ async function main() {
     }
     const plan = readPlan();
     const preDispatch = !!flags["pre-dispatch"];
-    const { errors, warnings } = planViolations(plan, state, { preDispatch });
+    // The story ids (and their AC numbers) a node's story:US-NNN#ACk token may name; none when there is no story map.
+    const stories = new Map();
+    try {
+      const dir = join(ROOT, STORY_MAP_PATHS.stories);
+      for (const f of readdirSync(dir).filter((x) => /^US-.*\.md$/.test(x))) {
+        const st = parseStory({ path: `${STORY_MAP_PATHS.stories}/${f}`, text: readFileSync(join(dir, f), "utf8") });
+        if (st.id) stories.set(st.id, new Set(st.acs));
+      }
+    } catch {
+      // no stories/ directory: every story token dangles, as a warning
+    }
+    // The run log decides whether an in-progress node's claim belongs to a live run (absent log: no entries).
+    const runLogPath = typeof flags["run-log"] === "string" ? resolve(flags["run-log"]) : join(ROOT, ".claude/memory/loop-run-log.md");
+    let runs = new Map();
+    try {
+      runs = parseRunLog(readFileSync(runLogPath, "utf8"));
+    } catch {
+      // no run log yet: an own claim is stale, another owner's is live
+    }
+    const { errors, warnings } = planViolations(plan, state, { preDispatch, maxScope, stories, owner: currentOwner(), runs });
     for (const w of warnings) process.stderr.write(`warn: ${w}\n`);
     for (const e of errors) process.stderr.write(`error: ${e}\n`);
     out({ ok: errors.length === 0, errors: errors.length, warnings: warnings.length, nodes: plan.nodes.length, preDispatch, plan: planPath, store: storePath }, true);
     return errors.length ? 1 : 0;
+  }
+
+  if (cmd === "claim-token") {
+    // The claim a dispatch writes into a node's notes; its time is the run-log entry's header (YYYY-MM-DD HH:MM, UTC).
+    const t = new Date().toISOString();
+    process.stdout.write(`claim:${currentOwner()}@${t.slice(0, 10).replace(/-/g, "")}-${t.slice(11, 13)}${t.slice(14, 16)}\n`);
+    return 0;
+  }
+
+  if (cmd === "plan-id") {
+    if (!pos.length) {
+      out('usage: pnpm trace plan-id "<node description>" [--plan p]');
+      return 2;
+    }
+    // Every id the plan or the store already uses (a pruned node lives on in its loop:<id> claims).
+    const plan = readPlan();
+    const taken = new Set(plan.nodes.map((n) => n.id.toLowerCase()));
+    for (const r of state.records.values()) if (/^loop:lp-/.test(r.claim_id)) taken.add(r.claim_id.slice(5));
+    process.stdout.write(`${newNodeId(pos.join(" "), { owner: currentOwner(), now: new Date().toISOString(), taken })}\n`);
+    return 0;
+  }
+
+  if (cmd === "status") {
+    if (state.errors.length) {
+      out({ ok: false, error: `the record store does not replay (${state.errors.length} error(s)); run pnpm trace lint`, store: storePath }, true);
+      return 2;
+    }
+    const plan = readPlan();
+    if (unparsed(plan)) return 1;
+    out(planStatus(plan.nodes, state, { now: new Date() }), true);
+    return 0;
+  }
+
+  if (cmd === "plan-drift") {
+    if (state.errors.length) {
+      out({ ok: false, error: `the record store does not replay (${state.errors.length} error(s)); run pnpm trace lint`, store: storePath }, true);
+      return 2;
+    }
+    const plan = readPlan();
+    if (unparsed(plan)) return 1;
+    // The base: --base-plan <file>, else the plan at --base <ref> (default: the last commit that touched the run log).
+    let base = null;
+    let baseFrom = "none";
+    if (typeof flags["base-plan"] === "string") {
+      try {
+        base = parsePlan(readFileSync(resolve(flags["base-plan"]), "utf8"));
+        baseFrom = flags["base-plan"];
+      } catch {
+        base = null;
+      }
+    } else {
+      const ref = typeof flags.base === "string" ? flags.base : git(["log", "-1", "--format=%H", "--", ".claude/memory/loop-run-log.md"]);
+      const rel = relative(ROOT, planPath);
+      const text = ref && !rel.startsWith("..") ? git(["show", `${ref}:${rel}`]) : null;
+      if (text) {
+        base = parsePlan(text);
+        baseFrom = `${ref}:${rel}`;
+      }
+    }
+    const drift = planDrift(plan.nodes, base && !base.errors.length ? base.nodes : null, state);
+    out({ ...drift, base: base && !base.errors.length ? baseFrom : "none (no readable base plan)", note: "advisory: consistency, not truth — never evidence in a TRACE record" }, true);
+    return 0;
   }
 
   if (cmd === "plan-items") {
@@ -436,7 +562,10 @@ async function main() {
       stories: names.map((f) => `${STORY_MAP_PATHS.stories}/${f}`).filter(isFile).map(file),
       ...Object.fromEntries(["index", "dashboard", "log", "coverage"].map((k) => [k, file(STORY_MAP_PATHS[k])])),
     };
-    const { errors, warnings, stories, absent } = storyMapViolations(map, state, { specExists: isFile });
+    // The loop plan's nodes, for the per-story list of open nodes; a plan that is absent or does not parse adds nothing.
+    const plan = readPlan();
+    const planNodes = plan.errors.length ? undefined : plan.nodes;
+    const { errors, warnings, stories, absent } = storyMapViolations(map, state, { specExists: isFile, planNodes });
     for (const w of warnings) process.stderr.write(`warn: ${w}\n`);
     for (const e of errors) process.stderr.write(`error: ${e}\n`);
     out({ ok: errors.length === 0, errors: errors.length, warnings: warnings.length, stories, ...(absent ? { absent } : {}), storyMap: join(root, STORY_MAP), store: storePath }, true);
@@ -515,7 +644,22 @@ async function main() {
   }
 
   if (cmd === "reaudit") {
-    const cands = reauditCandidates(state.records, state.superseded, changedSince, reachable);
+    if (flags["claim-prefix"] === true) {
+      out("usage: pnpm trace reaudit [--claim-prefix <prefix>] [--act]   (e.g. --claim-prefix story:)");
+      return 2;
+    }
+    const prefix = typeof flags["claim-prefix"] === "string" ? flags["claim-prefix"] : "";
+    const cands = reauditCandidates(state.records, state.superseded, changedSince, reachable)
+      .filter((c) => String(c.claim_id).startsWith(prefix))
+      .filter((c) => !flags.unreachable || c.unreachable);
+    // M6, the CI provenance job: one GitHub warning annotation per record whose commit was squashed away. Never fails.
+    if (flags.annotate) {
+      for (const c of cands) {
+        const what = c.unreachable ? `provenance commit ${c.unreachable} is unreachable (squash-merged or rebased away) — re-verify ${c.paths.join(", ")}` : `evidence changed: ${c.changed.join(", ")}`;
+        process.stdout.write(`::warning title=TRACE provenance${c.unreachable ? " unreachable" : ""}::${c.claim_id} ${c.record_id}: ${what}\n`);
+      }
+      return 0;
+    }
     if (flags.act && cands.length) {
       const note = (c) => (c.unreachable ? `provenance commit ${c.unreachable} is unreachable — re-verify: ${c.paths.join(", ")}` : `evidence changed: ${c.changed.join(", ")}`);
       const res = appendActions(

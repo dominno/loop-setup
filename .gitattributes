@@ -3,3 +3,7 @@
 # `pnpm test`) is the post-merge integrity check. Rotation (`pnpm trace rotate`) runs only
 # on the default branch — a union merge of two rotations would duplicate records.
 .claude/memory/trace/records.jsonl merge=union
+# The loop run log and the wiki log are append-only too (one self-contained "## [date] …" block per
+# entry): two branches that each append an entry merge as a union instead of conflicting at EOF.
+.claude/memory/loop-run-log.md merge=union
+.claude/memory/log.md merge=union

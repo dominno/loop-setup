@@ -370,3 +370,14 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
   force-push/hard-reset denies, worktree.baseRef "head") replaces the tracked
   `.claude/settings.local.json`, which is now git-ignored and personal.
 - Admission: committed 1, qualified 0, quarantined 0, rejected 0.
+
+## [2026-11-06] ingest | planning & task-status upgrade (W0–W5, M1–M10)
+- Admission: 1 committed (TR-8a89f665cbf8 → topics/workflow.md, plan node contract), 1 qualified
+  (TR-e7829fbc9fc1 → topics/remote-env.md, Chromium build 1243 vs Playwright 1.56.0's 1194),
+  0 quarantined, 0 rejected.
+- Reported, not edited (needs confirmation): the remote-env bullet "1.56.0 ↔ Chromium build 1194"
+  is stale for this container image.
+
+## [2026-11-07] ingest | rewrite the Playwright/Chromium pin fact (user confirmed)
+- Admission: 1 qualified (TR-1a2a7cac54bb → topics/remote-env.md: 1.56.0 launches build 1194; the
+  provisioned build depends on the container image). 0 committed, 0 quarantined, 0 rejected.

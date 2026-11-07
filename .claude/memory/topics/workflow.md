@@ -152,3 +152,33 @@
   <!-- rec:TR-b3b37a1408f4 -->
 
 Related: [build-and-verify](./build-and-verify.md) · [testing](./testing.md) · [trace](./trace.md)
+
+- **Plan node contract:** `loop-plan.md`'s table has 10 columns (`… | notes | scope | check |`)
+  and the legacy 8-column header still parses; plan-lint's node-contract rules (`[check]`,
+  `[oversize]`, `[scope]`, `[done-when]`, `[origin]`) run only with `--pre-dispatch`
+  (`--max-scope 1` at L3); new ids come from `pnpm trace plan-id` (`LP-<6 hex>`), and
+  `plan-ready --batch N` picks a conflict-free set by scope. <!-- rec:TR-8a89f665cbf8 -->
+
+## Not adopted (plan)
+Borrowings the planning research and critic council (docs/plans/planning-upgrade/) weighed
+for `loop-plan.md` and turned down. Each says what would reopen it, so this is not permanent.
+- **JSON plan / feature list** — the markdown table plus `pnpm trace plan-lint` already
+  fails closed on a malformed edit, and the TRACE records hold the verdicts. Reopen when
+  plan-lint misses a hand-edit corruption that a JSON schema would have caught.
+- **epic/parent containers** (a hierarchy column or nested ids) — a parent row would be one
+  more status nobody dispatches; as-needed decomposition is covered by the split convention
+  (`loop-plan.md`, *Split on failure*: a dropped parent with a `split into` trail). Reopen when a real plan needs a rollup that a story token
+  and `pnpm trace status` cannot give.
+- **A numeric complexity score** — a same-model guess with no ground truth; size is derived
+  from the `scope` column instead. Reopen when measured split rates show scope counts
+  mis-size nodes.
+- **A new node status** (e.g. `split`, `claimed`, `review`) — every status must be classified
+  by the ready rule and the cascade rules; extra ones multiply that. Reopen when an existing
+  status plus a notes token cannot express a real case.
+- **bd-style commands** (`ready`, `claim`, `close`) — `pnpm trace plan-ready`, `plan-lint`
+  and `plan-items` cover them; the plan is edited by the Lead. Reopen when two people need
+  an atomic claim that the commit-and-push lease cannot give.
+- **Bench re-run rule:** a `PLAN_COLUMNS` change alone needs no `/bench-checkers` re-run (it
+  must update `PLAN_COLUMNS`, the Node schema table and the parser tests together); a change
+  to the plan-items item shape, or to the text the loop verifier receives, does.
+

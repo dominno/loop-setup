@@ -45,7 +45,18 @@ Procedure:
    the **consumer protocol** in `.claude/memory/topics/trace.md` says (save the result to
    a scratchpad file → `pnpm trace write <file>` → `pnpm trace act --from <file>`).
 5. As Lead Agent, choose the smallest safe plan from the confirmed blockers +
-   directly-related important findings. Act on a `qualify` finding only at its qualified
+   directly-related important findings. If the work is meant to run unattended through
+   `/loop` instead, offer `/plan-nodes` (it turns the plan into confirmed loop-plan nodes) —
+   never invoke it yourself.
+   For a plan of more than one step, write it as a **step list** in the repo,
+   `docs/plans/<slug>/steps.md` (never only in a scratchpad, so another developer sees it
+   after a merge), with this fixed header:
+   `| id | description | scope | check | after | status | commit |` — ids `S01`, `S02`…;
+   `scope` the files the step may touch, `check` the smallest command that proves it,
+   `after` the step ids it waits on, `status` `planned`/`in-progress`/`done`/`dropped`, and
+   `commit` the SHA it landed in (filled from `git log`). A follow-up found mid-task gets a
+   child id of the step it came from (`S03.1`), never an ad-hoc id; a dropped step keeps its
+   row with a note. Act on a `qualify` finding only at its qualified
    strength (state the qualifier in your plan). A `deferred` or `revised` blocker is
    handled per the consumer protocol: gather its `missing` evidence (run the check,
    reproduce in the browser) or restate it per its `repair`, then re-adjudicate it in the

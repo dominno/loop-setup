@@ -12,6 +12,14 @@ budget, denylist, escalation, stop conditions). Before running, fix the loop's
 - **L3 — Unattended.** May act without a human watching; requires every section of
   `.claude/loop-checklist.md` to be satisfied first.
 
+## One loop per branch
+The plan file is a single-writer resource: run at most one `/loop` per checkout, and do not
+start an iteration on a shared branch while another session's claim is live (`pnpm trace
+status` lists the in-progress claims and their age; `plan-lint` warns `[in-progress-claimed]`).
+Two people work through branches and PRs, each loop on its own branch, or take turns on one
+through the commit-and-push lease (step 10). A markdown claim does not make plan writes atomic;
+git's rejected push is what serializes them.
+
 ## The plan (`.claude/memory/loop-plan.md`) — the DAG every action traces to
 The loop's watchlist is a **durable, mutable plan** of typed work nodes with `after:`
 dependency edges, kept in `.claude/memory/loop-plan.md` (schema + ready-node rule are
@@ -83,8 +91,13 @@ instructions — the self-modification guard below still applies to everything e
 9. **Re-evaluate & re-plan** (a first-class step, not an afterthought) — run this
    **before** any dispatch so the DAG is fresh when you act. Rewrite
    `.claude/memory/loop-plan.md`: nodes already `done` (record + `CLEAR`) unblock their
-   dependents — re-plan never marks a node `done` itself; **add new nodes** for this run's
-   confirmed findings (with `after:` deps + `origin` citing the finding's record id) and,
+   dependents — re-plan never marks a node `done` itself; **add new nodes** for this run's confirmed findings (each with a fresh id from
+   `pnpm -s trace plan-id "<description>"`, `after:` deps + `origin` citing the finding's record id, a
+   `scope` from the finding's `file:line`, a `check` that proves the fix, and a description
+   ending `— done when: <the observable outcome>`, written from the origin finding's evidence
+   or recommended fix, never from implementer output; `plan-lint --pre-dispatch` warns
+   `[done-when]` without one, but a weak clause still passes, and the clause changes the
+   verifier's behaviour only if the `<loop-verifier>` prompt changes — a bench-gated decision) and,
    for a critic finding the round `deferred`, a `deferred` node carrying its `missing`
    (only if the loop can supply it; a human-decision defer or a `revise` becomes an
    `escalated` node with the `missing`/`repair` as the human ask) — a node created
@@ -94,8 +107,8 @@ instructions — the self-modification guard below still applies to everything e
    `drop` obsolete nodes — never one whose `origin` record is in the latest round's
    `completion.notRechecked` (its lens was not reviewed, so nothing shows it obsolete);
    **re-check every `deferred` node's `missing`** — reset it to
-   `ready` only when you can cite the evidence that arrived (a record id or check output,
-   in the node's notes); a node deferred by a record whose `failed_gates` include
+   `ready` only when you can cite the evidence that arrived (a record written after the defer,
+   by id in the node's notes — `plan-lint` `[unsupported-reset]` checks it); a node deferred by a record whose `failed_gates` include
    `agent-failed` (an infra failure, not a verdict) may be reset citing that record's id,
    and so may one deferred by your own `git apply --check` record (writer_id
    `loop/apply-check:<node>`, step 10; never by another defer whose `missing` reads the
@@ -105,18 +118,36 @@ instructions — the self-modification guard below still applies to everything e
    the human ask instead); each such reset counts as an attempt like any
    defer, and so does a node that step 10 reset to `ready` because loop-iteration
    returned its whole-phase infra `error` (every implementer failed, so no record exists:
-   cite the run-log entry that noted the error); a fourth defer, or a fourth attempt of
-   any kind, escalates it (`plan-lint` counts the node's `loop:<id>` defers);
-   never reset an `escalated` node — only the human it waits on can; and recompute
+   cite the run-log entry that noted the error); a fourth attempt of any kind escalates it (`plan-lint` `[attempts]` counts the node's
+   `loop:<id>` defers and revises, and fails on a live node past the budget);
+   never reset an `escalated` node — only the human it waits on can (a human release:
+   `pnpm trace act <record> human HOLD --ref <node> --note "release: <decision>"`); and recompute
    which nodes are `ready`. New evidence may re-shape the DAG here — that is the point.
+   **Split instead of retry** when a node's own `loop:<id>` revise carries a `repair`, its
+   post-apply check failed, or its defer names the scope (too large): drop it with notes
+   `split into …`, create 2–4 children `origin: split from <parent> rec:<that record>` and
+   re-point its dependents to all of them (or the last of a chained set) — the full rule is
+   `loop-plan.md`, *Split on failure*. At L2 propose the children through the `/plan-nodes`
+   confirmation path; at L3 escalate the node instead of splitting it. Log the split in the
+   run-log re-plan delta.
    Also **repair broken states** (see the plan's rules): reset any
-   stale `in-progress` node left by an interrupted prior run, and **cascade-resolve** any
+   stale `in-progress` node left by an interrupted prior run — `plan-lint` decides stale from
+   the node's claim and the run log: your own claim whose run closed or was never logged is
+   stale; another owner's claim is stale only once that owner's entry closed
+   (`[in-progress-claimed]` otherwise: never reset another owner's node — report it, and ask
+   that owner or a human to release it); for a node `plan-lint` warns
+   `[verified-unlanded]` (its verifier accept was never applied), resume from the accept only
+   when the run-log entry names the saved diff, that file still exists and HEAD equals the
+   record's provenance commit — and still run denylist-check, `git apply --check` and the
+   post-apply check — otherwise HOLD the orphaned accept (`--note "orphaned accept"`) and
+   re-dispatch the node; and **cascade-resolve** any
    node whose `after:` dep became `dropped`/`escalated` (drop, re-point, or escalate it —
    an escalated one cites the ancestor's HOLDed record, `origin: cascade from <id>`)
    so nothing is left silently `blocked`. Node creation is the *only* loop action exempt
    from "no action without a node"; it is the sanctioned bootstrap, so an
    empty/first-iteration plan is populated here rather than deadlocking. Record the
-   re-plan delta in the run-log entry. Finish with `pnpm -s trace plan-lint --pre-dispatch`:
+   re-plan delta in the run-log entry. Finish with `pnpm -s trace plan-lint --pre-dispatch` (at L3 add `--max-scope 1`, the
+   L3 size ceiling; an `[oversize]` node is split or escalated, never dispatched):
    it checks the rewritten plan against its contract and the record store (consistency,
    not truth — exit 1 names each broken rule, exit 2 means the store does not replay).
    **Never dispatch from a plan that fails it:** repair the plan and re-run it, or stop
@@ -125,22 +156,28 @@ instructions — the self-modification guard below still applies to everything e
     declared for this run, treat it as L1 — never infer L2/L3 from context**). Pick the
     highest-priority **ready node(s)** from the just-updated plan:
     - L1: record findings only (no dispatch).
-    - L2/L3: list the candidates with `pnpm -s trace plan-ready --max <maxItems>`
+    - L2/L3: list the candidates with `pnpm -s trace plan-ready --batch <maxItems>`
       (`<maxItems>` = the `args.maxItems` you pass loop-iteration, default 5, its own
-      default): at most that many ready nodes, highest priority first — never pick ready
-      nodes by hand. Of those, never select two
-      expected to touch the same file (the file of their origin finding's file:line): the
-      second waits for a later call. This is a dispatch-time exclusion, never an `after:`
+      default): at most that many ready nodes, highest priority first, whose `scope`
+      columns do not overlap (an empty scope overlaps everything, so that node goes alone;
+      each skipped id is named on stderr with the node it conflicts with, and waits for a
+      later call) — never pick ready nodes by hand. This is a dispatch-time exclusion, never an `after:`
       edge — an artificial edge would cascade-escalate an unrelated node (`loop-plan.md`,
-      *Cascading drop / escalation*). Skip, and note, a node whose expected files have
-      uncommitted changes in the main checkout (`git status --porcelain -- <files>`): its
+      *Cascading drop / escalation*). Skip, and note, a node whose `scope` files have
+      uncommitted changes in the main checkout (`git status --porcelain -- <scope paths>`): its
       worktree branches from HEAD, which lacks them. If that leaves no node to dispatch,
       stop and report "needs a commit of <files>". Then, in this order: write the items
       with `pnpm -s trace plan-items <selected ids> > <scratchpad>/loop-items.json` (exit 1
       = an id is not ready: dispatch nothing and re-plan; exit 2 = the store does not
-      replay: dispatch nothing and stop, as for plan-lint); set the selected nodes
-      `in-progress` in the plan (only now: an `in-progress` node is never ready, so
-      plan-items would refuse it); then fix them via the **loop-iteration Workflow**
+      replay: dispatch nothing and stop, as for plan-lint); set the selected nodes `in-progress` in the plan, each with a claim in its notes
+      (`pnpm -s trace claim-token` → `claim:<owner>@<YYYYMMDD-HHMM>`; the run-log entry you
+      append in step 11 carries the same time in its header and a `- owner:` line) — only now:
+      an `in-progress` node is never ready, so plan-items would refuse it. **Lease through git
+      (a shared branch, and only when the user allowed this loop to commit and push):** commit
+      the claimed rows (`git commit -m "claim <ids>" -- .claude/memory/loop-plan.md`) and push
+      before dispatching; a rejected push means someone else moved the plan — never force:
+      fetch, re-read the plan and re-plan (step 9). Without that permission the loop runs on a
+      branch of its own, where no lease is needed; then fix them via the **loop-iteration Workflow**
       (`.claude/workflows/loop-iteration.js`, `args.level` = the declared level,
       `args.treeId` = `pnpm -s trace tree-id`, `args.headSha` = `git rev-parse HEAD`,
       `args.items` = the array in that file, unedited — each `id` is the node `id`, and a
@@ -164,7 +201,7 @@ instructions — the self-modification guard below still applies to everything e
       (no valid `headSha`, more than `maxItems` items) started no agent and counts no
       attempt: correct the call. Otherwise record its `traceRecords` per the consumer
       protocol — **before** moving any node. Then, per item:
-      - **`applied`** (accept, or qualify at L2): save the `diff` to a scratch file and,
+      - **`applied`** (accept, or qualify at L2): save the `diff` to a scratch file (name its path in the run-log entry) and,
         **before applying it**, run `pnpm trace denylist-check --patch <file>` (the
         production denylist, read from HEAD, over every path git's own parser finds in the
         patch — catches anything the patch-text parser missed); exit 1 (a hit) or 2 (could
@@ -173,13 +210,16 @@ instructions — the self-modification guard below still applies to everything e
         the record, write your own `defer` record that `revises` it (same `claim_id`, writer_id
         `loop/apply-check:<node>`, `missing` = "a diff based on the current tree",
         `reason` = the check's error), `HOLD` that one too, and set the node `deferred`
-        with it — it is re-dispatchable (step 9). If it passes → `git apply <file>`, then
-        re-run the smallest relevant check. If it passes, `pnpm trace act <that node's loop-iteration record> loop CLEAR
-        --ref <node> --note "<check that passed; qualifier if any>"` and mark the node
+        with it — it is re-dispatchable (step 9). If it passes → `git apply <file>`, then run the node's `check` (its smallest relevant
+        check), and log in the run-log entry the diff paths that fall outside its `scope` (a
+        drift signal, never a gate). If it passes, `pnpm trace act <that node's loop-iteration record> loop CLEAR
+        --ref <node> --note "base <baseSha>; patch <hash>; <check that passed>; <qualifier if any>"`
+        (`<baseSha>` = the item's reported `baseSha`; `<hash>` = the first 12 hex of
+        `git hash-object <patch file>`, so a later commit can be tied back to this apply) and mark the node
         `done` with that `record` (copy a qualifier into the node's notes). If no relevant
         automated check exists, do not CLEAR: `HOLD` and escalate. If the check fails,
-        revert the patch, write a `revise` record (same `claim_id`, `revises` the first,
-        `repair` = what failed), `HOLD` it, and leave the node `ready` with that record and
+        revert the patch, write a `revise` record (same `claim_id`, `revises` the first, writer_id
+        `loop/post-apply:<node>`, `repair` = what failed), `HOLD` it, and leave the node `ready` with that record and
         the attempt counted.
         After the CLEAR, remove the item's worktree (its root is in the item's `notes`,
         self-reported) only if it appears in `git worktree list --porcelain`, lies under
@@ -201,12 +241,14 @@ instructions — the self-modification guard below still applies to everything e
       Keep the worktrees of deferred, held and escalated items (and of any applied item
       that was not CLEARed), and list them in the run-log entry. Before that entry, run
       `pnpm -s trace plan-lint` again: a node this step escalated may strand its dependents
-      (cascade-resolve them now, as in step 9), and a fourth `loop:<id>` defer escalates
+      (cascade-resolve them now, as in step 9), and a fourth `loop:<id>` attempt escalates
       its node — an iteration never ends on a plan that fails it.
       Never fix nice-to-haves automatically; never start unrelated refactors.
     - **If no node is ready** after re-plan, do not invent work — **self-stop** (per
       *Stop when*).
-11. **Append a run entry** to `.claude/memory/loop-run-log.md` (see format below).
+11. **Append a run entry** to `.claude/memory/loop-run-log.md` (see format below). When the
+    user later commits a node's change, a `Plan: LP-…` trailer in the commit message ties it to
+    the node — an optional convention, never linted as an error.
 
 ## Denylist — never touch autonomously (escalate instead)
 (The TRACE record store under `.claude/memory/trace/` is appended only through
@@ -270,11 +312,13 @@ Notify only when action is needed — do not ping on a no-op run.
 ## Run-log entry (append to `.claude/memory/loop-run-log.md`)
 ```
 ## [YYYY-MM-DD HH:MM] L<level> | <task>
+- owner: <LOOP_OWNER, else git user.email's local part — the claims' owner>
 - node: <plan-item id acted on, or "none — report-only / no ready node">
 - found: <n blockers / n important / n nice-to-have>
 - actions: <fixes applied, or "report only">
 - re-plan: <nodes added / marked done / deferred→ready / dropped, or "none">
 - records: <record ids written + actions (CLEAR/HOLD/REUSE), or "none">
+- drift: <diff paths outside each node's scope, or none; plus `pnpm -s trace plan-drift` (advisory): nodes added/dropped/moved since the last entry>
 - worktrees: kept <paths> | removed <n>
 - budget: <used>/<cap> (turns or tokens)
 - escalations: <none | reason>

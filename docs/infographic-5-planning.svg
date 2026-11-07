@@ -1,0 +1,189 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1368 768" width="1368" height="768" font-family="DejaVu Sans, Arial, Helvetica, sans-serif">
+  <title>Planning and task status in the loop</title>
+  <desc>Three panels: plan the work (sources, /plan-nodes, the node row), the status lifecycle (blocked, ready, in-progress, done, deferred, escalated, split on failure, attempt budget), and safe dispatch (pre-dispatch gates, conflict-free batch, two-developer rules, commands).</desc>
+  <defs>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <path d="M24 0H0V24" fill="none" stroke="#e3eaf3" stroke-width="1"/>
+    </pattern>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#1b2f52"/>
+    </marker>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#5b3fb5"/>
+    </marker>
+    <style>
+      .t{fill:#0f2347;font-weight:800}
+      .h{fill:#0f2347;font-weight:800;font-size:21px}
+      .b{fill:#1b2f52;font-size:13px}
+      .s{fill:#3c4f6e;font-size:11.5px}
+      .m{font-family:"DejaVu Sans Mono",Menlo,Consolas,monospace}
+      .box{fill:#fff;stroke:#1b2f52;stroke-width:2}
+      .teal{fill:#fff;stroke:#11807a;stroke-width:2.5}
+      .purp{fill:#fff;stroke:#5b3fb5;stroke-width:2.5}
+      .gold{fill:#fff;stroke:#c48a0e;stroke-width:2.5}
+      .red{fill:#fff6f6;stroke:#d23b3b;stroke-width:2.5}
+      .grn{fill:#f3fbf5;stroke:#2f8a4b;stroke-width:2.5}
+      .ln{stroke:#1b2f52;stroke-width:2;fill:none}
+      .lr{stroke:#5b3fb5;stroke-width:2;fill:none;stroke-dasharray:6 4}
+    </style>
+  </defs>
+
+  <rect width="1368" height="768" fill="#f7fafd"/>
+  <rect width="1368" height="768" fill="url(#grid)"/>
+
+  <text x="28" y="56" class="t" font-size="38">PLANNING &amp; TASK STATUS IN THE LOOP</text>
+  <text x="30" y="80" class="s" font-size="13">.claude/memory/loop-plan.md · every L2/L3 action traces to a ready node · no status change without a TRACE record</text>
+
+  <line x1="452" y1="100" x2="452" y2="748" stroke="#1b2f52" stroke-width="1.5" stroke-dasharray="6 6"/>
+  <line x1="918" y1="100" x2="918" y2="748" stroke="#1b2f52" stroke-width="1.5" stroke-dasharray="6 6"/>
+
+  <!-- ============ PANEL 1: PLAN ============ -->
+  <circle cx="44" cy="120" r="15" fill="#0f2347"/><text x="44" y="126" text-anchor="middle" fill="#fff" font-weight="800" font-size="16">1</text>
+  <text x="68" y="128" class="h">PLAN THE WORK</text>
+
+  <g>
+    <rect x="28" y="148" width="112" height="40" rx="10" class="box"/><text x="84" y="166" text-anchor="middle" class="b">story</text><text x="84" y="181" text-anchor="middle" class="s m">US-001 AC2</text>
+    <rect x="160" y="148" width="112" height="40" rx="10" class="box"/><text x="216" y="173" text-anchor="middle" class="b">spec in docs/</text>
+    <rect x="292" y="148" width="132" height="40" rx="10" class="box"/><text x="358" y="173" text-anchor="middle" class="b">critic finding</text>
+    <path class="ln" d="M84 190V214H200" marker-end="url(#a)"/>
+    <path class="ln" d="M216 190V212" marker-end="url(#a)"/>
+    <path class="ln" d="M358 190V242H322" marker-end="url(#a)"/>
+    <rect x="82" y="216" width="236" height="52" rx="12" class="teal"/>
+    <text x="200" y="239" text-anchor="middle" fill="#11807a" font-weight="800" font-size="17" class="m">/plan-nodes</text>
+    <text x="200" y="258" text-anchor="middle" class="s">you confirm each node</text>
+    <text x="366" y="222" class="s">or loop</text>
+    <text x="366" y="236" class="s">re-plan</text>
+  </g>
+  <text x="30" y="286" class="s">also <tspan class="m">/write-goal</tspan> → blocked <tspan class="m">human:goal</tspan> rows to paste</text>
+  <text x="30" y="301" class="s">and <tspan class="m">/multi-agent-dev</tspan> → <tspan class="m">docs/plans/&lt;slug&gt;/steps.md</tspan></text>
+
+  <rect x="28" y="312" width="396" height="300" rx="14" class="box"/>
+  <rect x="28" y="312" width="396" height="34" rx="14" fill="#0f2347"/><rect x="28" y="330" width="396" height="16" fill="#0f2347"/>
+  <text x="44" y="335" fill="#fff" font-weight="800" font-size="14">ONE PLAN NODE = ONE TABLE ROW</text>
+  <g class="b">
+    <text x="44" y="366" font-weight="700">id</text>          <text x="138" y="366" class="m" font-size="12.5">LP-a3f9c2</text><text x="236" y="366" class="s">pnpm trace plan-id</text>
+    <text x="44" y="394" font-weight="700">description</text> <text x="138" y="394" font-size="12.5">Empty name crashes —</text>
+    <text x="138" y="410" font-size="12.5" fill="#11807a" font-weight="700">done when: '' shows the error</text>
+    <text x="44" y="438" font-weight="700">after</text>       <text x="138" y="438" class="m" font-size="12.5">LP-0b1e</text><text x="236" y="438" class="s">real order only</text>
+    <text x="44" y="466" font-weight="700">status</text>      <text x="138" y="466" font-size="12.5">ready · blocked · in-progress …</text>
+    <text x="44" y="494" font-weight="700">scope</text>       <text x="138" y="494" class="m" font-size="12.5">src/lib/greeting.ts</text><text x="314" y="494" class="s">≤ 3 · L3: 1</text>
+    <text x="44" y="522" font-weight="700">check</text>       <text x="138" y="522" class="m" font-size="12">pnpm vitest run …test.ts</text>
+    <text x="44" y="550" font-weight="700">origin</text>      <text x="138" y="550" class="m" font-size="12">rec:TR-… · plan: · human</text>
+    <text x="138" y="566" class="m" font-size="12" fill="#5b3fb5">story:US-001#AC2</text>
+    <text x="44" y="594" font-weight="700">record</text>      <text x="138" y="594" font-size="12.5">the TRACE verdict behind its status</text>
+  </g>
+
+  <rect x="28" y="626" width="396" height="112" rx="14" class="gold"/>
+  <text x="44" y="652" fill="#8a5f00" font-weight="800" font-size="14">PRIORITY IS COMPUTED</text>
+  <g font-size="13" fill="#1b2f52">
+    <rect x="44" y="666" width="86" height="28" rx="14" fill="#d23b3b"/><text x="87" y="685" text-anchor="middle" fill="#fff" font-weight="700">blocker</text>
+    <text x="140" y="685" font-weight="800">›</text>
+    <rect x="154" y="666" width="100" height="28" rx="14" fill="#c48a0e"/><text x="204" y="685" text-anchor="middle" fill="#fff" font-weight="700">important</text>
+    <text x="264" y="685" font-weight="800">›</text>
+    <rect x="278" y="666" width="130" height="28" rx="14" fill="#7a8aa3"/><text x="343" y="685" text-anchor="middle" fill="#fff" font-weight="700">rest · human</text>
+  </g>
+  <text x="44" y="722" class="s">from the origin record's severity; table order breaks ties</text>
+
+  <!-- ============ PANEL 2: LIFECYCLE ============ -->
+  <circle cx="490" cy="120" r="15" fill="#0f2347"/><text x="490" y="126" text-anchor="middle" fill="#fff" font-weight="800" font-size="16">2</text>
+  <text x="514" y="128" class="h">STATUS LIFECYCLE</text>
+
+  <rect x="478" y="152" width="140" height="44" rx="22" class="box"/><text x="548" y="179" text-anchor="middle" class="b" font-weight="700">blocked</text>
+  <rect x="736" y="152" width="140" height="44" rx="22" class="teal"/><text x="806" y="179" text-anchor="middle" fill="#11807a" font-weight="800" font-size="14">ready</text>
+  <path class="ln" d="M620 174H732" marker-end="url(#a)"/><text x="676" y="166" text-anchor="middle" class="s">deps done</text>
+
+  <rect x="676" y="262" width="200" height="52" rx="14" class="purp"/>
+  <text x="776" y="285" text-anchor="middle" fill="#5b3fb5" font-weight="800" font-size="14">in-progress</text>
+  <text x="776" y="303" text-anchor="middle" class="s m" font-size="10.5">claim:ana@20261106-1000</text>
+  <path class="ln" d="M806 198V258" marker-end="url(#a)"/><text x="798" y="234" class="s" text-anchor="end">dispatch</text>
+  <text x="798" y="248" class="s" text-anchor="end">(loop-iteration)</text>
+
+  <rect x="470" y="380" width="134" height="56" rx="14" class="grn"/><text x="537" y="404" text-anchor="middle" fill="#2f8a4b" font-weight="800" font-size="14">done</text><text x="537" y="422" text-anchor="middle" class="s">accept + CLEAR</text>
+  <rect x="622" y="380" width="134" height="56" rx="14" class="gold"/><text x="689" y="404" text-anchor="middle" fill="#8a5f00" font-weight="800" font-size="14">deferred</text><text x="689" y="422" text-anchor="middle" class="s">defer + HOLD</text>
+  <rect x="774" y="380" width="134" height="56" rx="14" class="red"/><text x="841" y="404" text-anchor="middle" fill="#b42525" font-weight="800" font-size="14">escalated</text><text x="841" y="422" text-anchor="middle" class="s">human decides</text>
+  <path class="ln" d="M700 316L560 376" marker-end="url(#a)"/>
+  <path class="ln" d="M748 316L700 376" marker-end="url(#a)"/>
+  <path class="ln" d="M820 316L838 376" marker-end="url(#a)"/>
+
+  <path class="lr" d="M650 378C600 300 640 210 732 182" marker-end="url(#ar)"/>
+  <text x="484" y="250" fill="#5b3fb5" font-size="11.5" font-weight="700">a newer record</text>
+  <text x="484" y="264" fill="#5b3fb5" font-size="11.5" font-weight="700">arrives</text>
+  <path class="lr" d="M890 378C918 320 912 220 878 186" marker-end="url(#ar)"/>
+  <text x="890" y="222" fill="#5b3fb5" font-size="11.5" font-weight="700" text-anchor="end">human</text>
+  <text x="890" y="236" fill="#5b3fb5" font-size="11.5" font-weight="700" text-anchor="end">release</text>
+
+  <rect x="470" y="460" width="438" height="150" rx="14" class="box"/>
+  <text x="486" y="486" class="t" font-size="15">FAILED AS ONE UNIT? SPLIT IT</text>
+  <rect x="486" y="502" width="128" height="58" rx="10" fill="#eef1f6" stroke="#7a8aa3" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <text x="550" y="524" text-anchor="middle" class="b" font-weight="700">LP-a3f9c2</text>
+  <text x="550" y="540" text-anchor="middle" class="s">dropped</text>
+  <text x="550" y="554" text-anchor="middle" class="s m" font-size="10">split into …</text>
+  <path class="ln" d="M616 520H666" marker-end="url(#a)"/>
+  <path class="ln" d="M616 544H666" marker-end="url(#a)"/>
+  <rect x="670" y="500" width="110" height="28" rx="8" class="teal"/><text x="725" y="519" text-anchor="middle" class="b m" font-size="12">LP-7c21d0</text>
+  <rect x="670" y="534" width="110" height="28" rx="8" class="teal"/><text x="725" y="553" text-anchor="middle" class="b m" font-size="12">LP-e04b9a</text>
+  <text x="790" y="518" class="s">split from</text>
+  <text x="790" y="532" class="s">LP-a3f9c2</text>
+  <text x="790" y="546" class="s">2–4 children</text>
+  <text x="790" y="560" class="s">depth ≤ 2</text>
+  <text x="486" y="582" class="s">only after a revise with a repair, a failed check, or a defer naming scope</text>
+  <text x="486" y="598" class="s">dependents move to all children · L2: you confirm · L3: escalate instead</text>
+
+  <rect x="470" y="626" width="438" height="112" rx="14" class="red"/>
+  <text x="486" y="652" fill="#b42525" font-weight="800" font-size="14">ATTEMPT BUDGET: 3</text>
+  <g>
+    <circle cx="502" cy="682" r="13" fill="#d23b3b"/><text x="502" y="687" text-anchor="middle" fill="#fff" font-weight="800" font-size="13">1</text>
+    <circle cx="536" cy="682" r="13" fill="#d23b3b"/><text x="536" y="687" text-anchor="middle" fill="#fff" font-weight="800" font-size="13">2</text>
+    <circle cx="570" cy="682" r="13" fill="#d23b3b"/><text x="570" y="687" text-anchor="middle" fill="#fff" font-weight="800" font-size="13">3</text>
+    <path class="ln" d="M592 682H632" marker-end="url(#a)"/>
+    <text x="642" y="687" fill="#b42525" font-weight="800" font-size="14">4th → escalated</text>
+  </g>
+  <text x="486" y="716" class="s">every defer and every revise counts; split children inherit the parent's</text>
+  <text x="486" y="730" class="s">count + 1 · a done node never moves back</text>
+
+  <!-- ============ PANEL 3: DISPATCH & TEAM ============ -->
+  <circle cx="956" cy="120" r="15" fill="#0f2347"/><text x="956" y="126" text-anchor="middle" fill="#fff" font-weight="800" font-size="16">3</text>
+  <text x="980" y="128" class="h">DISPATCH SAFELY</text>
+
+  <rect x="938" y="148" width="404" height="160" rx="14" class="box"/>
+  <text x="954" y="174" fill="#0f2347" font-weight="800" font-size="13.5" class="m">plan-lint --pre-dispatch</text>
+  <text x="954" y="192" class="s">must pass before every dispatch</text>
+  <g font-size="12">
+    <rect x="954" y="204" width="180" height="26" rx="13" fill="#fdeaea" stroke="#d23b3b"/><text x="964" y="221" fill="#b42525" font-weight="700" class="m">[check]</text><text x="1026" y="221" class="s">no check</text>
+    <rect x="1146" y="204" width="180" height="26" rx="13" fill="#fdeaea" stroke="#d23b3b"/><text x="1156" y="221" fill="#b42525" font-weight="700" class="m">[oversize]</text><text x="1238" y="221" class="s">&gt; 3 paths</text>
+    <rect x="954" y="238" width="180" height="26" rx="13" fill="#fdeaea" stroke="#d23b3b"/><text x="964" y="255" fill="#b42525" font-weight="700" class="m">[origin]</text><text x="1030" y="255" class="s">unreviewed</text>
+    <rect x="1146" y="238" width="180" height="26" rx="13" fill="#fdeaea" stroke="#d23b3b"/><text x="1156" y="255" fill="#b42525" font-weight="700" class="m">[split]</text><text x="1214" y="255" class="s">bad split</text>
+    <rect x="954" y="272" width="180" height="26" rx="13" fill="#fff6e0" stroke="#c48a0e"/><text x="964" y="289" fill="#8a5f00" font-weight="700" class="m">[scope]</text><text x="1026" y="289" class="s">warning</text>
+    <rect x="1146" y="272" width="180" height="26" rx="13" fill="#fff6e0" stroke="#c48a0e"/><text x="1156" y="289" fill="#8a5f00" font-weight="700" class="m">[done-when]</text><text x="1252" y="289" class="s">warning</text>
+  </g>
+
+  <rect x="938" y="322" width="404" height="128" rx="14" class="teal"/>
+  <text x="954" y="348" fill="#11807a" font-weight="800" font-size="13.5" class="m">plan-ready --batch 5</text>
+  <text x="954" y="366" class="s">ready nodes by priority, never two that touch the same file</text>
+  <g font-size="12">
+    <rect x="954" y="380" width="110" height="28" rx="8" class="teal"/><text x="1009" y="399" text-anchor="middle" class="m">LP-a1 a.ts</text>
+    <rect x="1074" y="380" width="110" height="28" rx="8" class="teal"/><text x="1129" y="399" text-anchor="middle" class="m">LP-c3 c.ts</text>
+    <rect x="1194" y="380" width="132" height="28" rx="8" fill="#eef1f6" stroke="#7a8aa3" stroke-dasharray="5 4"/><text x="1260" y="399" text-anchor="middle" class="m" fill="#56647a">LP-b2 a.ts</text>
+  </g>
+  <text x="954" y="426" class="s">LP-b2 shares a.ts with LP-a1 → waits for the next call</text>
+  <text x="954" y="441" class="s">a node with an empty scope always runs alone</text>
+
+  <rect x="938" y="464" width="404" height="128" rx="14" class="purp"/>
+  <text x="954" y="490" fill="#5b3fb5" font-weight="800" font-size="14">TWO DEVELOPERS, ONE PROJECT</text>
+  <g class="b" font-size="12.5">
+    <text x="954" y="514">• ids never collide: <tspan class="m">LP-&lt;6 hex&gt;</tspan></text>
+    <text x="954" y="534">• claims have owners; never reset someone else's</text>
+    <text x="954" y="554">• commit + push the claim; rejected push → re-plan</text>
+    <text x="954" y="574">• logs merge as a union · merge commits, no squash</text>
+  </g>
+
+  <rect x="938" y="606" width="404" height="132" rx="14" fill="#14284a"/>
+  <circle cx="958" cy="624" r="5" fill="#ff5f57"/><circle cx="975" cy="624" r="5" fill="#febc2e"/><circle cx="992" cy="624" r="5" fill="#28c840"/>
+  <g class="m" font-size="12.5" fill="#e8eef8">
+    <text x="956" y="652">pnpm trace plan-id "&lt;description&gt;"</text>
+    <text x="956" y="672">pnpm trace plan-lint --pre-dispatch</text>
+    <text x="956" y="692">pnpm trace plan-ready --batch 5</text>
+    <text x="956" y="712">pnpm trace status</text>
+    <text x="956" y="732">pnpm trace plan-drift</text>
+  </g>
+</svg>

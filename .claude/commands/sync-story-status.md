@@ -5,16 +5,29 @@ argument-hint: [scope, e.g. "current branch"]
 
 Synchronize user story status with current implementation and tests.
 
+**With more than one developer, run it on `main`** (after the work merged), or keep one
+status PR open at a time: two branches that each set a status write two story records that
+both claim "latest", and `story-lint`'s `[latest]` (a warning) only reports the order after a
+union merge. If two status PRs did merge, re-sync after merging two status PRs, so one new
+record settles each story.
+
 Scope:
 $ARGUMENTS
 
 Procedure:
 
-1. Read `docs/user-stories.md` (the index), then open only the per-story files
+1. **Stale evidence first:** run `pnpm trace reaudit --claim-prefix story:` — the story-status
+   records whose cited evidence changed since their commit (or whose commit is unreachable).
+   Re-verify those stories before any other; the list never downgrades a status by itself — a
+   new scan-docs record is still the only way a story's status changes.
+   Then read `docs/user-stories.md` (the index), then open only the per-story files
    under `docs/stories/` that are in scope. Also consult the memory wiki
    (`.claude/memory/index.md` → relevant topic pages such as `topics/testing.md`)
    so evidence judgments match the project's testing/verification conventions.
-2. Read `docs/implementation-status.md` if it exists.
+2. Read `docs/implementation-status.md` if it exists. `pnpm trace story-lint` lists each
+   story's open loop-plan nodes (`[plan-nodes]`, from a node's `story:US-NNN#ACk` origin
+   token; `pnpm trace plan-ready --json` carries the same links): an open node is context,
+   never evidence — a plan node never moves a story's status, and a status never moves a node.
 3. Inspect relevant source files.
 4. Inspect relevant unit/component tests.
 5. Inspect relevant E2E tests.

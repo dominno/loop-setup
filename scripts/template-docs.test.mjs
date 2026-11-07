@@ -6,7 +6,7 @@
 // and a phrase split across a line break still counts as present.
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ESLint } from "eslint";
@@ -59,6 +59,138 @@ describe("loop.md consumer procedure", () => {
     const loop = prose(".claude/loop.md");
     const anchors = ["write a `revise` record (same `claim_id`", "leave the node `ready` with that record and the attempt counted"];
     expect(anchors.filter((a) => !loop.includes(a))).toEqual([]);
+  });
+});
+
+describe("planning upgrade (docs/plans/planning-upgrade/04-spec.md)", () => {
+  it("W0: L2 needs one logged L1 iteration with a re-plan delta and a passing pre-dispatch plan-lint", () => {
+    const checklist = prose(".claude/loop-checklist.md");
+    const anchors = ["**(before L2)**", "at least one L1 iteration logged in `loop-run-log.md` with a re-plan delta", "`pnpm trace plan-lint --pre-dispatch` passed on a non-empty plan"];
+    expect(anchors.filter((a) => !checklist.includes(a))).toEqual([]);
+  });
+
+  it("the not-adopted plan borrowings are written down once, each with what would reopen it, and loop-plan.md points there", () => {
+    const page = section(read(".claude/memory/topics/workflow.md"), "## Not adopted (plan)");
+    for (const item of ["JSON plan", "epic/parent", "complexity score", "new node status"]) expect(page, item).toContain(item);
+    expect((page.match(/Reopen when/g) || []).length).toBeGreaterThanOrEqual(4);
+    expect(page).toContain("plan-items item shape");
+    expect(prose(".claude/memory/loop-plan.md")).toContain("*Not adopted (plan)*");
+  });
+});
+
+describe("W4.1 /plan-nodes: a confirmation-gated planner, offered by /multi-agent-dev and /write-goal, never invoked by them", () => {
+  it("the command appends each proposed node only after the user confirms it, lints the draft first, and is for /loop work only", () => {
+    const cmd = prose(".claude/commands/plan-nodes.md");
+    const anchors = [
+      "only after the user confirms it",
+      "pnpm trace plan-lint --pre-dispatch --plan",
+      "for work meant to run through `/loop`",
+      "`origin` `plan:<source> <YYYY-MM-DD>`",
+      "never sets a node `done`, `deferred` or `escalated`",
+    ];
+    expect(anchors.filter((a) => !cmd.includes(a))).toEqual([]);
+    expect(prose(".claude/skills-index.md")).toContain("`/plan-nodes`");
+  });
+
+  it("/multi-agent-dev and /write-goal offer /plan-nodes and never run it themselves; /write-goal proposes blocked human:goal rows for an oversize loop goal", () => {
+    for (const f of [".claude/commands/multi-agent-dev.md", ".claude/commands/write-goal.md"]) {
+      expect(prose(f), f).toContain("offer `/plan-nodes`");
+      expect(prose(f), f).toContain("never invoke it yourself");
+    }
+    const goal = prose(".claude/commands/write-goal.md");
+    for (const a of ["origin `human:goal <YYYY-MM-DD>`", "status `blocked`", "pasting them is the approval"]) expect(goal, a).toContain(a);
+  });
+});
+
+describe("W4.2 persistent step lists (docs/plans/<slug>/steps.md)", () => {
+  const STEP_HEADER = "| id | description | scope | check | after | status | commit |";
+  const plans = existsSync(join(ROOT, "docs/plans")) ? readdirSync(join(ROOT, "docs/plans")).filter((d) => existsSync(join(ROOT, "docs/plans", d, "steps.md"))) : [];
+
+  it("/multi-agent-dev writes its plan as a step list in the repo, with follow-ups as child ids", () => {
+    const cmd = prose(".claude/commands/multi-agent-dev.md");
+    for (const a of ["`docs/plans/<slug>/steps.md`", STEP_HEADER, "a child id of the step it came from (`S03.1`)", "never only in a scratchpad"]) expect(cmd, a).toContain(a);
+  });
+
+  it("every committed step list has the fixed header, unique ids, and children whose parent step exists", () => {
+    expect(plans.length).toBeGreaterThan(0);
+    for (const d of plans) {
+      const text = read(`docs/plans/${d}/steps.md`);
+      expect(text, d).toContain(`${STEP_HEADER}\n|---|---|---|---|---|---|---|`);
+      const ids = [...text.matchAll(/^\| (S[0-9]+(?:\.[0-9]+)*) \|/gm)].map((m) => m[1]);
+      expect(new Set(ids).size, d).toBe(ids.length);
+      const orphans = ids.filter((id) => id.includes(".") && !ids.includes(id.slice(0, id.lastIndexOf("."))));
+      expect(orphans, d).toEqual([]);
+    }
+  });
+});
+
+describe("M6: merge commits keep TRACE provenance reachable", () => {
+  it("CI runs a warn-only provenance job on full history, and the adoption guide says to disable squash merges", () => {
+    const ci = read(".github/workflows/verify.yml");
+    const job = ci.slice(ci.indexOf("  provenance:"));
+    expect(job).toContain("fetch-depth: 0");
+    expect(job).toContain("node scripts/trace/cli.mjs reaudit --unreachable --annotate");
+    expect(job).toContain("continue-on-error: true");
+    const guide = prose("docs/adoption-guide.md");
+    expect(guide).toContain("disable squash merging");
+  });
+});
+
+describe("M7-M10: two developers on one project", () => {
+  it("the adoption guide has a 'Working as a team' section covering ids, claims, the lease, union logs, merge commits, shared plans, story sync and /dream, and what stays personal", () => {
+    const team = section(read("docs/adoption-guide.md"), "## Working as a team").replace(/\s+/g, " ");
+    const anchors = ["pnpm trace plan-id", "claim:<owner>@<run-id>", "[claim-conflict]", "commit and push the claim", "merge=union", "disable squash merging", "docs/plans/<slug>/steps.md", "`/sync-story-status` on `main`", "`/dream` through PRs", "settings.local.json"];
+    expect(anchors.filter((a) => !team.includes(a))).toEqual([]);
+  });
+
+  it("/sync-story-status runs on main (one status PR at a time) and /dream's wiki edits go through PRs, never a hand-edited store", () => {
+    const sync = prose(".claude/commands/sync-story-status.md");
+    for (const a of ["run it on `main`", "re-sync after merging two status PRs"]) expect(sync, a).toContain(a);
+    const dream = prose(".claude/commands/dream.md");
+    for (const a of ["wiki edits go through PRs", "a new record that `revises` it"]) expect(dream, a).toContain(a);
+  });
+});
+
+describe("planning guide (docs/planning-guide.md)", () => {
+  it("documents every plan command the trace CLI offers, and README shows the planning infographic (SVG source + PNG)", () => {
+    const guide = read("docs/planning-guide.md");
+    const help = read("scripts/trace/cli.mjs");
+    const cmds = ["plan-lint", "plan-ready", "plan-items", "plan-id", "claim-token", "status", "plan-drift", "story-lint", "reaudit"];
+    for (const c of cmds) expect(help, c).toContain(`pnpm trace ${c}`);
+    expect(cmds.filter((c) => !guide.includes(`pnpm trace ${c}`))).toEqual([]);
+    for (const f of ["docs/infographic-5-planning.svg", "docs/infographic-5-planning.png"]) expect(existsSync(join(ROOT, f)), f).toBe(true);
+    expect(read("README.md")).toContain("(docs/infographic-5-planning.png)");
+    expect(guide).toContain("(infographic-5-planning.png)");
+  });
+});
+
+describe("README infographics stay true to the repo", () => {
+  const svg = (n) => read(`docs/${n}.svg`);
+  const NAMES = ["infographic-1-task-cycle", "infographic-2-multi-agent-workflows", "infographic-3-components", "infographic-4-loop-and-adoption", "infographic-5-planning"];
+
+  it("each README infographic has its SVG source next to the PNG", () => {
+    for (const n of NAMES) {
+      expect(existsSync(join(ROOT, `docs/${n}.svg`)), n).toBe(true);
+      expect(read("README.md"), n).toContain(`(docs/${n}.png)`);
+    }
+  });
+
+  it("the counts drawn on them match the commands and workflows on disk", () => {
+    const commands = readdirSync(join(ROOT, ".claude/commands")).filter((f) => f.endsWith(".md")).length;
+    const workflows = readdirSync(join(ROOT, ".claude/workflows")).filter((f) => f.endsWith(".js")).length;
+    expect(svg("infographic-3-components")).toContain(`commands/ — ${commands} commands`);
+    expect(svg("infographic-3-components")).toContain(`workflows/ — ${workflows} workflows`);
+    expect(svg("infographic-2-multi-agent-workflows")).toContain(`${workflows} MULTI-AGENT WORKFLOWS`);
+    for (const f of readdirSync(join(ROOT, ".claude/workflows")).filter((x) => x.endsWith(".js"))) {
+      expect(svg("infographic-2-multi-agent-workflows"), f).toContain(f.replace(/\.js$/, ""));
+    }
+  });
+
+  it("the story-map files drawn on infographic 3 exist", () => {
+    for (const f of ["prd.md", "user-stories.md", "implementation-status.md", "e2e-coverage-map.md", "story-verification-log.md", "gaps-and-risks.md"]) {
+      expect(svg("infographic-3-components"), f).toContain(f);
+      expect(existsSync(join(ROOT, "docs", f)), f).toBe(true);
+    }
   });
 });
 

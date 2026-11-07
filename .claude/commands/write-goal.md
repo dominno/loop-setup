@@ -48,6 +48,14 @@ critic matrix, browser evidence, commands run, and `git diff --stat`.
 Stop after <N> turns if not achieved.
 ```
 
+## When the goal is loop work that is too big for one node
+If the outcome could run through `/loop` (it touches no denylist path) but exceeds the plan's
+size ceiling (more than 3 files, or several independent outcomes), also output proposed
+plan rows for `.claude/memory/loop-plan.md` (the 10-column table: `scope`, `check` and a
+`done when:` clause each), with origin `human:goal <YYYY-MM-DD>` and status `blocked`. The
+user pastes them into the table: pasting them is the approval (a human origin is a sanctioned
+one). Or offer `/plan-nodes` to confirm them one at a time — never invoke it yourself.
+
 For a `/loop`, instead frame it as recurring watchdog work (what to re-check each
 iteration, what to fix vs. only report, when to stop) consistent with
 `.claude/loop.md`.
