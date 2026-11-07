@@ -3,9 +3,11 @@
 - Chromium is pre-provisioned at `/opt/pw-browsers`; `PLAYWRIGHT_BROWSERS_PATH`
   is already set. Run installs with `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` and do
   **not** run `playwright install`.
-- Keep `@playwright/test` pinned to the version whose bundled Chromium matches the
-  pre-provisioned build (currently **1.56.0 ↔ Chromium build 1194**). Bumping
-  Playwright without a matching browser will fail in headless web sessions.
+- `@playwright/test` is pinned to **1.56.0**, which launches Chromium build **1194**; the
+  pre-provisioned build is a property of the container image (1194 earlier, 1243 on
+  2026-11-06). A mismatch shows as "Executable doesn't exist … -1194": bridge it with the
+  scratchpad `PLAYWRIGHT_BROWSERS_PATH` shim below, not by bumping Playwright (CI pins its
+  own browser). <!-- rec:TR-1a2a7cac54bb -->
 - Manual MCP browser verification is unavailable in headless web sessions (no
   Chrome/Playwright MCP attached); automated Chromium E2E is the verification path.
 - **CI is different from the web env:** GitHub Actions has no pre-provisioned

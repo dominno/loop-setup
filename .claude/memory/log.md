@@ -377,3 +377,7 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
   0 quarantined, 0 rejected.
 - Reported, not edited (needs confirmation): the remote-env bullet "1.56.0 ↔ Chromium build 1194"
   is stale for this container image.
+
+## [2026-11-07] ingest | rewrite the Playwright/Chromium pin fact (user confirmed)
+- Admission: 1 qualified (TR-1a2a7cac54bb → topics/remote-env.md: 1.56.0 launches build 1194; the
+  provisioned build depends on the container image). 0 committed, 0 quarantined, 0 rejected.
