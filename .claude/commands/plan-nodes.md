@@ -18,6 +18,8 @@ $ARGUMENTS
 2. Draft the nodes. Each one is a bounded unit a single loop dispatch can finish:
    - `description`: one line ending `— done when: <the observable outcome>`, written from
      the source's acceptance criterion, never from implementer output;
+   - shape it the hexagonal way (`CLAUDE.md` *Design principles*): a core change, a port and an
+     adapter are separate nodes when each is big enough to need its own check;
    - `scope`: the files it may touch, at most 3 (1 literal file if it is to run at L3) —
      a larger unit is split into several nodes now, not later;
    - `check`: the smallest command that proves it (a unit test file, a named Playwright

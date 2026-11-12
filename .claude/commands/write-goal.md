@@ -24,8 +24,9 @@ $ARGUMENTS
 2. **3–5 measurable success criteria** — objectively checkable and tied to this
    repo's gates (`pnpm verify` green, no blocking console errors, E2E covers the
    happy path + ≥1 failure path, no post-implementation critic blockers).
-3. **Constraints** that hold throughout (scope limits, "don't touch X", no
-   unrelated refactors, don't weaken or delete tests, don't push/deploy).
+3. **Constraints** that hold throughout: always the design principles from `CLAUDE.md`
+   (hexagonal architecture first, then SOLID, KISS, DRY, test-first), plus scope limits, "don't touch X", no
+   unrelated refactors, don't weaken or delete tests, don't push/deploy.
 4. **Checkpoint rules** — when to pause for review vs. run straight through.
 5. **Self-verify instruction** — run the relevant checks + a post-implementation
    critic round and report evidence (commands run, browser check, `git diff --stat`)
