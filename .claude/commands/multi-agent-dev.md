@@ -63,7 +63,10 @@ Procedure:
    next critic round (pass the evidence as `priorEvidence`) — never fix blind and never
    act on the defer itself. A cap-deferred important finding was never adjudicated: the
    next round verifies it (focus on it, or raise `args.maxVerifiers`) before you act on it.
-6. Implement only those. Keep the **maker/checker split**: implementation is your
+6. Implement only those, following `CLAUDE.md` *Design principles*: hexagonal architecture
+   first (the core stays free of framework, DOM, storage, `fetch` and clock; I/O goes through a
+   port with an adapter at the edge), then SOLID, KISS and DRY, test-first. Name in the plan
+   which layer each change touches: core, port or adapter. Keep the **maker/checker split**: implementation is your
    pass; the post-implementation workflow below is the independent checker.
 7. Run the smallest relevant automated checks first. For a bug fix, first add or adjust a
    test that fails on the bug and keep its failing output (write it before the step-6

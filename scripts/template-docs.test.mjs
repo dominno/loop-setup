@@ -52,6 +52,30 @@ describe("CLAUDE.md governing rules", () => {
   });
 });
 
+describe("design principles: hexagonal architecture first, then SOLID, KISS, DRY", () => {
+  const claudeMd = prose("CLAUDE.md");
+  const principles = section(read("CLAUDE.md"), "## Design principles").replace(/\s+/g, " ");
+
+  it("CLAUDE.md makes hexagonal architecture the default for new and changed code and explains what each principle buys", () => {
+    expect(principles.length).toBeGreaterThan(0);
+    for (const a of ["Hexagonal architecture (ports and adapters)", "dependency rule", "Driving adapters", "Driven adapters", "SOLID", "KISS", "DRY", "TDD"]) {
+      expect(principles, a).toContain(a);
+    }
+    expect((principles.match(/What it buys:/g) || []).length).toBeGreaterThanOrEqual(4); // hexagonal, SOLID, KISS, DRY
+    expect(principles).toContain("src/lib/rememberedName.ts"); // names the adapter that has no port yet
+    expect(claudeMd).toContain("see *Design principles*"); // the development rule points at the section
+  });
+
+  it("the commands that plan and build code, and the architecture critic, apply it", () => {
+    for (const f of [".claude/commands/multi-agent-dev.md", ".claude/commands/write-goal.md", ".claude/commands/plan-nodes.md"]) {
+      expect(prose(f), f).toContain("hexagonal");
+    }
+    for (const f of [".claude/workflows/critic-panel.js", ".claude/workflows/trace-bench.js"]) {
+      expect(read(f), f).toMatch(/key: 'frontend-arch'[^\n]*Hexagonal boundaries/);
+    }
+  });
+});
+
 describe("loop.md consumer procedure", () => {
   it("a check that fails after an apply leaves the node on a revise of its own claim", () => {
     // plan-items passes a ready node's own loop:<id> record on as priorRecordId: left on the superseded
