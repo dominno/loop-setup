@@ -34,5 +34,11 @@
   `PLAYWRIGHT_BROWSERS_PATH` with `chromium_headless_shell-1194/chrome-linux/headless_shell`
   symlinked to the 1243 binary (plus `ffmpeg-1011`) passed all 16 E2E tests with no repo change.
   <!-- rec:TR-e7829fbc9fc1 -->
+- A kit installed into `~/.claude` by the environment **setup script** (it runs before Claude
+  starts) is loaded by a fresh web session: its user-scope commands in `~/.claude/commands` are
+  available as skills, and its SessionStart hook in `~/.claude/settings.json` runs, even though
+  the runtime writes its own `~/.claude/launcher-settings.json` with its own SessionStart/Stop
+  hooks. Check with `stat -c %w ~/.claude/loop-setup/installed.json` (it predates the session
+  transcript) and `loop-setup doctor`. <!-- rec:TR-1a9be639eba8 -->
 
 Related: [tooling](./tooling.md) · [testing](./testing.md) · [build-and-verify](./build-and-verify.md)
