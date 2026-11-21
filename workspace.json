@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "loop-setup-e3ed255a",
+  "project": {
+    "name": "loop-setup"
+  },
+  "state": {
+    "branch": "claude/loop-state"
+  },
+  "createdAt": "2026-11-21T21:13:44.642Z",
+  "migratedFrom": {
+    "path": ".claude/memory",
+    "commit": "4ccf2579d37e59fde9af4dda217355b16335ff10"
+  }
+}
