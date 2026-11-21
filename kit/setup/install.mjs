@@ -139,7 +139,25 @@ export function mergeSettings(settings, owned, previous = null) {
   return out;
 }
 
-/** Write a settings file through a symlink to its target (a dotfiles setup), keeping one backup. */
+/**
+ * The user's settings.json: {} only when the file does not exist. A file that exists but does not
+ * parse is the user's data — refuse (nothing is changed) instead of replacing it with the kit's entries.
+ */
+export function readSettings(path) {
+  if (!existsSync(path)) return {};
+  const text = readFileSync(path, "utf8");
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    throw new Error(`${path} does not parse as JSON (${e.message}) — fix it first; loop-setup changed nothing`);
+  }
+}
+
+/**
+ * Write a settings file through a symlink to its target (a dotfiles setup). The FIRST original is
+ * kept as <file>.loop-setup.bak and never overwritten, so a later install or uninstall cannot
+ * replace the user's original with a kit-written copy.
+ */
 function writeSettings(path, value) {
   let target = path;
   try {
@@ -147,7 +165,8 @@ function writeSettings(path, value) {
   } catch {
     // no file yet
   }
-  if (existsSync(target)) writeFileSync(`${target}.loop-setup.bak`, readFileSync(target));
+  const bak = `${target}.loop-setup.bak`;
+  if (existsSync(target) && !existsSync(bak)) writeFileSync(bak, readFileSync(target));
   writeJson(target, value);
 }
 
@@ -162,6 +181,9 @@ export function install({ from, claudeHome, linkBin = null, withStopGate = false
   const previous = readJson(manifestPath, null);
   const { files, commit, from: source } = readKitSource(from);
   const kitJson = JSON.parse(files.get("kit.json").toString("utf8"));
+  // Read the user's settings first: one that does not parse stops the install before anything changes.
+  const settingsPath = join(claudeHome, "settings.json");
+  const userSettings = readSettings(settingsPath);
 
   // Commands first, so a clash stops the install before anything changes.
   const commandsDir = join(claudeHome, "commands");
@@ -242,8 +264,7 @@ export function install({ from, claudeHome, linkBin = null, withStopGate = false
 
   // Settings.
   const owned = ownedSettings({ kitDir, loopDir, shim, withStopGate });
-  const settingsPath = join(claudeHome, "settings.json");
-  writeSettings(settingsPath, mergeSettings(readJson(settingsPath, {}), owned, previous?.settings || null));
+  writeSettings(settingsPath, mergeSettings(userSettings, owned, previous?.settings || null));
 
   const manifest = {
     schema: MANIFEST_SCHEMA,
@@ -267,6 +288,8 @@ export function uninstall({ claudeHome }) {
   const manifestPath = manifestPathFor(kitDir);
   const manifest = readJson(manifestPath, null);
   if (!manifest) throw new Error(`the kit is not installed in ${claudeHome} (no ${manifestPath})`);
+  const settingsPath = join(claudeHome, "settings.json");
+  const userSettings = readSettings(settingsPath); // refuses before anything is removed
   const kept = [];
   for (const [name, hash] of Object.entries(manifest.commands || {})) {
     const p = join(claudeHome, "commands", `${name}.md`);
@@ -274,8 +297,7 @@ export function uninstall({ claudeHome }) {
     if (sha256(readFileSync(p)) === hash) rmSync(p);
     else kept.push(p);
   }
-  const settingsPath = join(claudeHome, "settings.json");
-  if (existsSync(settingsPath)) writeSettings(settingsPath, mergeSettings(readJson(settingsPath, {}), null, manifest.settings));
+  if (existsSync(settingsPath)) writeSettings(settingsPath, mergeSettings(userSettings, null, manifest.settings));
   if (manifest.bin?.linked) {
     try {
       if (lstatSync(manifest.bin.linked).isSymbolicLink()) unlinkSync(manifest.bin.linked);

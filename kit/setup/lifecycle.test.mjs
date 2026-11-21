@@ -94,6 +94,22 @@ describe("install / uninstall (temp ~/.claude)", () => {
     expect(where.status).toBe(2);
   });
 
+  it("refuses to touch a settings.json that does not parse, and keeps the user's first backup across installs", () => {
+    const home = mkHome("h-badjson");
+    const original = '{ // my settings\n  "model": "opus",\n  "permissions": { "allow": ["Bash(ls)"] },\n}\n';
+    writeFileSync(join(home, "settings.json"), original);
+    expect(() => install({ from: kitSrc, claudeHome: home })).toThrow(/does not parse/);
+    expect(readFileSync(join(home, "settings.json"), "utf8")).toBe(original); // untouched
+    expect(existsSync(join(home, "loop-setup/kit"))).toBe(false); // nothing installed
+    const valid = JSON.stringify({ model: "opus", permissions: { allow: ["Bash(ls)"] } });
+    writeFileSync(join(home, "settings.json"), valid);
+    install({ from: kitSrc, claudeHome: home });
+    install({ from: kitSrc, claudeHome: home });
+    uninstall({ claudeHome: home });
+    expect(readFileSync(join(home, "settings.json.loop-setup.bak"), "utf8")).toBe(valid); // the original, not a kit-written copy
+    expect(JSON.parse(readFileSync(join(home, "settings.json"), "utf8"))).toEqual(JSON.parse(valid));
+  });
+
   it("refuses to overwrite a command it did not install (unless --force, keeping a .bak)", () => {
     const home = mkHome("h-clash");
     mkdirSync(join(home, "commands"), { recursive: true });
