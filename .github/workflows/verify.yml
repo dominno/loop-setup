@@ -31,6 +31,8 @@ jobs:
   # Provenance (warn-only): TRACE records cite the commit they were written on. A squash merge
   # orphans those commits, so `reaudit --unreachable` warns about every record whose provenance
   # the full history no longer has (merge with a merge commit instead). It never fails the run.
+  # The records live on the loop-state branch (the project's workspace), checked out beside the
+  # project as the workspace; with no such branch there is nothing to audit.
   provenance:
     name: provenance
     runs-on: ubuntu-latest
@@ -42,7 +44,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node kit/trace/cli.mjs reaudit --unreachable --annotate
+      - name: Check out the loop state (claude/loop-state) as the workspace
+        id: state
+        run: |
+          if git fetch --quiet origin claude/loop-state; then
+            git worktree add --quiet --detach "$RUNNER_TEMP/loop-state" FETCH_HEAD
+            echo "dir=$RUNNER_TEMP/loop-state" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice title=TRACE provenance::no claude/loop-state branch — nothing to audit"
+          fi
+      - if: steps.state.outputs.dir
+        env:
+          LOOP_SETUP_WORKSPACE: ${{ steps.state.outputs.dir }}
+        run: node kit/trace/cli.mjs reaudit --unreachable --annotate
 
   # E2E runs separately because it needs a real browser. GitHub Actions has no
   # pre-provisioned Chromium (unlike Claude Code on the web), so install it here.

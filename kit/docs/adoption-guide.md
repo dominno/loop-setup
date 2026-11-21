@@ -1,52 +1,101 @@
-# Adoption Guide — using this template in a real project
+# Adoption Guide — using the loop-setup kit in a real project
 
-This repo is a **template** for the Claude Code multi-agent critic + loop workflow,
-plus a tiny Next.js starter app that proves every command runs end to end. This
-guide shows how to adopt it in a real project.
+The loop-setup kit (multi-agent critic workflows, TRACE-lite records, a memory wiki and
+hardened loops) is **installed into `~/.claude`, not copied into your repository**. Your
+project carries only its own contract. The loop's state lives in a per-project workspace
+outside the repo, persisted on the orphan branch `claude/loop-state` of the project's own
+remote. This repository is the kit's source (`kit/`) plus a tiny Next.js starter app that
+proves every command runs end to end.
 
-There are two paths:
+There are three paths:
 
-- **Path A — start a new project** from this template (keep the starter, then
-  grow it into your app).
-- **Path B — adopt the workflow** into an existing codebase (copy the workflow
-  files; ignore the starter app).
-
-The portable part is everything **except** the starter app. The starter app
-(`src/`, `e2e/`, and the build configs) only exists to demonstrate the commands.
+- **Path A — start a new project** from this template (keep the starter, then grow it).
+- **Path B — add the kit to an existing project** (install once, `loop-setup init` per project).
+- **Path C — migrate a project that copied the old template** (machinery in `.claude/`, state
+  in `.claude/memory`).
 
 ---
 
-## What's portable vs. starter-only
+## What lives where
 
-**Portable — the workflow (copy these):**
+**Installed once per machine by `loop-setup install` (in `~/.claude`, never in your repo):**
 
 ```txt
-CLAUDE.md                     Project rules, critic roster, completion gates
-kit/commands/*            Slash commands (/multi-agent-dev, /critic-round, /dream, ...)
-kit/workflows/*           Multi-agent orchestration scripts (critic-panel, scan-docs, ...)
-kit/loop.md  loop-checklist.md   Recurring watchdog loop + readiness rubric (used by /loop)
-.claude/loop-workspace/               Knowledge wiki (index.md + topics/ + log.md + loop-run-log.md + loop-plan.md)
-.claude/loop-workspace/trace/  quarantine.md   TRACE-lite record store (start it EMPTY) + /dream quarantine;
-                              with an empty store, strip the topic pages' <!-- rec:TR-… --> comments
-                              (loop-setup wiki-check lists them) and keep those facts as legacy bullets
-.claude/trace/                TRACE-lite schema + bench fixtures (rewrite the fixtures for your app)
-kit/trace/                `loop-setup` CLI + its tests (add "trace": "node kit/trace/cli.mjs"
-                              to package.json and scripts/**/*.test.mjs to your unit-test globs)
-kit/skills-index.md       Command catalog: which slash command fits which task
-.claude/settings.json         Shared permissions (merge into yours; adapt the allow-list)
-kit/hooks/stop-gate.mjs   Optional: the opt-in advisory Stop hook, enabled by no settings file (see
-                              "Optional hooks"); its tests are kit/hooks/stop-gate.test.mjs
-docs/*.md  docs/stories/      Story-map scaffolds (user-stories index, stories/ per-story files, ...)
+~/.claude/loop-setup/kit/             the kit: commands, workflows, loop prompt, rules (rules/KIT.md), TRACE CLI, hooks
+~/.claude/loop-setup/installed.json   what was installed (sha256 of every file); uninstall removes exactly that
+~/.claude/loop-setup/bin/loop-setup   the CLI shim (on PATH via the SessionStart hook, or --link-bin <dir>)
+~/.claude/commands/*.md               /multi-agent-dev, /critic-round, /dream, … and /loop-tick, at user scope
+~/.claude/settings.json               the kit's SessionStart and Stop hooks and read-only permission rules (merged)
+```
+
+**Per project, created by `loop-setup init` or `loop-setup restore` (outside your repo):**
+
+```txt
+~/.claude/loop-setup/workspaces/<slug>-<hex8>/   the loop state: the wiki (index.md, topics/, log.md), the TRACE
+                                                 store (trace/records.jsonl), loop-plan.md, loop-run-log.md and
+                                                 quarantine.md; a git repo on the branch claude/loop-state
+<project>/.claude/loop-workspace                 the git-ignored link to that directory
+<project>/.git/config  [loop-setup] workspace    the clone marker (shared by every worktree of the clone)
+```
+
+**Portable — what your project carries (commit these):**
+
+```txt
+CLAUDE.md                     Your project's own rules: project type, Main commands, localhost, design and repo rules
+.claude/settings.json         Shared permissions: your real commands; the force-push/hard-reset denies
+.gitignore                    /.claude/loop-workspace (the link), .claude/settings.local.json, .claude/worktrees/
+package.json                  qualityBar.perfBudgetKbGzip: the bundle budget the build gate reads
+docs/*.md  docs/stories/      The story map (product state; /scan-project-docs creates it)
+.github/workflows/verify.yml  CI: the typecheck/lint/test/build matrix and e2e (needs no kit)
 ```
 
 **Starter-only — demonstrates the commands (do NOT copy into an existing app):**
 
 ```txt
-src/  e2e/  package.json  pnpm-lock.yaml
+src/  e2e/  pnpm-lock.yaml
 next.config.mjs  next-env.d.ts  tsconfig.json
 eslint.config.mjs  vitest.config.ts  playwright.config.ts
 docs/prd.md                   Example PRD (US-001, US-002) — reference only
+kit/                          The kit's source: install from it; loops never edit it (denylisted)
 ```
+
+---
+
+## Install the kit (once per machine)
+
+```bash
+git clone https://github.com/dominno/loop-setup ~/src/loop-setup     # the kit's source repository
+node ~/src/loop-setup/kit/bin/loop-setup.mjs install --from ~/src/loop-setup --link-bin ~/.local/bin
+loop-setup doctor
+```
+
+- `install` copies the **committed** kit (the source's HEAD, never uncommitted edits).
+- To upgrade, pull and re-run `install`. It refuses to overwrite a command file it did not
+  install unless you pass `--force`, which keeps a `.bak`.
+- `loop-setup uninstall` removes exactly what was installed and never a workspace.
+- The opt-in test gate hook is `--with-stop-gate` (see "Optional hooks").
+
+**Claude Code on the web.** A cloud session starts with an empty `~/.claude` and a fresh clone.
+Install the kit from the environment's **setup script**, which runs before Claude starts, and
+opt the project into **auto-restore**:
+
+```bash
+# environment setup script (runs as root before each fresh session)
+if [ -f loop-setup/kit/bin/loop-setup.mjs ]; then
+  node loop-setup/kit/bin/loop-setup.mjs install --from loop-setup --link-bin /usr/local/bin \
+    --auto-restore github.com/<owner>/<repo> || echo "loop-setup install failed" >&2
+fi
+```
+
+The kit's hooks then do the rest:
+
+- **SessionStart** restores the workspace from `claude/loop-state`, relinks it and injects the
+  rules digest.
+- **Stop** reminds Claude to `loop-setup sync` before the session ends. Unsynced state is lost
+  with the machine.
+
+For another project, make the kit's repository reachable from the environment (attach it, or
+clone the public repo at a pinned tag or commit) and install from that checkout.
 
 ---
 
@@ -58,45 +107,71 @@ docs/prd.md                   Example PRD (US-001, US-002) — reference only
    git clone <this-repo> my-app && cd my-app
    rm -rf .git && git init
    ```
+   The new repo also holds `kit/`. Delete it if you install the kit from its upstream
+   repository instead.
 2. **Install and confirm the baseline is green:**
    ```bash
    pnpm install
    pnpm verify        # typecheck → lint → unit → build → E2E
    ```
-3. **Make it yours.** Replace the greeting starter as you build: edit `src/`,
+3. **Install the kit** (above), then run `loop-setup init` in the project. Run
+   `loop-setup sync` once a remote exists; it publishes `claude/loop-state`.
+4. **Make it yours.** Replace the greeting starter as you build: edit `src/`,
    replace `e2e/` specs, and rewrite `docs/prd.md` with your real requirements.
-4. **Reset the worked examples** when you no longer want them: clear the example
-   rows in the `docs/*.md` story map (keep the headers/format) and re-seed the
-   memory wiki (see “Adapt the memory wiki”).
-5. **Drive development** with the commands (see “First session”).
-
-Keeping the starter while you bootstrap is fine — it gives the critics and tests
-something real to run against until your own flows exist.
+5. **Reset the worked examples** when you no longer want them: clear the example
+   rows in the `docs/*.md` story map (keep the headers/format).
+6. **Drive development** with the commands (see “First session”).
 
 ---
 
-## Path B — adopt the workflow into an existing project
+## Path B — add the kit to an existing project
 
-1. **Copy the portable files** (above) into your repo. If you already have a
-   `CLAUDE.md`, **merge** rather than overwrite — keep your project facts, add the
-   “Multi-Agent …” and memory/`/dream` sections.
-2. **Do not** copy `src/`, `e2e/`, the build configs, `package.json`, or the
-   lockfile. Your project already has those.
-3. **Wire the verification commands** to your real scripts (next section). This is
-   the one step that must be correct.
-4. **Adapt the memory wiki** to your stack (clear the Next/React-specific facts,
-   re-seed with `/dream`).
-5. **Start the story map empty** — clear the US-001/US-002 example content from
-   `docs/*.md`, keep the formats, then run `/scan-project-docs` against your docs.
-6. **Merge `.claude/settings.json`** — see “Permissions” below: allow only your
-   real commands, keep the force-push/hard-reset denies, and put any personal
-   `git add`/`git commit` auto-allow in your own `.claude/settings.local.json`.
-7. **Already have a wiki in `docs/`?** Read “Reconciling with an existing `docs/`
-   wiki” before you start the story map (step 5) — you’ll likely namespace the
-   story map and bridge the two memory systems.
-8. **Already have your own slash commands or notes?** See “Integrating existing
-   skills and old learnings” — give each command a `description` + a
-   `kit/skills-index.md` row, and triage notes into the wiki.
+1. **Install the kit** (above).
+2. **`loop-setup init`** in the project. It does all of the following:
+   - creates the workspace from the kit's template;
+   - writes the clone marker and the `.claude/loop-workspace` link;
+   - adds the `.git/info/exclude` block;
+   - grants Claude access to the workspace through `.claude/settings.local.json`.
+3. **Add `/.claude/loop-workspace` to `.gitignore`** and commit it. The exclude block
+   covers only this clone.
+4. **Write your `CLAUDE.md`** with your project's rules only:
+   - project type, Main commands and localhost;
+   - design and repo rules (this repository's *Development rules* are a good start).
+
+   The kit's process rules are injected by the hook, so do not paste them.
+5. **Wire the verification commands** to your real scripts (next section). This is the one
+   step that must be correct.
+6. **Shared `.claude/settings.json`** — see “Permissions” below:
+   - allow only your real commands;
+   - keep the force-push/hard-reset denies.
+7. **`loop-setup sync`** publishes the state branch. Then run `/scan-project-docs` against
+   your docs to start the story map.
+8. **Already have a wiki in `docs/`, your own slash commands, or notes?** See “Reconciling with
+   an existing `docs/` wiki” and “Integrating existing skills and old learnings”.
+
+---
+
+## Path C — migrate a project that copied the old template
+
+1. **Install the kit** (above).
+2. **`loop-setup init --from-legacy`** moves `.claude/memory` (records, wiki, plan, logs) into
+   the workspace. `loop-setup lint` shows the same record count before and after.
+3. **`loop-setup sync`** publishes the state branch.
+4. **Take the copied machinery out of the repository:**
+   - Untrack `.claude/memory`: `git rm -r --cached .claude/memory`. It stays on disk until
+     you delete it.
+   - Remove `.claude/commands`, `.claude/workflows`, `.claude/hooks`, `.claude/trace`,
+     `.claude/loop.md`, `.claude/loop-checklist.md`, `.claude/skills-index.md`,
+     `scripts/trace` and `scripts/hooks`.
+   - Drop the `trace` script from `package.json`, the `pnpm trace` allows from
+     `.claude/settings.json`, and the `.claude/memory` union lines from `.gitattributes`.
+   - Move the bundle budget into `package.json` → `qualityBar` if you used the quality bar.
+   - Keep only your project's rules in `CLAUDE.md`.
+5. **Add `/.claude/loop-workspace` to `.gitignore`** and commit everything by pathspec.
+
+Old records keep citing their commits. `loop-setup reaudit` compares a moved file (for example
+`scripts/trace/lib.mjs`, now `kit/trace/lib.mjs`) by content, and a legacy `.claude/memory/…`
+reference against its workspace copy.
 
 ---
 
@@ -536,6 +611,10 @@ pre-provisioned. A couple of settings differ on a normal local machine:
 If you only run locally, you can remove the `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD`
 guidance and the version-pin note from `.claude/loop-workspace/topics/remote-env.md`.
 
+On the web, the kit itself comes from the environment's setup script, and the workspace comes
+from `claude/loop-state` at session start. Both are covered in *Install the kit* above. Run
+`loop-setup sync` before the session ends.
+
 ---
 
 ## Driving work: let Claude write the `/goal`
@@ -610,9 +689,12 @@ Adapt it to your stack:
   (deleting the branch alone keeps them), `loop-setup reaudit` reports those records as
   unreachable. Prefer a merge commit for such PRs — better, disable squash merging in
   *Settings → General → Pull Requests* (allow merge commits only), so no PR can orphan them.
-  The warn-only `provenance` job in `verify.yml` (full history, `fetch-depth: 0`) runs
-  `loop-setup reaudit --unreachable --annotate` and prints one warning per record whose
-  provenance commit is gone; it never fails the run. Do not make it a required check.
+  The warn-only `provenance` job in `verify.yml` (full history, `fetch-depth: 0`) checks out the
+  `claude/loop-state` branch as the workspace, runs `loop-setup reaudit --unreachable --annotate`,
+  and prints one warning per record whose provenance commit is gone. It never fails the run.
+  Do not make it a required check.
+- **No kit in CI.** The other jobs need neither the kit nor a workspace: the build reads its
+  budget from `package.json`.
 
 ---
 
@@ -620,40 +702,51 @@ Adapt it to your stack:
 
 (How a single person plans and dispatches work is in [`planning-guide.md`](planning-guide.md).)
 
-Two or more people, each with their own clone or cloud session running Claude Code, integrate
-through branches and PRs. What already merges cleanly: the record store (`merge=union`,
-content-hash ids), the shared `.claude/settings.json`, tree-keyed verdict reuse, and the CI
-gates. What the template adds for a team (docs/plans/planning-upgrade/03-multi-developer.md):
+Two or more people, each with their own clone or cloud session running Claude Code, share
+code through branches and PRs. They share **loop state** through the `claude/loop-state`
+branch: `loop-setup sync` commits, merges a teammate's state and pushes. What merges cleanly:
+
+- the record store: content-hash ids, `merge=union` in the workspace's `.gitattributes`;
+- the shared `.claude/settings.json`;
+- tree-keyed verdict reuse;
+- the CI gates.
+
+The kit adds the following for a team (docs/plans/planning-upgrade/03-multi-developer.md):
 
 - **Node ids never collide.** New plan nodes get `LP-<6 hex>` from `loop-setup plan-id
   "<description>"` (a hash of description, creator and time); legacy `LP-NNN` ids stay valid.
-  If two branches still add one id, `plan-lint` fails `[duplicate-id]` after the merge.
+  If two sessions still add one id, `plan-lint` fails `[duplicate-id]` after the merge.
 - **Claims have owners.** A dispatched node's notes carry `claim:<owner>@<run-id>`
   (`loop-setup claim-token`; owner = `LOOP_OWNER`, else your git `user.email` local part).
-  Re-plan never resets another owner's node: it is stale only once that owner's run-log
-  entry closed (`[in-progress-claimed]` warns until then); two owners on one node fail
-  `[claim-conflict]` in CI.
-- **One loop per branch.** On a shared branch, commit and push the claim rows before
-  dispatching (only when you allowed the loop to commit and push); a rejected push means
-  someone else moved the plan: fetch, re-read, re-plan — never force. Otherwise give each
-  person's loop its own branch.
-- **Append-only logs merge as a union.** `loop-run-log.md` and `.claude/loop-workspace/log.md` are
-  `merge=union` in `.gitattributes`, like the record store, so two appended entries never
-  conflict.
-- **Merge commits, not squash.** Squash merges orphan the commits TRACE records cite:
-  disable squash merging (see *Continuous integration*); the warn-only `provenance` CI job
+  - Re-plan never resets another owner's node. It is stale only once that owner's run-log
+    entry closed; `[in-progress-claimed]` warns until then.
+  - Two owners on one node fail `[claim-conflict]`.
+- **One loop per node.** Before dispatching, commit and push the claim rows: `loop-setup sync`
+  pushes the plan to `claude/loop-state`. A rejected push or a merge conflict means someone
+  else moved the plan. Re-read and re-plan; never force.
+- **Append-only logs merge as a union.** `loop-run-log.md`, `log.md` and the store are
+  `merge=union` in the workspace's `.gitattributes`, so two appended entries never conflict.
+  `sync` re-runs `loop-setup lint` and `wiki-check` after the merge and refuses to push a
+  state that does not replay.
+- **Merge commits, not squash.** Squash merges orphan the project commits TRACE records cite,
+  so disable squash merging (see *Continuous integration*). The warn-only `provenance` CI job
   lists any record whose commit is gone.
-- **Plans live in the repo.** Loop work goes into `loop-plan.md` through `/plan-nodes`; a
-  `/multi-agent-dev` plan is a step list in `docs/plans/<slug>/steps.md` (id, description,
-  scope, check, after, status, commit). A plan only in a personal scratchpad is invisible to
-  the other developer.
+- **Plans live with the state.** Loop work goes into `loop-plan.md` through `/plan-nodes`.
+  A `/multi-agent-dev` plan is a step list in `docs/plans/<slug>/steps.md` in the repo (id,
+  description, scope, check, after, status, commit). A plan kept only in a personal scratchpad
+  is invisible to the other developer.
 - **Story statuses:** run `/sync-story-status` on `main` (or one status PR at a time), and
   re-sync after merging two status PRs; `story-lint`'s `[latest]` stays a warning.
-- **The wiki:** run `/dream` through PRs too; `wiki-check` in CI is the post-merge gate, and a
-  retire/cite collision is resolved by a new revising record, never a hand-edited store.
+- **The wiki:** `/dream` edits reach teammates through `loop-setup sync`. The state branch is
+  not PR-reviewed, so `sync`'s `wiki-check` is the gate. A retire/cite collision is resolved by
+  a new revising record, never a hand-edited store.
 
-What stays personal: `.claude/settings.local.json` (git-ignored allows), your worktrees and
-`/workflows` runs, and your scratchpad.
+What stays personal:
+
+- the kit install in `~/.claude`;
+- `.claude/settings.local.json`, holding the workspace grant and any git-ignored allows;
+- your worktrees and `/workflows` runs;
+- your scratchpad.
 
 ---
 
@@ -727,28 +820,25 @@ issues; record nice-to-haves; avoid unrelated refactors.
 ## Adoption checklist
 
 ```txt
-[ ] Copied CLAUDE.md (merged with any existing one)
-[ ] Copied kit/commands/, kit/workflows/, kit/loop.md, loop-checklist.md,
-    .claude/loop-workspace/, .claude/trace/, kit/skills-index.md and kit/trace/
-[ ] Started .claude/loop-workspace/trace/ and quarantine.md EMPTY (no template records, no quarantine rows)
-    and stripped the topic pages' <!-- rec:TR-… --> comments (loop-setup wiki-check exits 0)
-[ ] package.json has "trace": "node kit/trace/cli.mjs"; unit-test globs include scripts/**/*.test.mjs
-[ ] Copied docs/*.md and docs/stories/ story-map scaffolds (content cleared, formats kept)
-[ ] CLAUDE.md "Main commands" point at my real scripts
+[ ] Kit installed (loop-setup install; loop-setup doctor is green); on the web, from the setup script
+    with --auto-restore for this project
+[ ] loop-setup init (or init --from-legacy) ran in the project; loop-setup sync published claude/loop-state
+[ ] .gitignore lists /.claude/loop-workspace (plus .claude/settings.local.json and .claude/worktrees/);
+    git status shows no workspace files; my linter ignores .claude/worktrees/**
+[ ] CLAUDE.md holds my project's rules only: Main commands point at my real scripts, design + repo rules
 [ ] verify trimmed to the scripts I actually have (no missing-script failure)
 [ ] Package-manager + localhost URL/port updated to match my project
 [ ] Monorepo: src/ , e2e/ , and port paths adjusted to my package layout
-[ ] Merged .claude/settings.json into mine: allows only my real commands, denies kept;
+[ ] .claude/settings.json allows only my real commands and keeps the force-push/hard-reset denies;
     any git add/commit auto-allow lives only in my own .claude/settings.local.json
-[ ] Optional: copied the opt-in Stop hook kit/hooks/stop-gate.mjs + kit/hooks/stop-gate.test.mjs
-    (off until I add its snippet, see "Optional hooks"), or left both out
-[ ] .gitignore covers .claude/settings.local.json and .claude/worktrees/; my linter ignores .claude/worktrees/**
-[ ] CLAUDE.md memory @import path resolves from where my CLAUDE.md lives
+[ ] package.json carries qualityBar.perfBudgetKbGzip if I use the bundle gate
+[ ] docs/*.md and docs/stories/ story map started by /scan-project-docs (example content cleared)
+[ ] .github/workflows/verify.yml matches my scripts (and the provenance job reads claude/loop-state)
 [ ] Memory wiki: removed stack facts that don't apply (BEFORE first task); will re-seed via /dream
 [ ] If a docs/ wiki already exists: namespaced the story map + picked ONE canonical
     memory home (see "Reconciling with an existing docs/ wiki")
-[ ] Checked command name collisions; existing commands given descriptions + skills-index rows;
-    disable-model-invocation only per the manual-only rule; old notes triaged (no secrets)
+[ ] Checked command name collisions with the kit's user-scope commands (a project skill of the
+    same name wins over them); old notes triaged (no secrets)
 [ ] Playwright/browser setup chosen (local install vs. web pre-provisioned)
 [ ] Ran my own `verify` chain green once
 [ ] Ran /scan-project-docs against my real docs
@@ -781,8 +871,11 @@ console errors, and the current critical flow.
   don’t match your scripts. Fix the contract; it’s the single source of truth.
 - **Memory advice doesn’t fit my stack.** The seeded wiki facts are from this
   template. Delete the inapplicable ones and run `/dream` to seed your own.
-- **A slash command isn’t found.** Commands live in `kit/commands/*.md`;
-  confirm the file exists and you’re in the project root.
+- **A slash command isn’t found.** The kit's commands are installed at user scope
+  (`~/.claude/commands/`) by `loop-setup install`; run `loop-setup doctor`. In a cloud session,
+  check that the environment's setup script installs the kit.
+- **`[layout:NO_WORKSPACE]` / `[layout:MISSING_WORKSPACE]`.** The project has no workspace on
+  this machine: `loop-setup restore` (from `claude/loop-state`) or `loop-setup init`.
 - **Permission prompts on every command.** The shared `.claude/settings.json` allow
   rules apply only after you accept the workspace trust dialog for the folder. Add the
   commands you trust: team-wide ones to `.claude/settings.json`, personal ones to your

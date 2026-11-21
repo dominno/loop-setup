@@ -30,10 +30,12 @@ const inGitCheckout = git("rev-parse", "--is-inside-work-tree").stdout?.trim() =
 
 describe("CLAUDE.md governing rules", () => {
   const claudeMd = prose("CLAUDE.md");
+  const kitRules = prose("kit/rules/KIT.md");
 
-  it("states every governing rule", () => {
-    // One distinctive phrase per rule: rewording a rule is fine, dropping one is not.
-    const anchors = [
+  it("states every governing rule: the project's repo rules in CLAUDE.md, the kit's process rules in KIT.md", () => {
+    // One distinctive phrase per rule: rewording a rule is fine, dropping one is not. The repo rules stay
+    // in the project's CLAUDE.md so a teammate or cloud session without the kit still gets them.
+    const repoRules = [
       "Commit by pathspec", // commits name their paths; other agents share the checkout
       "git rm --cached", // the index-commit exception for a file untracked but still on disk
       "fix forward", // pushed history is never rewritten; TRACE records cite commit SHAs
@@ -41,11 +43,27 @@ describe("CLAUDE.md governing rules", () => {
       "Do not weaken or delete an assertion", // a changed expectation states its root cause
       "Mocks don't prove integration", // mock-only coverage is reported as unit-tested only
       "Lead session only", // workflow subagents never start, stop or kill servers
+    ];
+    const kitProcess = [
       "observed in full", // test results come from complete output seen this session
       "stopping on a bound is not completing", // loop step 16: a fix-attempt bound is not a finish
       "never accepted as clean", // completion gate: a round with a failed lens is re-run
     ];
-    expect(anchors.filter((a) => !claudeMd.includes(a))).toEqual([]);
+    expect(repoRules.filter((a) => !claudeMd.includes(a))).toEqual([]);
+    expect(kitProcess.filter((a) => !kitRules.includes(a))).toEqual([]);
+  });
+
+  it("the project CLAUDE.md carries no kit machinery and imports nothing from the workspace", () => {
+    expect(read("CLAUDE.md")).not.toMatch(/^@/m);
+    expect(claudeMd).not.toContain("## Multi-Agent Development Workflow");
+    expect(kitRules).toContain("## Multi-Agent Development Workflow");
+  });
+
+  it("KIT.md carries the session digest within the SessionStart budget", () => {
+    const digest = /<!--\s*digest:start\s*-->([\s\S]*?)<!--\s*digest:end\s*-->/.exec(read("kit/rules/KIT.md"))?.[1] ?? "";
+    expect(digest.length).toBeGreaterThan(500);
+    expect(digest.length).toBeLessThanOrEqual(5500);
+    for (const a of ["/write-goal", "loop-setup sync", "Maker/checker", "Scope control"]) expect(digest, a).toContain(a);
   });
 
   it("no longer ties the commit allow rule to settings.local.json", () => {
@@ -166,15 +184,16 @@ describe("M6: merge commits keep TRACE provenance reachable", () => {
 describe("M7-M10: two developers on one project", () => {
   it("the adoption guide has a 'Working as a team' section covering ids, claims, the lease, union logs, merge commits, shared plans, story sync and /dream, and what stays personal", () => {
     const team = section(read("kit/docs/adoption-guide.md"), "## Working as a team").replace(/\s+/g, " ");
-    const anchors = ["loop-setup plan-id", "claim:<owner>@<run-id>", "[claim-conflict]", "commit and push the claim", "merge=union", "disable squash merging", "docs/plans/<slug>/steps.md", "`/sync-story-status` on `main`", "`/dream` through PRs", "settings.local.json"];
+    // The loop state is shared through the claude/loop-state branch (loop-setup sync), not through PRs.
+    const anchors = ["loop-setup plan-id", "claim:<owner>@<run-id>", "[claim-conflict]", "commit and push the claim", "merge=union", "disable squash merging", "docs/plans/<slug>/steps.md", "`/sync-story-status` on `main`", "`/dream` edits reach teammates through `loop-setup sync`", "settings.local.json"];
     expect(anchors.filter((a) => !team.includes(a))).toEqual([]);
   });
 
-  it("/sync-story-status runs on main (one status PR at a time) and /dream's wiki edits go through PRs, never a hand-edited store", () => {
+  it("/sync-story-status runs on main (one status PR at a time) and /dream's wiki edits reach teammates through loop-setup sync, never a hand-edited store", () => {
     const sync = prose("kit/commands/sync-story-status.md");
     for (const a of ["run it on `main`", "re-sync after merging two status PRs"]) expect(sync, a).toContain(a);
     const dream = prose("kit/commands/dream.md");
-    for (const a of ["wiki edits go through PRs", "a new record that `revises` it"]) expect(dream, a).toContain(a);
+    for (const a of ["Wiki edits reach teammates through `loop-setup sync`", "a new record that `revises` it"]) expect(dream, a).toContain(a);
   });
 });
 

@@ -15,31 +15,36 @@ layer on top.
 
 ---
 
-## 1. What you're adding (copy these)
+## 1. What you're adding (nothing to copy)
+
+The loop ships with the loop-setup kit, which is **installed into `~/.claude`** (`loop-setup
+install`; on Claude Code on the web, from the environment's setup script). Its state lives in
+the project's workspace (`loop-setup init` / `restore`), reached from the project as
+`.claude/loop-workspace/`:
 
 ```txt
-kit/loop.md                    Hardened loop operating prompt (trust levels, denylist, stop rules, run-log step)
-kit/loop-checklist.md          Readiness rubric to promote a loop's trust level (L0→L3)
-.claude/loop-workspace/loop-run-log.md     Durable, append-only loop run state
-.claude/loop-workspace/loop-plan.md        The plan/DAG every L2/L3 action traces to (incl. the `deferred` status)
-.claude/loop-workspace/trace/records.jsonl TRACE-lite record store — start it empty and strip topics/trace.md's
-                                   <!-- rec:TR-… --> comments (loop-setup wiki-check exits 0); written
-                                   only via `loop-setup`
-kit/rules/trace-policy.md     The record policy: typed verdicts, evidence gate, consumer actions
-kit/trace/  .claude/trace/     The `loop-setup` CLI/tests + schema (and bench fixtures for /bench-checkers)
-kit/workflows/loop-iteration.js
-                                   The maker/checker Workflow that loop.md step 10 runs at L2/L3
-kit/workflows/critic-panel.js  The critic-round Workflow that loop.md step 7 runs (both are part
-                                   of the base workflow's kit/workflows/)
+~/.claude/loop-setup/kit/loop.md                 Hardened loop operating prompt (trust levels, denylist, stop
+                                                 rules, run-log step), installed as the /loop-tick command
+~/.claude/loop-setup/kit/loop-checklist.md       Readiness rubric to promote a loop's trust level (L0→L3)
+~/.claude/loop-setup/kit/workflows/loop-iteration.js   The maker/checker Workflow that the loop's step 10 runs at L2/L3
+~/.claude/loop-setup/kit/workflows/critic-panel.js     The critic-round Workflow that the loop's step 7 runs
+~/.claude/loop-setup/kit/rules/trace-policy.md   The record policy: typed verdicts, evidence gate, consumer actions
+.claude/loop-workspace/loop-run-log.md           Durable, append-only loop run state
+.claude/loop-workspace/loop-plan.md              The plan/DAG every L2/L3 action traces to (incl. the `deferred` status)
+.claude/loop-workspace/trace/records.jsonl       TRACE-lite record store, written only via `loop-setup`
 ```
+
+Run the standing loop as `/loop 30m /loop-tick` (or `/loop /loop-tick` to let the model pace
+itself), and run `loop-setup sync` at the end of a session so the run log, plan and records
+reach `claude/loop-state`.
 
 A node only becomes `done` with an `accept`/`qualify` record and a `CLEAR` action; a
 `defer` verdict parks it as `deferred` with the `missing` evidence named, so a hold is
 resolvable rather than a dead end. Before promoting a loop to L3, run `/bench-checkers`
 and clear checklist §10's measured-checker item.
 
-Then merge the loop paragraph from this template's `CLAUDE.md` ("Writing `/goal` and
-`/loop` prompts" → the trust-level + maker/checker note) into your `CLAUDE.md`.
+The loop's rules reach every session through the kit's SessionStart hook (the digest of
+`rules/KIT.md`); your `CLAUDE.md` needs no loop paragraph.
 
 ## 2. The operating model in one breath
 

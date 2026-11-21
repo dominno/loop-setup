@@ -38,26 +38,28 @@ Every infographic is drawn as an SVG next to its PNG (`docs/infographic-*.svg`);
 
 ## What's in this setup
 
+The loop-setup kit is **installed into `~/.claude`**, not copied into a project. A project
+carries only its own contract, and the loop's state lives in a per-project workspace outside
+the repository. This repository is the kit's source (`kit/`) plus a small starter app that
+exercises every command.
+
 ```txt
-CLAUDE.md                         Project rules + multi-agent workflow + doc-scanner workflow
-.claude/
-  loop.md                         Recurring watchdog loop, hardened: trust levels + denylist + stop rules
+CLAUDE.md                         The project's own rules: project type, commands, localhost, design + repo rules
+kit/                              The loop-setup kit's SOURCE — `loop-setup install` copies it into ~/.claude/loop-setup/kit
+  kit.json                        Kit name + version
+  bin/loop-setup.mjs              The one CLI: install/uninstall/init/restore/sync/where/doctor/hook + the TRACE-lite commands
+  setup/                          Layout resolver (pure core: kit, project, workspace), installer, workspaces, hooks
+  rules/KIT.md                    The kit's process rules, with the digest the SessionStart hook injects into every session
+  rules/trace-policy.md           The TRACE-lite policy (versioned; its tables are enforced by kit/trace)
+  loop.md                         Recurring watchdog loop, hardened: trust levels + denylist + stop rules (installed as /loop-tick)
   loop-checklist.md               Readiness rubric to raise a loop's trust level (L0→L3)
   skills-index.md                 Grouped "when to use which command" catalog (kept in sync by /dream)
-  memory/                         Knowledge wiki (Karpathy LLM-wiki pattern), maintained by /dream
-    index.md                      Small catalog imported by CLAUDE.md (always loaded)
-    log.md                        Append-only history of wiki operations
-    loop-plan.md                  The loop's durable plan/DAG (every L2/L3 action traces to a ready node)
-    loop-run-log.md               Append-only /loop run history (the loop's durable state)
-    quarantine.md                 Candidate facts the /dream admission gate deferred (not part of the wiki)
-    trace/records.jsonl           TRACE-lite record store: one typed verdict per adjudicated claim (append-only)
-    topics/                       One page per subject, read on demand (trace.md = the TRACE-lite policy)
-  trace/
-    schema-v1.json                TRACE-lite record schema (versioned)
-    bench/                        TRACE-Bench-lite: seeded-defect fixtures + scored runs
-  settings.json                   Shared permissions: allow-list, force-push/hard-reset denies
-  hooks/
-    stop-gate.mjs                 Opt-in Stop hook, enabled by no settings file: warns once per tree state when unit tests fail
+  templates/workspace/            Skeleton of a new project's workspace (wiki index, plan schema, logs, union-merge rules)
+  schema/schema-v1.json           TRACE-lite record schema (versioned)
+  bench/                          TRACE-Bench-lite: seeded-defect fixtures for /bench-checkers
+  hooks/stop-gate.mjs             Opt-in Stop hook (install --with-stop-gate): warns once per tree state when unit tests fail
+  trace/                          `loop-setup …` — record writer, linter, re-audit, metrics, bench scoring, loop-plan DAG checks, story-map lint, wiki check
+  docs/                           adoption-guide.md, planning-guide.md, loop-integration-guide.md, workflow-graphs.md
   workflows/                      Deterministic multi-agent orchestration scripts (Workflow tool)
     critic-panel.js               Fan-out critics → adversarial verify → severity matrix
     scan-docs.js                  Per-story parallel evidence-gathering → status verifier
@@ -66,7 +68,7 @@ CLAUDE.md                         Project rules + multi-agent workflow + doc-sca
     loop-iteration.js             Maker/checker: worktree implementer → separate verifier (typed verdict)
     improve-skills.js             Meta-critic over the project's own prompts → proposed edits
     trace-bench.js                Measure our own checkers on seeded-defect fixtures
-  commands/                       Each command has a description used for routing
+  commands/                       Each command has a description used for routing (installed at user scope)
     write-goal.md                 Write a production-grade /goal (or /loop) prompt for a task
     multi-agent-dev.md            Full critic-led development pass
     plan-nodes.md                 Story/spec/goal → loop-plan nodes, each appended only after you confirm it
@@ -81,11 +83,12 @@ CLAUDE.md                         Project rules + multi-agent workflow + doc-sca
     story-gap-analysis.md         Gap analysis: docs vs code vs E2E
     improve-skills.md             Self-improvement pass over the prompts/workflows (confirmation-gated)
     bench-checkers.md             TRACE-Bench-lite: measure the checkers, report falsification flags
-kit/trace/                    `loop-setup …` — record writer, linter, re-audit, metrics, bench scoring, loop-plan DAG checks, story-map lint, wiki check
+.claude/
+  settings.json                   Shared permissions: allow-list, force-push/hard-reset denies
+  loop-workspace                  git-ignored link → ~/.claude/loop-setup/workspaces/<id>/, this project's loop state:
+                                  index.md, topics/, log.md (the wiki), trace/records.jsonl (TRACE records),
+                                  loop-plan.md, loop-run-log.md, quarantine.md — persisted on the claude/loop-state branch
 docs/
-  adoption-guide.md               How to adopt this template in a real project
-  planning-guide.md               How to plan, track and dispatch work with the loop plan (/plan-nodes, statuses, commands)
-  loop-integration-guide.md       How to add hardened recurring /loop automations to a project
   prd.md                          Product requirements (source of record for stories)
   product-docs-index.md           Source documents scanned
   user-stories.md                 Story index (one row per story → its file)
@@ -105,43 +108,41 @@ grouped *"when to use which"* catalog (with a pick-by-intent guide) is
 
 ## Quickstart: add to an existing project
 
-The full walkthrough (with snippets, the existing-wiki bridge, and a checklist) is
-in **[`kit/docs/adoption-guide.md`](kit/docs/adoption-guide.md)** — the short version:
+The full walkthrough is in **[`kit/docs/adoption-guide.md`](kit/docs/adoption-guide.md)** (paths A, B
+and C, cloud setup, team use, and a checklist). The short version:
 
-1. **Copy the portable workflow** — `CLAUDE.md` (merge into yours, don't
-   overwrite), `kit/commands/`, `kit/workflows/`, `kit/loop.md`,
-   `kit/loop-checklist.md`, `.claude/loop-workspace/` (start `.claude/loop-workspace/trace/` and
-   `quarantine.md` empty), `.claude/trace/`, `kit/skills-index.md`,
-   `.claude/settings.json` (merge into yours, don't overwrite), `kit/trace/`,
-   `docs/*.md`, `docs/stories/`, and `.github/workflows/verify.yml`. Then add
-   `"trace": "node kit/trace/cli.mjs"` to your `package.json` scripts and
-   `scripts/**/*.test.mjs` to your unit-test globs.
-   Optionally copy the opt-in Stop hook `kit/hooks/stop-gate.mjs` and its tests
-   `kit/hooks/stop-gate.test.mjs` (no settings file enables it; see
-   [Optional hooks](kit/docs/adoption-guide.md#optional-hooks)).
-   **Do not** copy the starter app (`src/`, `e2e/`, `package.json`, `pnpm-lock.yaml`,
-   and the build configs) — that's only a demo.
-2. **Wire the verification commands** — point `CLAUDE.md`'s *Main commands* at your
-   real scripts and **trim `verify`** to the steps you actually have (it's a hard
-   `&&` chain — a missing script breaks the gate). Adjust the package manager,
-   `localhost` port, and (in monorepos) the `src/`/`e2e/` paths.
-3. **Clear the seeded memory facts FIRST** — `.claude/loop-workspace/topics/*` ship this
-   template's Next/React stack facts and load as authoritative memory; delete the
-   ones that don't fit, then run `/dream` to seed your own.
-4. **Start the story map empty** — delete the example story files in
-   `docs/stories/` (keep `_TEMPLATE.md`) and clear the example rows in `docs/*.md`
-   (keep the formats), then run `/scan-project-docs` against your real docs/PRD.
-5. **Mind the integration gotchas** — already have a `docs/` wiki? Namespace the
-   story map and *bridge* (don't run two memories). Already have slash commands?
-   Check name collisions, give each a `description`, and set
-   `disable-model-invocation: true` only where the manual-only rule in
-   `kit/skills-index.md` applies (never on a command `CLAUDE.md` tells Claude to
-   run). Trim the shared allow-list in `.claude/settings.json` to your real commands and
-   keep its force-push/hard-reset denies; a `git add`/`git commit` auto-allow is a
-   personal opt-in in your own git-ignored `.claude/settings.local.json`. In CI,
-   install the browser normally (no `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD`).
-6. **First session** — `pnpm verify` (green once) → `/scan-project-docs` →
-   `/write-goal <your first task>` (review, then run it) → `/qa-pass` → `/dream`.
+1. **Install the kit once per machine.** It goes into `~/.claude`, not your repo:
+   ```bash
+   git clone https://github.com/dominno/loop-setup ~/src/loop-setup
+   node ~/src/loop-setup/kit/bin/loop-setup.mjs install --from ~/src/loop-setup --link-bin ~/.local/bin
+   ```
+   - **Claude Code on the web:** put that install in the environment's setup script, with
+     `--auto-restore github.com/<owner>/<repo>`. Every session then starts with the kit and the
+     restored workspace.
+2. **Create the project's workspace.** Run `loop-setup init` in your repo, or
+   `loop-setup init --from-legacy` for a repo that copied the old template's `.claude/memory`.
+   It creates `~/.claude/loop-setup/workspaces/<id>/` and links it as `.claude/loop-workspace`.
+3. **Commit only your project's contract:**
+   - `.gitignore` with `/.claude/loop-workspace`;
+   - your `CLAUDE.md` with project rules only (Main commands, localhost, design + repo rules —
+     the hook injects the kit's rules);
+   - `.claude/settings.json` (your real commands, the force-push/hard-reset denies);
+   - `package.json` → `qualityBar` (if you use the bundle gate);
+   - your `docs/*.md` and `docs/stories/` story map;
+   - `.github/workflows/verify.yml`.
+4. **Persist the state:** `loop-setup sync` commits the workspace and pushes it to the
+   `claude/loop-state` branch of your remote. `loop-setup restore` brings it back on another
+   machine or session.
+5. **Wire the verification commands.** Point `CLAUDE.md`'s *Main commands* at your real
+   scripts and trim `verify` to the steps you actually have; it is a hard `&&` chain.
+6. **First session:**
+   - `loop-setup doctor`
+   - `pnpm verify` (green once)
+   - `/scan-project-docs`
+   - `/write-goal <your first task>`
+   - `/qa-pass`
+   - `/dream`
+   - `loop-setup sync`
 
 ## Critic roster
 

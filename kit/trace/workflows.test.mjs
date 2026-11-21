@@ -3103,8 +3103,9 @@ describe("workflow registry", () => {
     expect(workflows.filter((w) => typeof w.name !== "string").map((w) => w.base)).toEqual([]);
   });
 
-  it.skipIf(!exists("CLAUDE.md"))("CLAUDE.md names every workflow script as <name>.js", () => {
-    const text = read("CLAUDE.md");
+  // The workflow list is part of the kit's process rules (kit/rules/KIT.md), not a project's CLAUDE.md.
+  it.skipIf(!exists("kit/rules/KIT.md"))("the kit rules (KIT.md) name every workflow script as <name>.js", () => {
+    const text = read("kit/rules/KIT.md");
     expect(workflows.filter((w) => !text.includes(`${w.base}.js`)).map((w) => w.base)).toEqual([]);
   });
 
