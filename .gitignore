@@ -152,3 +152,7 @@ vite.config.ts.timestamp-*
 # and the checkouts of worktree-isolated agents
 .claude/settings.local.json
 .claude/worktrees/
+# The loop-setup kit's workspace link: this project's loop state lives in
+# ~/.claude/loop-setup/workspaces/<id>/ (persisted on the claude/loop-state branch), never here.
+# Anchored and WITHOUT a trailing slash: a pattern ending in "/" does not ignore a symlink.
+/.claude/loop-workspace

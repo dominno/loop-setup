@@ -90,7 +90,8 @@ export function doctor({ cwd = process.cwd(), env = process.env } = {}) {
   }
   const lp = join(layout.projectRoot, LINK_NAME);
   if (!layout.inWorktree) add(`${LINK_NAME} link`, !(layout.warnings || []).length, (layout.warnings || []).join(", ") || lp);
-  add(`${LINK_NAME} is git-ignored`, linkIgnored(layout.projectRoot), `add /${LINK_NAME} to .gitignore`);
+  const ignored = linkIgnored(layout.projectRoot);
+  add(`${LINK_NAME} is git-ignored`, ignored, ignored ? "" : `add /${LINK_NAME} to .gitignore`);
   add(`${LINK_NAME} is not tracked`, !linkTracked(layout.projectRoot));
   const committedIgnore = (() => {
     try {
