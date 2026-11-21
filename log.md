@@ -381,3 +381,18 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
 ## [2026-11-07] ingest | rewrite the Playwright/Chromium pin fact (user confirmed)
 - Admission: 1 qualified (TR-1a2a7cac54bb → topics/remote-env.md: 1.56.0 launches build 1194; the
   provisioned build depends on the container image). 0 committed, 0 quarantined, 0 rejected.
+
+## [2026-11-21] migrate | Loop state moved out of the project into the loop-setup workspace
+- The kit moved to `kit/` and is installed into `~/.claude/loop-setup/kit`; this wiki, the TRACE
+  store, the plan and the logs moved from the project's `.claude/memory` into workspace
+  `loop-setup-e3ed255a` (`loop-setup init --from-legacy`; 133 records, wiki-check clean), persisted
+  on the `claude/loop-state` branch (`loop-setup sync`).
+
+## [2026-11-21] ingest | kit layout and the loop-state branch
+- Admission tally: 2 committed / 0 qualified / 1 quarantined / 0 rejected.
+- Committed: TR-87c615903b10 → topics/code-organization.md (kit source in `kit/`, installed from the
+  committed tree); TR-f2df8fefa89c → topics/workflow.md (workspace + `claude/loop-state`, sync/restore).
+- Quarantined: TR-325b6a5ea4fb (setup-script install loaded in a fresh cloud session) — missing a
+  fresh session on the updated environment.
+- Critic round on the branch: TR-4fe142478925 (important, accept) fixed in 5af23ca and CLEARed after a
+  separate re-check round.

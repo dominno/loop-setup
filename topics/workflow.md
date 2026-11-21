@@ -151,6 +151,13 @@
   carries an exact args string, e.g. a bench patch (observed 2026-10-08).
   <!-- rec:TR-b3b37a1408f4 -->
 
+- A project's loop state (wiki, TRACE store, plan, run log) lives in
+  `~/.claude/loop-setup/workspaces/<id>/`, reached from the project as the git-ignored
+  `.claude/loop-workspace` link and bound by `git config loop-setup.workspace <id>`.
+  `loop-setup sync` (lint + wiki-check gate, union merge) pushes it to the orphan branch
+  `claude/loop-state` of origin; `loop-setup restore`, or the SessionStart hook for an
+  `--auto-restore` project, clones it back into a fresh `~/.claude`. <!-- rec:TR-f2df8fefa89c -->
+
 Related: [build-and-verify](./build-and-verify.md) · [testing](./testing.md) · [trace](./trace.md)
 
 - **Plan node contract:** `loop-plan.md`'s table has 10 columns (`… | notes | scope | check |`)
@@ -181,4 +188,3 @@ for `loop-plan.md` and turned down. Each says what would reopen it, so this is n
 - **Bench re-run rule:** a `PLAN_COLUMNS` change alone needs no `/bench-checkers` re-run (it
   must update `PLAN_COLUMNS`, the Node schema table and the parser tests together); a change
   to the plan-items item shape, or to the text the loop verifier receives, does.
-
