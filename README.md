@@ -8,7 +8,7 @@ as a single coding agent that just edits files.
 The workflow starts with critique, not coding — and ends with proof, not confidence.
 
 > **Adopting this in your own project?** See the
-> **[Adoption Guide](docs/adoption-guide.md)** — what to copy, how to wire the
+> **[Adoption Guide](kit/docs/adoption-guide.md)** — what to copy, how to wire the
 > verification commands, and how to adapt the memory wiki and story map (covers
 > both a fresh start and dropping the workflow into an existing codebase).
 
@@ -18,7 +18,7 @@ The workflow starts with critique, not coding — and ends with proof, not confi
 
 ![Task cycle: intent, /write-goal, pre-critique, plan blockers and related important findings, TDD implementation, verify, post-critique, 0 blockers? (at most 3 rounds), /qa-pass, /dream](docs/infographic-1-task-cycle.png)
 
-**2. The multi-agent workflows** — all seven; each node is a subagent with its own context (node-level graphs: [`docs/workflow-graphs.md`](docs/workflow-graphs.md)).
+**2. The multi-agent workflows** — all seven; each node is a subagent with its own context (node-level graphs: [`kit/docs/workflow-graphs.md`](kit/docs/workflow-graphs.md)).
 
 ![The seven multi-agent workflows: critic-panel (lens fan-out or one all-lens reviewer, dedup, skeptics, matrix), scan-docs, gap-analysis, e2e-design, loop-iteration, improve-skills and trace-bench](docs/infographic-2-multi-agent-workflows.png)
 
@@ -32,7 +32,7 @@ Every infographic is drawn as an SVG next to its PNG (`docs/infographic-*.svg`);
 
 ![/loop trust levels L0-L3, denylist, loop iteration, and six adoption steps with the first-session commands](docs/infographic-4-loop-and-adoption.png)
 
-**5. Planning and task status** — how work becomes plan nodes, how a node moves through its statuses (with split on failure and the attempt budget), and how the loop dispatches safely, also with two developers. How to use it: [`docs/planning-guide.md`](docs/planning-guide.md).
+**5. Planning and task status** — how work becomes plan nodes, how a node moves through its statuses (with split on failure and the attempt budget), and how the loop dispatches safely, also with two developers. How to use it: [`kit/docs/planning-guide.md`](kit/docs/planning-guide.md).
 
 ![Planning and task status: /plan-nodes and the node row, the status lifecycle with split on failure and the attempt budget, and safe dispatch with plan-lint --pre-dispatch, plan-ready --batch, the two-developer rules and the commands](docs/infographic-5-planning.png)
 
@@ -81,7 +81,7 @@ CLAUDE.md                         Project rules + multi-agent workflow + doc-sca
     story-gap-analysis.md         Gap analysis: docs vs code vs E2E
     improve-skills.md             Self-improvement pass over the prompts/workflows (confirmation-gated)
     bench-checkers.md             TRACE-Bench-lite: measure the checkers, report falsification flags
-scripts/trace/                    `pnpm trace …` — record writer, linter, re-audit, metrics, bench scoring, loop-plan DAG checks, story-map lint, wiki check
+kit/trace/                    `loop-setup …` — record writer, linter, re-audit, metrics, bench scoring, loop-plan DAG checks, story-map lint, wiki check
 docs/
   adoption-guide.md               How to adopt this template in a real project
   planning-guide.md               How to plan, track and dispatch work with the loop plan (/plan-nodes, statuses, commands)
@@ -101,31 +101,31 @@ docs/
 
 **Which command when?** Each command above carries a one-line description; the full
 grouped *"when to use which"* catalog (with a pick-by-intent guide) is
-[`.claude/skills-index.md`](.claude/skills-index.md).
+[`kit/skills-index.md`](kit/skills-index.md).
 
 ## Quickstart: add to an existing project
 
 The full walkthrough (with snippets, the existing-wiki bridge, and a checklist) is
-in **[`docs/adoption-guide.md`](docs/adoption-guide.md)** — the short version:
+in **[`kit/docs/adoption-guide.md`](kit/docs/adoption-guide.md)** — the short version:
 
 1. **Copy the portable workflow** — `CLAUDE.md` (merge into yours, don't
-   overwrite), `.claude/commands/`, `.claude/workflows/`, `.claude/loop.md`,
-   `.claude/loop-checklist.md`, `.claude/memory/` (start `.claude/memory/trace/` and
-   `quarantine.md` empty), `.claude/trace/`, `.claude/skills-index.md`,
-   `.claude/settings.json` (merge into yours, don't overwrite), `scripts/trace/`,
+   overwrite), `kit/commands/`, `kit/workflows/`, `kit/loop.md`,
+   `kit/loop-checklist.md`, `.claude/loop-workspace/` (start `.claude/loop-workspace/trace/` and
+   `quarantine.md` empty), `.claude/trace/`, `kit/skills-index.md`,
+   `.claude/settings.json` (merge into yours, don't overwrite), `kit/trace/`,
    `docs/*.md`, `docs/stories/`, and `.github/workflows/verify.yml`. Then add
-   `"trace": "node scripts/trace/cli.mjs"` to your `package.json` scripts and
+   `"trace": "node kit/trace/cli.mjs"` to your `package.json` scripts and
    `scripts/**/*.test.mjs` to your unit-test globs.
-   Optionally copy the opt-in Stop hook `.claude/hooks/stop-gate.mjs` and its tests
-   `scripts/hooks/stop-gate.test.mjs` (no settings file enables it; see
-   [Optional hooks](docs/adoption-guide.md#optional-hooks)).
+   Optionally copy the opt-in Stop hook `kit/hooks/stop-gate.mjs` and its tests
+   `kit/hooks/stop-gate.test.mjs` (no settings file enables it; see
+   [Optional hooks](kit/docs/adoption-guide.md#optional-hooks)).
    **Do not** copy the starter app (`src/`, `e2e/`, `package.json`, `pnpm-lock.yaml`,
    and the build configs) — that's only a demo.
 2. **Wire the verification commands** — point `CLAUDE.md`'s *Main commands* at your
    real scripts and **trim `verify`** to the steps you actually have (it's a hard
    `&&` chain — a missing script breaks the gate). Adjust the package manager,
    `localhost` port, and (in monorepos) the `src/`/`e2e/` paths.
-3. **Clear the seeded memory facts FIRST** — `.claude/memory/topics/*` ship this
+3. **Clear the seeded memory facts FIRST** — `.claude/loop-workspace/topics/*` ship this
    template's Next/React stack facts and load as authoritative memory; delete the
    ones that don't fit, then run `/dream` to seed your own.
 4. **Start the story map empty** — delete the example story files in
@@ -135,7 +135,7 @@ in **[`docs/adoption-guide.md`](docs/adoption-guide.md)** — the short version:
    story map and *bridge* (don't run two memories). Already have slash commands?
    Check name collisions, give each a `description`, and set
    `disable-model-invocation: true` only where the manual-only rule in
-   `.claude/skills-index.md` applies (never on a command `CLAUDE.md` tells Claude to
+   `kit/skills-index.md` applies (never on a command `CLAUDE.md` tells Claude to
    run). Trim the shared allow-list in `.claude/settings.json` to your real commands and
    keep its force-push/hard-reset denies; a `git add`/`git commit` auto-allow is a
    personal opt-in in your own git-ignored `.claude/settings.local.json`. In CI,
@@ -164,7 +164,7 @@ Documentation Consistency critics.
 
 **These run as real multi-agent orchestration, not one agent simulating critics.**
 The critic-bearing commands invoke deterministic `Workflow`-tool scripts under
-`.claude/workflows/` — parallel subagents (own context each) with adversarial /
+`kit/workflows/` — parallel subagents (own context each) with adversarial /
 maker-checker verification:
 
 | Workflow | Backs | What it does |
@@ -175,7 +175,7 @@ maker-checker verification:
 | `e2e-design.js` | `/multi-agent-e2e` | per-category E2E case enumeration → dedup → a separate judge types each case; only licensed (accept/qualify) cases are returned |
 | `loop-iteration.js` | `/loop` (L2/L3) | worktree implementer → separate verifier per item |
 | `improve-skills.js` | `/improve-skills` (manual-only) | per-lens meta-critic over the project's own prompts and workflows → a separate skeptic per blocker and important finding → proposed edits, applied only on confirmation (skill name `prompt-meta-critic`) |
-| `trace-bench.js` | `/bench-checkers` (manual-only) | the production loop verifier, a single-pass reviewer and an opt-in critic panel run on seeded-defect fixtures; `pnpm trace bench-score` scores the runs |
+| `trace-bench.js` | `/bench-checkers` (manual-only) | the production loop verifier, a single-pass reviewer and an opt-in critic panel run on seeded-defect fixtures; `loop-setup bench-score` scores the runs |
 
 It's heavier by design — independent review beats a single context role-playing the
 panel. Commands that don't fan out (`/fix-localhost`, `/write-goal`, `/dream`,
@@ -228,7 +228,7 @@ This follows Andrej Karpathy's [LLM wiki pattern](https://gist.github.com/karpat
 and uses Claude Code's **real** memory system (`@import` + `/memory`):
 
 ```txt
-.claude/memory/
+.claude/loop-workspace/
   index.md        small catalog: each topic = one-line summary + link (always loaded)
   log.md          append-only history of ingest / lint operations
   topics/         one page per subject — read ON DEMAND, not all at once (index.md lists them)
@@ -237,7 +237,7 @@ and uses Claude Code's **real** memory system (`@import` + `/memory`):
 - **Why a wiki, not one file:** `CLAUDE.md` imports only `index.md`, so per-session
   context stays flat as knowledge grows. Claude opens just the topic page(s)
   relevant to the task (the *query* operation) instead of loading everything.
-- **`/dream`** (a **custom** command — see `.claude/commands/dream.md`) is the
+- **`/dream`** (a **custom** command — see `kit/commands/dream.md`) is the
   wiki maintainer: *ingest* files new durable learnings into the right topic page
   and appends to `log.md`; *lint* health-checks for contradictions, stale claims,
   and orphan pages. Run it at the end of a non-trivial task.
@@ -271,7 +271,7 @@ status, a fact headed for the wiki — gets a typed verdict and an append-only r
   confused" claim needs a browser observation). No claim stronger than its evidence.
 - **No durable state change without a record:** a loop node becomes `done`, a fact enters
   the wiki, a story changes status — only with a licensing record and a consumer action
-  (`CLEAR`, `COMMIT`, …), enforced fail-closed by `pnpm trace` and checked in CI.
+  (`CLEAR`, `COMMIT`, …), enforced fail-closed by `loop-setup` and checked in CI.
 - **Consensus is not evidence:** critics share a model, so agreement doesn't upgrade a
   finding — only *different* evidence corroborates.
 - **Measured, not assumed:** `/bench-checkers` runs the production checkers on seeded
@@ -279,21 +279,21 @@ status, a fact headed for the wiki — gets a typed verdict and an append-only r
   good as the panel").
 
 ```txt
-pnpm trace query --latest          # what has been adjudicated, and what is still deferred
-pnpm trace show TR-…               # one record + its consumer actions + revision chain
-pnpm trace lint                    # replay the store against the contract (also in pnpm test)
-pnpm trace reaudit                 # wiki facts whose evidence changed since they were committed (or whose commit is gone)
-pnpm trace metrics                 # consumer coverage, defer quality, repeated-error rate
-pnpm trace plan-ready              # the loop plan's ready nodes, computed (table order; --max N)
-pnpm trace plan-lint               # the loop plan vs its contract and the records (consistency, not truth)
-pnpm trace plan-items LP-002 …     # loop-iteration args.items for ready nodes (refuses a non-ready id)
-pnpm trace story-lint              # the story map vs itself and the records (consistency, not truth)
-pnpm trace wiki-check              # the memory wiki vs the records: rec: comments, quarantine rows, page sizes
-pnpm trace l3-check                # the L3 measured-checker item, computed: latest bench record vs the current verifier
+loop-setup query --latest          # what has been adjudicated, and what is still deferred
+loop-setup show TR-…               # one record + its consumer actions + revision chain
+loop-setup lint                    # replay the store against the contract (also in pnpm test)
+loop-setup reaudit                 # wiki facts whose evidence changed since they were committed (or whose commit is gone)
+loop-setup metrics                 # consumer coverage, defer quality, repeated-error rate
+loop-setup plan-ready              # the loop plan's ready nodes, computed (table order; --max N)
+loop-setup plan-lint               # the loop plan vs its contract and the records (consistency, not truth)
+loop-setup plan-items LP-002 …     # loop-iteration args.items for ready nodes (refuses a non-ready id)
+loop-setup story-lint              # the story map vs itself and the records (consistency, not truth)
+loop-setup wiki-check              # the memory wiki vs the records: rec: comments, quarantine rows, page sizes
+loop-setup l3-check                # the L3 measured-checker item, computed: latest bench record vs the current verifier
 ```
 
 Policy, verdict semantics and what was deliberately *not* adopted:
-[`.claude/memory/topics/trace.md`](.claude/memory/topics/trace.md).
+[`kit/rules/trace-policy.md`](kit/rules/trace-policy.md).
 
 ## Severity model
 

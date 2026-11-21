@@ -11,14 +11,14 @@ declared policy, **not** objective truth: gates verify field consistency, not fi
 truth (paper §7.2).
 
 <!-- trace-policy-version: 3 -->
-(machine-readable; `scripts/trace/lib.mjs` stamps it on every record and refuses records
+(machine-readable; `kit/trace/lib.mjs` stamps it on every record and refuses records
 written under a newer policy — bump it whenever a table below or a record rule changes.)
 v3 adds the memory write boundary for `wiki:` records (**Record guarantees**); records
 written under v1/v2 replay unchanged.
 
-- Schema: `.claude/trace/schema-v1.json` · Store: `.claude/memory/trace/records.jsonl`
-  (append-only JSONL, archives `<YYYY>.jsonl`) · Writer/linter: `pnpm trace …`
-  (`scripts/trace/cli.mjs`). Never hand-edit the store; corrections are new records that
+- Schema: `kit/schema/schema-v1.json` · Store: `.claude/loop-workspace/trace/records.jsonl`
+  (append-only JSONL, archives `<YYYY>.jsonl`) · Writer/linter: `loop-setup …`
+  (`kit/trace/cli.mjs`). Never hand-edit the store; corrections are new records that
   `revises` the old one.
 
 ## Verdicts (`final_status`)
@@ -54,8 +54,8 @@ types and keeps the stricter outcome (`retyped_from` records the original type).
 | normative | "this violates the DRY rule in CLAUDE.md" | rule, human | defer |
 | practical | "apply this diff" (loop-iteration) | diff | defer |
 
-The canonical code is the `<trace-evidence-gate>` block in `scripts/trace/lib.mjs`;
-workflows inline a byte-identical copy (they cannot import) and `scripts/trace/lib.test.mjs`
+The canonical code is the `<trace-evidence-gate>` block in `kit/trace/lib.mjs`;
+workflows inline a byte-identical copy (they cannot import) and `kit/trace/lib.test.mjs`
 fails on drift — including drift between this table and the code.
 
 ## Consumer actions (record-consumer contract)
@@ -64,10 +64,10 @@ fails on drift — including drift between this table and the code.
 | CLEAR | accept, qualify | loop (node → done), multi-agent-dev (finding fixed), improve-skills (edit applied) |
 | COMMIT | accept | dream (fact filed) |
 | COMMIT_QUALIFIED | accept, qualify | dream (fact filed with its qualifier) |
-| QUARANTINE | qualify, revise, defer | dream (held in `.claude/memory/quarantine.md` until `missing` arrives) |
+| QUARANTINE | qualify, revise, defer | dream (held in `.claude/loop-workspace/quarantine.md` until `missing` arrives) |
 | HOLD | any | loop (node deferred/escalated), critic-round (review-only), any consumer withholding |
 | REJECT | any | dream (not filed), improve-skills (edit declined) |
-| REUSE | any | critic-panel (prior verdict reused on an identical working tree — `pnpm trace tree-id`) |
+| REUSE | any | critic-panel (prior verdict reused on an identical working tree — `loop-setup tree-id`) |
 | REAUDIT | any | dream lint (evidence file changed since the record's commit, or that commit is unreachable) |
 
 **Fail closed:** CLEAR/COMMIT/COMMIT_QUALIFIED are refused on a non-licensing verdict, on
@@ -78,8 +78,8 @@ denylist path still needs a human).
 
 ## Consumer protocol (every command follows this — don't restate it, cite it)
 - **Writing a workflow's records:** save the workflow result JSON to a scratchpad file
-  (Write tool), then `pnpm trace write <file>` (reads `traceRecords`) and, if present,
-  `pnpm trace act --from <file>` (reads `reuseActions`). If the writer rejects a draft
+  (Write tool), then `loop-setup write <file>` (reads `traceRecords`) and, if present,
+  `loop-setup act --from <file>` (reads `reuseActions`). If the writer rejects a draft
   (`stored: false`), report the violations and act on **no** finding from that batch —
   never hand-edit a draft to force it through. `write --then-act ACTION --consumer NAME
   --note …` records one decision on every stored record (e.g. `HOLD` for a review-only round).
@@ -106,7 +106,7 @@ denylist path still needs a human).
   adjudicate it (new record that `revises`) before acting, or HOLD.
 - **`reject`** → nothing to fix; HOLD/REJECT. In a plan node, `missing` becomes
   "a human decision on: <reason>".
-- **Human release** (only a human writes it): `pnpm trace act <record> human HOLD --ref <node>
+- **Human release** (only a human writes it): `loop-setup act <record> human HOLD --ref <node>
   --note "release: <decision>"` lets an escalated node return to ready/blocked; the record
   still licenses nothing (no CLEAR). `plan-lint` `[unsupported-reset]` reads it.
 - **"Fixed"** = a `CLEAR` on the finding's latest licensing record, written only after the
@@ -150,7 +150,7 @@ dimension over its gaps), only `accept`/`qualify` proposals go on (cases returne
 implementation, gaps into the synthesized order), and no durable state changes on their output.
 
 ## Record guarantees ↔ how this repo enforces them
-- **Immutability** — append-only store; ids are content hashes, so `pnpm trace lint` detects
+- **Immutability** — append-only store; ids are content hashes, so `loop-setup lint` detects
   any line edited in place; corrections via `revises`. Writing the same draft twice is
   refused (content idempotency); duplicate consumer actions too.
 - **No secrets, no bench answers** — the writer refuses drafts that look like they carry a
@@ -163,7 +163,7 @@ implementation, gaps into the synthesized order), and no durable state changes o
   qualify on it), a `file_line`, `command`, `browser`, `measurement` or `diff` item whose ref
   holds a URL that does not parse or whose host is not `localhost`, `127.0.0.1`, `[::1]`,
   `0.0.0.0` or `*.localhost`, and a `file_line` and a `diff` ref (each comma-separated part)
-  that is not repo-relative (`pnpm trace reaudit` diffs repo paths only). `rule`, `human`,
+  that is not repo-relative (`loop-setup reaudit` diffs repo paths only). `rule`, `human`,
   `record` and `reading` are exempt from the URL check: a WCAG URL stays citable as a rule,
   and external content is cited as `reading` (`external:<source>`) beside the local check
   that licenses the fact (`/dream` step 3b). The boundary follows the commit, not the claim
@@ -176,7 +176,7 @@ implementation, gaps into the synthesized order), and no durable state changes o
   is trusted by its kind (a blog cited as a rule, a PR comment as a human decision, or any id
   cited as a record passes — a record ref is not checked to name an existing record), and only
   a `scheme://` URL is recognized (a scheme-less `example.com/x` or an `http:/…` form is not).
-- **Wiki ↔ store agreement** — `pnpm trace wiki-check` (and a contracts test in `pnpm test`):
+- **Wiki ↔ store agreement** — `loop-setup wiki-check` (and a contracts test in `pnpm test`):
   each `<!-- rec:TR-… -->` comment in a topic page names the latest record for its claim, a
   licensing `wiki:` one, with a `COMMIT`/`COMMIT_QUALIFIED` whose `--ref` is that page, and a
   malformed one is an error, never a legacy bullet; each latest licensing `wiki:` record
@@ -186,10 +186,10 @@ implementation, gaps into the synthesized order), and no durable state changes o
   `wiki:` records whose last decision is `QUARANTINE` (`HOLD` and `REAUDIT` decide nothing);
   `index.md` stays within 150 lines (a topic page over 200 lines, or this page over 400, is a
   warning; this page over 400 also fails the contracts test). Partial: a legacy bullet without
-  a rec comment is not checked, and whether a cited fact still holds is `pnpm trace reaudit`'s
+  a rec comment is not checked, and whether a cited fact still holds is `loop-setup reaudit`'s
   queue (a record whose commit the repository no longer has is listed apart, as `unreachable`).
 - **Merges** — `.gitattributes` merges `records.jsonl` as a union (both branches' appends
-  survive); `pnpm trace lint` (in `pnpm test`) is the post-merge check. Replay errors only
+  survive); `loop-setup lint` (in `pnpm test`) is the post-merge check. Replay errors only
   on merge-invariant violations (schema, content-hash ids, unknown targets, verdict vs
   action); "this CLEAR was on a no-longer-newest record" depends on line order a union can
   interleave, so on replay it is a warning — the writer still refuses it at append time.
@@ -202,7 +202,7 @@ implementation, gaps into the synthesized order), and no durable state changes o
   rather than a line per stale record per pass. Action notes/refs are screened for secrets
   and bench ground truth exactly like records.
 - **Version legibility** — `schema_version` const + `policy_version` stamp; a reader refuses
-  records from a newer policy (`pnpm trace lint`).
+  records from a newer policy (`loop-setup lint`).
 - **Self-containment** — verdict, failed gates, missing, repair live in the record.
 - **Provenance** — `writer_id` + `provenance.commit/workflow` (+ `provenance.tree`, the
   working-tree fingerprint); the writer fails closed without a commit.
@@ -240,12 +240,12 @@ A finding that re-raises a prior claim reuses the prior verdict without a new sk
 when **all** hold: it is deterministically the same claim (same lens, normalized title and
 claim type — the critic's `revisits` link alone is never trusted), the prior verdict is
 licensing (`accept`/`qualify` — defers and rejects are always re-adjudicated), and the
-working tree is identical (`pnpm trace tree-id`: HEAD + uncommitted changes, excluding the
+working tree is identical (`loop-setup tree-id`: HEAD + uncommitted changes, excluding the
 record store and loop/wiki bookkeeping files).
 
 ## Measurement & pre-registered falsification (TRACE-Bench-lite)
-`/bench-checkers` runs `.claude/workflows/trace-bench.js` over seeded-defect fixtures
-(`.claude/trace/bench/`); `pnpm trace bench-score` scores it; `pnpm trace metrics` scores
+`/bench-checkers` runs `kit/workflows/trace-bench.js` over seeded-defect fixtures
+(`kit/bench/`); `loop-setup bench-score` scores it; `loop-setup metrics` scores
 the live store. Pre-registered — results that count **against** our design:
 - **F1** single-pass reviewer matches/beats the critic panel on recall and false-block
   rate → the fan-out is unjustified on this bench.
@@ -254,7 +254,7 @@ the live store. Pre-registered — results that count **against** our design:
 - **F4** the loop verifier licensed any bad fixture the denylist does not catch → the
   checker licenses bad diffs; keep loops at ≤ L2 and tighten it (emitted by `bench-score`).
 - **F5** `consumerCoverage` < 0.5 over ≥ 10 current claims → records are an archive, not
-  an instrument; cut fields (emitted by `pnpm trace metrics`; only decision actions count —
+  an instrument; cut fields (emitted by `loop-setup metrics`; only decision actions count —
   REUSE/REAUDIT are bookkeeping).
 - **F0** (validity precondition) ground truth reached a bench agent — a marker in what it
   *received* (prompt, tool results, injected context) — or an agent returned no verdict, or
@@ -262,11 +262,11 @@ the live store. Pre-registered — results that count **against** our design:
   the measurement record is `qualify`, not `accept`. F1 needs the `panel` arm; F3 needs
   `repeat ≥ 2`.
 
-**L3 freshness (`pnpm trace l3-check`):** a bench record names the verifier it measured — a
-`file_line` item on `.claude/workflows/loop-iteration.js` whose result is `<loop-verifier>
+**L3 freshness (`loop-setup l3-check`):** a bench record names the verifier it measured — a
+`file_line` item on `kit/workflows/loop-iteration.js` whose result is `<loop-verifier>
 sha256=<hex>`, the hash of that block (marker lines included) as `bench-score --record` reads
-it from the working tree (a run without a verifier arm names none). `pnpm trace l3-check` is
-the measured-checker item of `.claude/loop-checklist.md`, computed: the latest
+it from the working tree (a run without a verifier arm names none). `loop-setup l3-check` is
+the measured-checker item of `kit/loop-checklist.md`, computed: the latest
 `bench:trace-bench-lite` record, licensing or not, must be `accept`, from a verifier arm run at
 `repeat ≥ 2` over every manifest fixture in every repeat (its measurement item's
 `arms.verifier.measured` bad/good counts, taken over the fixtures measured in every repeat
@@ -281,7 +281,7 @@ before this check carries no hash, so it never passes. Partial: the hash is read
 score, so it cannot see an edit made between the run and the score, or a `trace-bench.js` copy
 (the one the Workflow runs) that drifted from the production block — `pnpm test`'s parity check
 fails then; score a run before editing either copy. The hash item is file evidence, so
-`pnpm trace reaudit` also lists the bench record when `loop-iteration.js` changes (path-level;
+`loop-setup reaudit` also lists the bench record when `loop-iteration.js` changes (path-level;
 `l3-check` is the block-level answer). The verifier's scratch-copy instruction (verify in its
 own scratch copy, never in the shared checkout; no exit status piped through `head` or `tail`)
 is an edit inside the block: every bench record scored before it measured the verifier without
@@ -290,7 +290,7 @@ it, so L3 needs a re-bench after it.
 **Contamination rule (learned the hard way — the first bench run was contaminated):**
 bench agents run inside this repo and grep it, so fixture ground truth must never be
 plain text in the tree. Fixtures live gzip+base64-encoded in
-`.claude/trace/bench/fixtures.bundle`; agents get opaque `fx-…` tokens, never real ids;
+`kit/bench/fixtures.bundle`; agents get opaque `fx-…` tokens, never real ids;
 raw runs stay in the scratchpad (their verdict prose names the defects); bench records
 carry counts only; a unit test scans the whole tree for leaked ids/defect text; and
 `bench-score --transcripts` excludes any run whose agent received ground truth anyway.
@@ -317,16 +317,16 @@ debate stage (critic panel + skeptic already is one).
   `<loop-denylist>`, `<loop-verifier>`, `<critic-roster>`, and `<agent-safety>` in exactly
   the five read-only workflows) are duplicated byte-for-byte and parity-tested — edit the
   canonical copy, paste into every marked block, run `pnpm test`.
-  `scripts/trace/workflows.test.mjs` also runs the real workflow bodies with stub agents, so
+  `kit/trace/workflows.test.mjs` also runs the real workflow bodies with stub agents, so
   a deleted gate call or a broken reuse key fails a test. <!-- rec:TR-85dc794fd165 -->
 - The writer refuses any record or action whose text holds a bench leak marker, and a
   patch-only token can be an ordinary word: a critic-panel draft whose prose happened to
   contain one was refused (2026-10-31). The write is atomic, so nothing of that round lands
   until the refused draft is left out; a workflow draft is never hand-edited to get past the
   screen (`/critic-round` step 5). <!-- rec:TR-77dcaddf05c7 -->
-- The store lives under `.claude/`, and the TRACE gate code under `scripts/trace/`; the
+- The store lives under `.claude/`, and the TRACE gate code under `kit/trace/`; the
   `loop-iteration` denylist blocks both for implementer diffs — records are written only by
-  checkers/the Lead via `pnpm trace`.
+  checkers/the Lead via `loop-setup`.
 - `claim_id` must be stable across rounds for reuse/recurrence metrics to work; a reworded
   re-raise gets a new `claim_id` (fail-safe: it is re-verified, not reused).
 - A Node script blocked in `spawnSync` cannot run `process.on('SIGINT'|'SIGTERM')` listeners
@@ -334,11 +334,11 @@ debate stage (critic panel + skeptic already is one).
   exit-on-signal — a signal-safe long-running script must spawn asynchronously (that is why
   `bench-judge` uses async `spawn`). <!-- rec:TR-7bf1d1f3331a -->
 - `JSON.parse` turns a `"__proto__"` key into an own property, and `Object.assign`/spread of
-  that object rewrites the target's prototype — `pnpm trace write` refuses drafts with
+  that object rewrites the target's prototype — `loop-setup write` refuses drafts with
   `__proto__`/`constructor`/`prototype` keys for this reason. <!-- rec:TR-f57f71d953ae -->
 - Which paths a patch touches comes from git (`git diff --name-status -z -M -C`), not from
   parsing the patch text: a rename/copy-only patch has no `---`/`+++` lines, only
-  `rename from`/`rename to` headers (`pnpm trace denylist-check` uses git's list).
+  `rename from`/`rename to` headers (`loop-setup denylist-check` uses git's list).
   <!-- rec:TR-b2252b5e37e6 -->
 - A content-addressed id must hash every field except the entry's OWN id — stripping a
   reference field (an action's `record_id`) made one action on two different records
@@ -351,7 +351,7 @@ debate stage (critic panel + skeptic already is one).
   Node refreshes loop time per `setTimeout`, so equal-delay timers can fire in different
   passes and the child's exit then cancels the group kill. <!-- rec:TR-b219013814f2 -->
 - `git apply --numstat -z <patch>` names only the destination of a rename/copy; union it
-  with `git apply --numstat -z -R <patch>` to see both sides (`pnpm trace denylist-check`
+  with `git apply --numstat -z -R <patch>` to see both sides (`loop-setup denylist-check`
   does). <!-- rec:TR-269d82f78a84 -->
 - `git apply` strips any one leading path component and accepts traditional `---`/`+++`
   sections (tab timestamps included) after a `diff --git` section, so an `a/`/`b/` regex
@@ -389,7 +389,7 @@ debate stage (critic panel + skeptic already is one).
   Qualified: two runs on the same fixtures; FalseHold 0 relies on the leak-guard fix made
   after the previous run (WrongAccept 0 does not); ~30% of verdicts are `defer`. Its record
   (TR-df7ab02dc866) predates L3 freshness — no `<loop-verifier>` hash, no per-repeat fixture
-  counts — and the verifier block changed after it, so `pnpm trace l3-check` reports the L3
+  counts — and the verifier block changed after it, so `loop-setup l3-check` reports the L3
   measured-checker item NOT met until `/bench-checkers` is re-run. <!-- rec:TR-634fa314a7bf -->
 
 Related: [workflow](./workflow.md) · [quality-bar](./quality-bar.md) · [testing](./testing.md)

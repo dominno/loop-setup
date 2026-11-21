@@ -1,34 +1,34 @@
 # Project Instructions for Claude Code
 
 ## Durable project memory (LLM wiki)
-Durable project knowledge is a small **knowledge wiki** under `.claude/memory/`
+Durable project knowledge is a small **knowledge wiki** under `.claude/loop-workspace/`
 (Karpathy "LLM wiki" pattern). Only the lightweight catalog is imported here, so it
 loads every session while detailed pages stay out of context until needed:
 
-@.claude/memory/index.md
+@.claude/loop-workspace/index.md
 
 At the start of a non-trivial task, consult that index and **open only the topic
-page(s)** under `.claude/memory/topics/` relevant to the task (the "query"
+page(s)** under `.claude/loop-workspace/topics/` relevant to the task (the "query"
 operation). Do not load the whole wiki. This keeps per-session context flat as
 memory grows.
 
 ## Self-learning loop (`/dream`)
 At the end of a non-trivial task, run `/dream` to maintain the wiki:
 - **ingest** — file new durable learnings into the right topic page, add a row to
-  `.claude/memory/index.md` if a page is created, and append to
-  `.claude/memory/log.md`;
+  `.claude/loop-workspace/index.md` if a page is created, and append to
+  `.claude/loop-workspace/log.md`;
 - **lint** — health-check for contradictions, stale claims, and orphan pages.
 
-`/dream` is a custom command in this repo (`.claude/commands/dream.md`), not a
+`/dream` is a custom command in this repo (`kit/commands/dream.md`), not a
 built-in Claude Code feature — it implements memory consolidation on top of Claude
 Code's real memory system. Rules: only durable, verifiable facts; never secrets or
 temporary/branch-specific bugs; prefer appending; confirm before removing entries.
 Use the built-in `/memory` command to view or edit loaded memory files.
 
 ## Commands (skills) index
-The custom slash commands live in `.claude/commands/` and each carries a
+The custom slash commands live in `kit/commands/` and each carries a
 `description` used for routing. For the grouped "when to use which command" guide,
-see `.claude/skills-index.md` (a plain catalog, kept in sync by `/dream`). Consult
+see `kit/skills-index.md` (a plain catalog, kept in sync by `/dream`). Consult
 it when unsure which command fits the task.
 
 ## Writing `/goal` and `/loop` prompts
@@ -59,15 +59,15 @@ command does this on demand.
 building. Triggers: "write me the `/goal` for this", "turn this into a `/loop`",
 "what `/goal` should we build based on how this project works?".
 
-For recurring/watchdog work, the standing loop prompt is `.claude/loop.md`
+For recurring/watchdog work, the standing loop prompt is `kit/loop.md`
 (used by `/loop`). Loops are **hardened** ("loop engineering"): declare a trust
 level — **L1 report-only → L2 assisted → L3 unattended** — and stay within it; read
-`.claude/memory/loop-plan.md` (the durable plan/DAG — every L2/L3 action must trace to a
+`.claude/loop-workspace/loop-plan.md` (the durable plan/DAG — every L2/L3 action must trace to a
 ready node, and re-plan runs as a first-class step before each dispatch) and
-`.claude/memory/loop-run-log.md` at the start of each iteration and append an entry
+`.claude/loop-workspace/loop-run-log.md` at the start of each iteration and append an entry
 per iteration; respect the denylist (auth, payments, secrets, infra, CI config, migrations),
 the escalation triggers, and the red-flag stop conditions. Before raising a loop's
-trust level, satisfy `.claude/loop-checklist.md`.
+trust level, satisfy `kit/loop-checklist.md`.
 
 **Maker/checker rule:** the pass that verifies a fix must be separate from the pass
 that made it — the implementer never marks its own work "done" (post-implementation
@@ -180,7 +180,7 @@ testable, which hexagonal boundaries make easy.
   integrates with (`vi.mock`, `vi.stubGlobal`, spies) counts as unit-tested only. Pair
   it with a test on the real stack (a Playwright spec for user flows; otherwise an
   integration test against the real module, route or CLI, like `tempRepo()` in
-  `scripts/trace/cli.test.mjs`), or name the gap and why under Remaining risks. This
+  `kit/trace/cli.test.mjs`), or name the gap and why under Remaining risks. This
   rule governs how coverage is reported and how story status is classified, not
   whether a diff that adds a stubbed unit test is acceptable.
 - Always explain root cause before applying a fix.
@@ -225,7 +225,7 @@ Before implementation, the Lead Agent must consult these critic perspectives:
 
 **Critic rounds and other fan-out work run as deterministic multi-agent Workflows,
 not one agent simulating critics.** The commands invoke `Workflow`-tool scripts in
-`.claude/workflows/` — parallel subagents (own context each) with adversarial /
+`kit/workflows/` — parallel subagents (own context each) with adversarial /
 maker-checker verification — and that command-driven invocation is the sanctioned
 multi-agent opt-in:
 
@@ -248,15 +248,15 @@ multi-agent opt-in:
   workflows → adversarial verify → proposed edits (`/improve-skills`).
 - `trace-bench.js` — measure our own checkers on seeded-defect fixtures (production
   loop verifier, single-pass reviewer, optional critic panel) → scored by
-  `pnpm trace bench-score` (`/bench-checkers`).
+  `loop-setup bench-score` (`/bench-checkers`).
 
 **Typed verdicts and records (TRACE-lite).** Every checker returns a typed verdict —
 `accept` / `qualify` / `revise` / `defer` / `reject` — held to its claim type's evidence
 standard, never a bare true/false; a missing verdict is `defer`. **No durable state change
 without a record:** a loop node → `done`, a fact → the wiki, a story → a new status only
 with an `accept`/`qualify` TRACE-lite record and a consumer action, written via
-`pnpm trace` (never hand-edited). Agreement between same-model critics is not evidence —
-only different evidence corroborates. Policy: `.claude/memory/topics/trace.md`.
+`loop-setup` (never hand-edited). Agreement between same-model critics is not evidence —
+only different evidence corroborates. Policy: `kit/rules/trace-policy.md`.
 
 This is heavier (many subagents) by design; it buys genuine independent review
 instead of one context role-playing the panel. Commands that don't fan out
@@ -317,7 +317,7 @@ A task is complete only when:
   confirmed, and none deferred or revised. An open defer/revise blocker keeps the task
   incomplete until its missing evidence is supplied and re-adjudicated, or the user
   explicitly accepts the risk
-- the critic rounds' TRACE-lite records are appended (`pnpm trace lint` passes)
+- the critic rounds' TRACE-lite records are appended (`loop-setup lint` passes)
 - Artistic Direction Critic confirms the UI has an intentional look and feel when the task touches UI or product experience
 - changed files and remaining risks are reported
 

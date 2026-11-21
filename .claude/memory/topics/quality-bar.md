@@ -32,8 +32,9 @@ just critic opinion.
   desktop WCAG-2.1-AA scan). Don't read "zero violations" as a mobile/touch guarantee.
 
 ## Performance target (client JS budget)
-<!-- perf-budget-kb-gzip: 155 --> (machine-readable single source of truth; the enforcing
-script `scripts/check-bundle-size.mjs` reads THIS marker — edit the number here, nowhere else.)
+The machine-readable single source of truth is `qualityBar.perfBudgetKbGzip` in the project's
+`package.json` (project contract, so CI needs no loop workspace); `scripts/check-bundle-size.mjs`
+reads it — edit the number there, nowhere else. This page explains the target.
 - **First-load client JS ≤ 155 KB gzipped.**
 - **Metric (deterministic, CI-checkable without a browser):** sum of the **per-file**
   gzipped sizes of `.next/static/chunks/**/*.js` after `next build`, **excluding the legacy
@@ -56,10 +57,10 @@ script `scripts/check-bundle-size.mjs` reads THIS marker — edit the number her
   matrix (incl. `build`) + `e2e` rather than `pnpm verify`, attaching the check to `build`
   is what enforces the budget on **every PR** (the CI `build` job fails if it's over).
   `pnpm check:bundle` runs it standalone against an existing `.next`.
-- **critics:** the Accessibility and Performance lenses in `.claude/workflows/critic-panel.js`
+- **critics:** the Accessibility and Performance lenses in `kit/workflows/critic-panel.js`
   judge the current UI against these numbers, not vague "is it accessible / fast".
 
 ## Ratchet policy
 When the bundle legitimately grows (a justified new dependency/feature), **raise the
-budget consciously in this file** with a one-line reason — never silently, and never
+budget consciously in `package.json` → `qualityBar`** with a one-line reason — never silently, and never
 lower a target just to make a failing check pass (fix the real violation instead).

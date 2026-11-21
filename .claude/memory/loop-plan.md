@@ -9,7 +9,7 @@ This is **distinct from `loop-run-log.md`**:
 - `loop-run-log.md` = append-only *history* — what happened, never rewritten.
 
 > Not `@imported`, so it costs nothing until a loop opens it. The loop reads it at
-> iteration start (step 1) and rewrites it in the re-plan step (see `.claude/loop.md`).
+> iteration start (step 1) and rewrites it in the re-plan step (see `kit/loop.md`).
 
 ## Node schema
 One row per node in the table below. The header is
@@ -19,11 +19,11 @@ an empty scope and check.
 
 | Field | Meaning |
 |---|---|
-| `id` | Stable node id, never reused after `done`/`dropped`: a new node gets `LP-<6 hex>` from `pnpm trace plan-id "<description>"` (a hash of description, creator and time, so two people's branches never collide); legacy `LP-NNN` ids stay valid. |
+| `id` | Stable node id, never reused after `done`/`dropped`: a new node gets `LP-<6 hex>` from `loop-setup plan-id "<description>"` (a hash of description, creator and time, so two people's branches never collide); legacy `LP-NNN` ids stay valid. |
 | `description` | One line — the bounded unit of work, ending `— done when: <observable outcome>` (from the origin finding's evidence or fix; `[done-when]` warns under `--pre-dispatch` without it). |
 | `after` | Comma-separated `id`s this node depends on; empty = no deps. |
 | `status` | `ready` · `blocked` · `in-progress` · `deferred` · `done` · `escalated` · `dropped`. |
-| `record` | The TRACE-lite `record_id` behind the node's latest status change (`pnpm trace show <id>`): the node's own `loop:<id>` record; for a node created `deferred`/`escalated` from a critic finding, that critic record, HOLDed for the node (`pnpm trace act <record> loop HOLD --ref <id>`); for a cascade-escalated node, its escalated ancestor's HOLDed record. Empty only while `ready`/`blocked` with no verdict yet. |
+| `record` | The TRACE-lite `record_id` behind the node's latest status change (`loop-setup show <id>`): the node's own `loop:<id>` record; for a node created `deferred`/`escalated` from a critic finding, that critic record, HOLDed for the node (`loop-setup act <record> loop HOLD --ref <id>`); for a cascade-escalated node, its escalated ancestor's HOLDed record. Empty only while `ready`/`blocked` with no verdict yet. |
 | `missing` | For `deferred`/`escalated`: the evidence or decision that would unblock it — the record's `missing`, else its `repair`, else "a human decision on: <its reason>". Never empty. |
 | `origin` | Where it came from: a confirmed critic finding (cite its record id), a re-plan, or a human. **Review gate** (`plan-lint --pre-dispatch` `[origin]`): a live node is dispatchable only from a reviewed origin — a critic-panel record that licenses it (accept/qualify, or one HOLDed for the node), `cascade from`/`split from` a node in the table, a `/plan-nodes` entry (`plan:<source> <YYYY-MM-DD>`, the user confirmed it), or a human (`human`, `human:goal <YYYY-MM-DD>`); a decomposition the loop drafts by itself goes through `/plan-nodes` (L2) or the next critic round. An optional `story:US-NNN#ACk` token links the node to a story's acceptance criterion k (`[story-dangling]` warns on an unknown story or AC); with `check`, it is the node's requirement/verify link — plan and story statuses never move each other. |
 | `notes` | Evidence / decision trail (attempt count, escalation reason). |
@@ -31,7 +31,7 @@ an empty scope and check.
 | `check` | The smallest command that proves the node (e.g. `pnpm vitest run src/x.test.ts`, a named Playwright spec): the post-apply check the Lead runs before any `CLEAR`. A `ready` node with an empty `check` fails `plan-lint --pre-dispatch` — escalate a node that has no automated check before it is dispatched, not after. |
 
 Not adopted for this plan, deliberately (a JSON plan, epic/parent containers, a complexity
-score, a new node status, bd-style commands): see `.claude/memory/topics/workflow.md`,
+score, a new node status, bd-style commands): see `.claude/loop-workspace/topics/workflow.md`,
 *Not adopted (plan)*, which also says what evidence would reopen each.
 
 **Status meaning**
@@ -47,7 +47,7 @@ score, a new node status, bd-style commands): see `.claude/memory/topics/workflo
   `record` written by the **loop-iteration verifier for this node** (`claim_id
   loop:<node id>`) whose verdict is `accept`/`qualify`, **and** a `CLEAR` action on it
   citing the post-apply check (no durable state change without a record —
-  `.claude/memory/topics/trace.md`). Re-plan never sets `done` by itself.
+  `kit/rules/trace-policy.md`). Re-plan never sets `done` by itself.
 - `escalated` — handed to a human (denylist hit, max attempts, ambiguity, a `reject`/
   `revise` verdict, or a `defer` whose `missing` is a human approval — the loop cannot
   resolve those, so they are escalated, not deferred); its `missing` names the human
@@ -60,7 +60,7 @@ score, a new node status, bd-style commands): see `.claude/memory/topics/workflo
 Deleting a `done` id changes no readiness, but deleting a `dropped` one would make its live
 dependents ready with no cascade decision: prune a `dropped` row only once no live node lists
 it in `after:`, so cascade-resolve those nodes first (`plan-lint`'s `[stranded]` rule names them).
-A pruned id is never reused: give a new node a fresh id with `pnpm trace plan-id` (it skips
+A pruned id is never reused: give a new node a fresh id with `loop-setup plan-id` (it skips
 every id in the table and in the store's `loop:<id>` claims),
 because `plan-lint` ties records to the id — a reused id inherits the old node's defers and its
 CLEARed verdict (`plan-lint` warns `[reused-id]` while such a node is not `done`).
@@ -96,14 +96,14 @@ table order breaks ties, so a human reorders by moving rows within one tier. Sev
 from same-model critics: it is triage, not ground truth. Denylist and trust-level gates still apply **on top** of readiness — a ready node
 whose fix would touch a denylist path is escalated, never auto-applied.
 
-**Computed, not hand-derived:** `pnpm trace plan-ready` prints the ready ids in priority order
-(`--max N` keeps the first N; a store that does not replay exits 2), and `pnpm trace plan-lint` checks the rest of this contract
+**Computed, not hand-derived:** `loop-setup plan-ready` prints the ready ids in priority order
+(`--max N` keeps the first N; a store that does not replay exits 2), and `loop-setup plan-lint` checks the rest of this contract
 against the record store: statuses, `after:` edges, cycles, stranded nodes, and each node's
 record and consumer actions. It checks consistency, not truth: it shows that the table and
 the records agree, not that a fix is right or that a `missing` was really supplied. A table
-that does not parse fails closed (exit 1, no ids). `pnpm trace status` is a read-only rollup
+that does not parse fails closed (exit 1, no ids). `loop-setup status` is a read-only rollup
 (nodes per status and story, in-progress claims and their age, oversize nodes, attempts) and
-`pnpm trace plan-drift` an advisory diff against the previous run's plan; both report
+`loop-setup plan-drift` an advisory diff against the previous run's plan; both report
 consistency, not truth, and neither is ever evidence in a record.
 
 **Stale `in-progress` recovery:** `in-progress` means "dispatched this iteration" and
@@ -112,7 +112,7 @@ at the *start* of a later iteration means the prior run was interrupted (crash /
 budget exhaustion) — it is stale. The re-plan step MUST resolve it (reset it to `ready`
 or `blocked` per its current `after:` deps, with a note) before it can be selected again;
 never dispatch a leftover `in-progress` node as-is (it may be mid-flight or orphaned).
-A dispatched node's notes carry its claim, `claim:<owner>@<YYYYMMDD-HHMM>` (`pnpm trace
+A dispatched node's notes carry its claim, `claim:<owner>@<YYYYMMDD-HHMM>` (`loop-setup
 claim-token`), and the run log decides stale (`plan-lint`, with `[in-progress-claimed]` for a
 live claim): your own claim is stale once its run's entry closed (`- next:`) or if no entry
 was logged (the run died); **another owner's claim is never yours to reset** — it is stale only
@@ -127,7 +127,7 @@ the defer, by id) in its notes — no citation, no reset (`plan-lint` `[unsuppor
 evidence: a node deferred by a record whose `failed_gates` include `agent-failed` (an infra
 failure: the agent died, so nothing was weighed) may be reset citing that defer record's own
 id (`loop.md` step 9 lists the other record-cited resets). A reset keeps the node's `record`
-and `missing` columns. `pnpm trace plan-items` passes `missing` on as the item's `missing`,
+and `missing` columns. `loop-setup plan-items` passes `missing` on as the item's `missing`,
 and the `record` as its `priorRecordId` only when it is the node's own `loop:<id>` record (the
 new verdict revises it, so the claim keeps one chain). A critic record is never passed on:
 revising it across claims would supersede a finding that is still open and drop it from the
@@ -144,7 +144,7 @@ if the deferred node later escalates or drops, the cascade rules below apply.
 
 ## No action without a node
 Every L2/L3 dispatch (`loop-iteration.js` `args.items`) MUST be ready nodes from this
-table — each item's `id` is its node `id` (`pnpm trace plan-items <ids>` builds the items and
+table — each item's `id` is its node `id` (`loop-setup plan-items <ids>` builds the items and
 refuses an id that is not ready). An action with no backing node is **not
 taken**; instead the re-plan step creates the node first (see below). Node creation is
 the *only* loop action not itself gated by an existing node — it is the sanctioned way
@@ -173,7 +173,7 @@ large, split it). Only a `deferred` node, or a `ready` one carrying such a recor
 Never split a `reject`, a denylist hit, a human-decision defer, an `escalated` node, or a node
 whose origin record is in the latest round's `completion.notRechecked`.
 - **Parent:** set `dropped`, notes `split into LP-a, LP-b`; HOLD the triggering record for it
-  (`pnpm trace act <record> loop HOLD --ref <parent>`).
+  (`loop-setup act <record> loop HOLD --ref <parent>`).
 - **Children (2–4):** each a new node with `origin: split from <parent> rec:<triggering record>`
   (plus the parent's critic record, if it had one: a child that cites it in `record` HOLDs it
   `--ref <child>`), its own `scope`, `check` and `done when:` clause, and `after:` edges between

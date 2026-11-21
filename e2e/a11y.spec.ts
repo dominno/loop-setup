@@ -3,7 +3,7 @@ import AxeBuilder from "@axe-core/playwright";
 
 /**
  * Accessibility gate — the objective half of the quality bar
- * (.claude/memory/topics/quality-bar.md): zero `serious`/`critical` axe
+ * (.claude/loop-workspace/topics/quality-bar.md): zero `serious`/`critical` axe
  * violations against WCAG 2.1 A/AA across the main flow's key states.
  */
 

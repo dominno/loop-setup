@@ -1,0 +1,5 @@
+{
+  "name": "loop-setup",
+  "version": "2.0.0-alpha.1",
+  "description": "Claude Code multi-agent loop kit, installed into ~/.claude with one workspace per project"
+}

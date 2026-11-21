@@ -3,7 +3,7 @@
 - `/dream` maintains this wiki: **ingest** new durable learnings into the right
   topic page at the end of a task, **query** it to answer "what do we know about
   X", and **lint** it for contradictions/stale/orphan pages. See
-  `.claude/commands/dream.md`.
+  `kit/commands/dream.md`.
 - `docs/prd.md` is the source of record for user stories; `docs/` holds the
   evidence-based story/status maps kept in sync by the doc-scanner commands.
 - **User stories are one file per story** under `docs/stories/US-<id>-<slug>.md`
@@ -12,15 +12,15 @@
   one file — same scaling reason as the memory wiki and log.
 - A `scan-docs` story record's `claim_text` names the PROPOSED status (`is at status "<S>"`);
   when the status verifier held it lower, the record is `qualify` and its qualifier names the
-  status it licenses (`holds only at "<S>"`). `pnpm trace story-lint` rule (7) reads those two
+  status it licenses (`holds only at "<S>"`). `loop-setup story-lint` rule (7) reads those two
   phrases, so a story cites a qualify record at the lower status. <!-- rec:TR-ef509b55013d -->
 - **Loops are hardened ("loop engineering"):** every `/loop` declares a trust level
   (L1 report → L2 assisted → L3 unattended), reads/writes
-  `.claude/memory/loop-run-log.md`, and obeys the denylist + red-flag stop
-  conditions in `.claude/loop.md`. Raise a level only after `.claude/loop-checklist.md`
+  `.claude/loop-workspace/loop-run-log.md`, and obeys the denylist + red-flag stop
+  conditions in `kit/loop.md`. Raise a level only after `kit/loop-checklist.md`
   passes. The verifier pass is always separate from the implementer (no self-approve).
 - **The loop is HTDAG-disciplined:** it traces every action to a durable plan/DAG in
-  `.claude/memory/loop-plan.md` — typed nodes with `after:` dependency edges and a
+  `.claude/loop-workspace/loop-plan.md` — typed nodes with `after:` dependency edges and a
   `ready` rule (deps `done`). Three disciplines: (1) **persistent plan** the loop reads
   at iteration start (step 1) and rewrites in the re-plan step; (2) **re-plan is a
   first-class step** that runs *before* dispatch (step 9) so the loop consults the fresh
@@ -35,19 +35,19 @@
   dependency must cascade-resolve, else its dependents strand silently `blocked`).
 - **Verdicts are typed and recorded (TRACE-lite):** `critic-panel`, `loop-iteration`,
   `improve-skills` and `scan-docs` return accept/qualify/revise/defer/reject plus
-  `traceRecords` drafts that the caller appends with `pnpm trace write`; `e2e-design` and
+  `traceRecords` drafts that the caller appends with `loop-setup write`; `e2e-design` and
   `gap-analysis` type every case or gap with the same verdicts but return no records (their
   verdicts are advisory), and a `trace-bench` run becomes one record only through
-  `pnpm trace bench-score --record`. A node/fact/story status changes only with a licensing
+  `loop-setup bench-score --record`. A node/fact/story status changes only with a licensing
   record + consumer action; the shared deterministic blocks (evidence gate, denylist, loop
   verifier prompt, critic roster, agent safety) are byte-identical copies, enforced by
-  `scripts/trace/contracts.test.mjs`. Details: [trace](./trace.md). <!-- rec:TR-5f79a159395f -->
-- Custom commands live in `.claude/commands/` (each with a `description` for
-  routing); the grouped "when to use" catalog is `.claude/skills-index.md`. A
-  catalog file must NOT live in `.claude/commands/` — anything there auto-registers
+  `kit/trace/contracts.test.mjs`. Details: [trace](./trace.md). <!-- rec:TR-5f79a159395f -->
+- Custom commands live in `kit/commands/` (each with a `description` for
+  routing); the grouped "when to use" catalog is `kit/skills-index.md`. A
+  catalog file must NOT live in `kit/commands/` — anything there auto-registers
   as its own `/command`.
 - **Fan-out commands run as deterministic multi-agent Workflows** under
-  `.claude/workflows/`, not one agent simulating critics: `critic-panel` (critics →
+  `kit/workflows/`, not one agent simulating critics: `critic-panel` (critics →
   adversarial verify → matrix), `scan-docs` (per-story evidence → status verifier),
   `gap-analysis` (per-dimension finders → a separate skeptic per dimension → an order over
   the licensed gaps only), `e2e-design` (per-category cases → dedup → a separate judge;
@@ -89,7 +89,7 @@
   documented API). So every `agent()` starts inside `then()` with
   `.catch(agentFailed(label))`, a first stage whose agent may die wraps its result, and a
   `null` slot is filled or read as a failure — never dropped with `filter(Boolean)`
-  (*Adding a workflow* in `docs/workflow-graphs.md`). <!-- rec:TR-aea448fee314 -->
+  (*Adding a workflow* in `kit/docs/workflow-graphs.md`). <!-- rec:TR-aea448fee314 -->
 - A workflow runs at most 2 agents at once in this 4-CPU cloud container (consistent with
   min(16, CPUs − 2)); three workflows launched together ran 6 at once (2026-10-31). That
   bounds parallelism, not cost — the cost bounds are the per-call caps (`critic-panel`
@@ -113,14 +113,14 @@
   never counted as refuted). Keep the fail-safe
   direction: a budget stop must never *approve* unverified work.
 - **Diagram-first:** every workflow's node/edge graph is drawn in
-  `docs/workflow-graphs.md` (Mermaid), with the model tier per node. Update the diagram
+  `kit/docs/workflow-graphs.md` (Mermaid), with the model tier per node. Update the diagram
   when you add a node, edge, or change a tier — `/improve-skills` and `/dream lint`
   flag drift between a diagram and its script.
 - A command's `description` also lets Claude **auto-invoke** it.
   `disable-model-invocation: true` stops that but also blocks Claude's Skill call, so a
   command is manual-only only if it rewrites the governing prompt surface or runs a measured
   fan-out `CLAUDE.md` never asks for (today `/improve-skills` and `/bench-checkers`), marked
-  `(manual-only)` in its `.claude/skills-index.md` row; `pnpm test` fails when a flag and its
+  `(manual-only)` in its `kit/skills-index.md` row; `pnpm test` fails when a flag and its
   row disagree. <!-- rec:TR-dc21201014e2 -->
 - Team-wide permissions belong in committed `.claude/settings.json`;
   `.claude/settings.local.json` is conventionally personal (often git-ignored).
@@ -156,26 +156,26 @@ Related: [build-and-verify](./build-and-verify.md) · [testing](./testing.md) ·
 - **Plan node contract:** `loop-plan.md`'s table has 10 columns (`… | notes | scope | check |`)
   and the legacy 8-column header still parses; plan-lint's node-contract rules (`[check]`,
   `[oversize]`, `[scope]`, `[done-when]`, `[origin]`) run only with `--pre-dispatch`
-  (`--max-scope 1` at L3); new ids come from `pnpm trace plan-id` (`LP-<6 hex>`), and
+  (`--max-scope 1` at L3); new ids come from `loop-setup plan-id` (`LP-<6 hex>`), and
   `plan-ready --batch N` picks a conflict-free set by scope. <!-- rec:TR-8a89f665cbf8 -->
 
 ## Not adopted (plan)
 Borrowings the planning research and critic council (docs/plans/planning-upgrade/) weighed
 for `loop-plan.md` and turned down. Each says what would reopen it, so this is not permanent.
-- **JSON plan / feature list** — the markdown table plus `pnpm trace plan-lint` already
+- **JSON plan / feature list** — the markdown table plus `loop-setup plan-lint` already
   fails closed on a malformed edit, and the TRACE records hold the verdicts. Reopen when
   plan-lint misses a hand-edit corruption that a JSON schema would have caught.
 - **epic/parent containers** (a hierarchy column or nested ids) — a parent row would be one
   more status nobody dispatches; as-needed decomposition is covered by the split convention
   (`loop-plan.md`, *Split on failure*: a dropped parent with a `split into` trail). Reopen when a real plan needs a rollup that a story token
-  and `pnpm trace status` cannot give.
+  and `loop-setup status` cannot give.
 - **A numeric complexity score** — a same-model guess with no ground truth; size is derived
   from the `scope` column instead. Reopen when measured split rates show scope counts
   mis-size nodes.
 - **A new node status** (e.g. `split`, `claimed`, `review`) — every status must be classified
   by the ready rule and the cascade rules; extra ones multiply that. Reopen when an existing
   status plus a notes token cannot express a real case.
-- **bd-style commands** (`ready`, `claim`, `close`) — `pnpm trace plan-ready`, `plan-lint`
+- **bd-style commands** (`ready`, `claim`, `close`) — `loop-setup plan-ready`, `plan-lint`
   and `plan-items` cover them; the plan is edited by the Lead. Reopen when two people need
   an atomic claim that the commit-and-push lease cannot give.
 - **Bench re-run rule:** a `PLAN_COLUMNS` change alone needs no `/bench-checkers` re-run (it

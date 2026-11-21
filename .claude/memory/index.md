@@ -3,12 +3,12 @@
 The **always-loaded catalog** of the project knowledge wiki (Andrej Karpathy's
 "LLM wiki" pattern). `CLAUDE.md` imports **only this file**, so it loads every
 session and must stay small. Detailed knowledge lives in topic pages under
-`.claude/memory/topics/` and is read **on demand** — never all at once. History
-lives in `.claude/memory/log.md`. Loop **state** (not knowledge) lives beside it:
+`.claude/loop-workspace/topics/` and is read **on demand** — never all at once. History
+lives in `.claude/loop-workspace/log.md`. Loop **state** (not knowledge) lives beside it:
 `loop-plan.md` is the loop's current plan/DAG (the mutable watchlist every loop action
 traces to) and `loop-run-log.md` is the append-only run history — neither is a topic
 page; both are read only by a running `/loop`. `trace/records.jsonl` is the append-only
-TRACE-lite record store (written only via `pnpm trace`) and `quarantine.md` holds
+TRACE-lite record store (written only via `loop-setup`) and `quarantine.md` holds
 candidate facts the `/dream` admission gate deferred — neither is part of the wiki.
 
 > Links below are plain markdown (not `@imports`), so topic pages are NOT
@@ -42,6 +42,6 @@ candidate facts the `/dream` admission gate deferred — neither is part of the 
 - Adding a topic → create a page under `topics/` and add one row above.
 - Keep this index to summaries and links only; facts belong in topic pages.
 - **Log rotation:** when `log.md` exceeds **500 lines**, `/dream lint` rolls the
-  older entries into yearly archives `.claude/memory/log/<YYYY>.md`, keeping the
+  older entries into yearly archives `.claude/loop-workspace/log/<YYYY>.md`, keeping the
   recent window in `log.md`. The log is not imported, so this is about read/append
   cost, not session context.

@@ -1,0 +1,8 @@
+# The loop workspace is its own git repository (the state branch claude/loop-state of the
+# project's remote). Its append-only files merge as a union, so two sessions that each append
+# records or log entries never conflict; `loop-setup sync` runs `loop-setup lint` before it pushes.
+# Rotation (`loop-setup rotate`) is done by one session only — a union of two rotations duplicates.
+trace/records.jsonl merge=union
+trace/*.jsonl merge=union
+loop-run-log.md merge=union
+log.md merge=union

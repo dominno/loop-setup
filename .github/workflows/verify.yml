@@ -42,7 +42,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node scripts/trace/cli.mjs reaudit --unreachable --annotate
+      - run: node kit/trace/cli.mjs reaudit --unreachable --annotate
 
   # E2E runs separately because it needs a real browser. GitHub Actions has no
   # pre-provisioned Chromium (unlike Claude Code on the web), so install it here.

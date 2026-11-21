@@ -1,0 +1,100 @@
+# Commands (skills) index
+
+Catalog of the custom slash commands in `{{KIT}}/commands/`, grouped by purpose,
+with **when to use** each. This mirrors the memory wiki's `index.md`: a small
+catalog so both you and Claude can route to the right command.
+
+> This file lives at `{{KIT}}/skills-index.md` (NOT inside `{{KIT}}/commands/`) on
+> purpose — a file in `commands/` would auto-register as its own `/command`.
+>
+> Claude also routes natively from each command's `description` frontmatter. This
+> index is the human-readable, grouped view and the canonical "when to use" guide.
+> Keep it in sync when commands are added or changed (the `/dream` command does
+> this during its `lint`/`ingest` passes).
+
+## Pick by intent
+- **Start a non-trivial task — let Claude write the goal** → `/write-goal`
+- **Build or change something non-trivial** → `/multi-agent-dev`
+- **Plan work for the loop (story/spec → plan nodes, confirmed one by one)** → `/plan-nodes` (how-to: `{{KIT}}/docs/planning-guide.md`)
+- **Just review, don't change code** → `/critic-round`
+- **Add/expand end-to-end tests** → `/multi-agent-e2e`
+- **localhost is broken** → `/fix-localhost`
+- **About to commit/ship** → `/qa-pass`
+- **Map what's built vs documented vs tested** → `/scan-project-docs`, then
+  `/sync-story-status`, `/story-gap-analysis`
+- **Capture/curate what was learned** → `/dream`, `/memory-audit`
+- **Improve the system's own prompts/skills/workflows** → `/improve-skills`
+- **Measure whether the checkers actually catch defects** (before L3, after a checker
+  prompt change) → `/bench-checkers`
+- **See what has been adjudicated / what is still deferred** → `loop-setup query --latest`
+  (records policy: `{{KIT}}/rules/trace-policy.md`)
+- **Keep watching localhost on an interval** → `/loop` (uses `{{KIT}}/loop.md`;
+  gate trust level with `{{KIT}}/loop-checklist.md`; state in
+  `.claude/loop-workspace/loop-plan.md` (current plan/DAG — every L2/L3 action traces to a ready
+  node here) and `.claude/loop-workspace/loop-run-log.md` (append-only history))
+
+**A task's lifecycle:** `/story-gap-analysis` → `/write-goal` → `/multi-agent-dev` (with
+`/multi-agent-e2e` when a flow needs coverage) → `/qa-pass` → `/sync-story-status` →
+`/dream`. **Periodic:** `/scan-project-docs`, `/memory-audit`, `/improve-skills`,
+`/bench-checkers`, `/loop`.
+
+## Development loop
+
+> Fan-out commands run as real multi-agent **Workflows** under `{{KIT}}/workflows/`
+> (parallel subagents + adversarial/maker-checker verification), invoked via the
+> Workflow tool — not one agent simulating critics: `critic-panel` (critic rounds),
+> `scan-docs` (`/scan-project-docs`), `gap-analysis` (`/story-gap-analysis`),
+> `e2e-design` (`/multi-agent-e2e`), `loop-iteration` (`/loop` L2/L3),
+> `prompt-meta-critic` (file `improve-skills.js`; `/improve-skills` — meta-critic over our
+> own prompts/workflows), `trace-bench` (`/bench-checkers` — measures the checkers on
+> seeded defects).
+> The record-writing workflows (`critic-panel`, `scan-docs`, `loop-iteration`,
+> `improve-skills`) return typed TRACE verdicts plus `traceRecords` drafts that the caller
+> appends with `loop-setup write` (no durable state change without a record); `e2e-design`
+> and `gap-analysis` return typed verdicts that are advisory and write no records.
+> Pass `args.models = { fanout, judge }` when invoking any of these to override the
+> default `sonnet`/`opus` model tiering (e.g. for cost control on a large fan-out).
+
+| Command | When to use | Args |
+|---|---|---|
+| `/write-goal` | Start of a non-trivial task: turn a described outcome into a production-grade `/goal` (or `/loop`) prompt to review and run | `[outcome]` (say "loop" for a /loop) |
+| `/multi-agent-dev` | Default for any non-trivial feature, bug fix, or UI change; ends with browser + test evidence | `[task]` |
+| `/plan-nodes` | Turn a story, spec or goal into proposed loop-plan nodes (scope, check, after, story link); each is appended only after you confirm it — for work meant to run through `/loop` | `[story id \| spec path \| goal]` |
+| `/critic-round` | Read-only review of the current app/flow; returns a findings matrix, changes no code | `[focus]` |
+| `/multi-agent-e2e` | A user flow needs new or expanded Playwright E2E coverage | `[target flow]` |
+| `/qa-pass` | Final pre-ship gate before committing a change set | `[scope]` |
+| `/fix-localhost` | Dev server or localhost is broken / throwing on load | — |
+
+## Product-delivery audit
+| Command | When to use | Args |
+|---|---|---|
+| `/scan-project-docs` | First audit, or after product docs change significantly; builds the `docs/` story map | `[scope]` |
+| `/sync-story-status` | After implementing/testing stories, to refresh statuses with evidence | `[scope]` |
+| `/story-gap-analysis` | Assessing MVP readiness or deciding what to build/test next (read-only) | `[scope]` |
+
+## Memory & self-learning
+| Command | When to use | Args |
+|---|---|---|
+| `/dream` | End of a non-trivial task: ingest durable learnings into the wiki, lint it, and propose new skills | `[ingest \| query <q> \| lint]` |
+| `/memory-audit` | Periodically prune stale/duplicated/misleading memory (no deletes without confirmation) | — |
+| `/improve-skills` | Periodically improve the system's OWN prompts/skills/workflows via a meta-critic; proposes edits, confirmation-gated (manual-only) | `[scope]` |
+| `/bench-checkers` | Measure the checkers (loop verifier, single-pass reviewer, critic panel) on seeded-defect fixtures; reports WrongAcceptRate, invariance, judge gap and pre-registered falsification flags (manual-only) | `[arms] [repeat N]` |
+
+## Conventions for adding a command
+- Every command needs a one-line `description` frontmatter (used for routing) and,
+  if it takes input, an `argument-hint`.
+- Add a row to the right group above. `/dream lint` flags commands missing a
+  description or an index row.
+- Prefer extending an existing command over adding a near-duplicate.
+- Name it apart from every workflow's skill name (`meta.name` in `{{KIT}}/workflows/*.js`):
+  commands and workflows share the skills list, so a shared name shows up twice there.
+- **The manual-only rule.** A command is manual-only (`disable-model-invocation: true` in
+  its frontmatter, plus `(manual-only)` in its index row) only if it rewrites the
+  governing prompt surface, or runs a measured fan-out that `CLAUDE.md` never tells Claude
+  to run. Today that is `/improve-skills` and `/bench-checkers`. Any command `CLAUDE.md`
+  tells Claude to run stays model-invocable: the flag blocks Claude's Skill call and hides
+  the command, so that instruction could not be followed. The engine workflows stay
+  model-invocable skills, so their cost bounds are the per-call caps and budget floors
+  (Cost bounds in `{{KIT}}/docs/workflow-graphs.md`); in Auto mode, the Workflow approval appears
+  only on the first launch. `pnpm test` fails when a command's flag and its index row
+  disagree, or when a workflow's skill name is also a command's name.
