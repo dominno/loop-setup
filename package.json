@@ -13,7 +13,7 @@
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "check:bundle": "node scripts/check-bundle-size.mjs",
-    "trace": "node scripts/trace/cli.mjs",
+    "loop-setup": "node kit/bin/loop-setup.mjs",
     "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e"
   },
   "dependencies": {
@@ -31,5 +31,9 @@
     "eslint-config-next": "16.2.9",
     "typescript": "^6.0.0",
     "vitest": "^4.1.0"
+  },
+  "qualityBar": {
+    "perfBudgetKbGzip": 155,
+    "wcag": "2.1 AA"
   }
 }

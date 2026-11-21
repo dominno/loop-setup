@@ -1,0 +1,49 @@
+---
+description: Complete pre-ship QA pass — typecheck, lint, unit, build, E2E, browser check, a11y basics, and a post-implementation critic round. Run before committing/shipping a change set.
+argument-hint: [scope, e.g. "changed auth flow"]
+---
+
+Perform a complete QA pass before shipping.
+
+Scope:
+$ARGUMENTS
+
+Checklist:
+
+1. Inspect changed files with git diff.
+2. Run typecheck.
+3. Run lint.
+4. Run unit tests.
+5. Run production build.
+6. Run E2E tests.
+7. Open localhost in browser.
+8. Manually verify the main changed flows.
+9. Check console errors.
+10. Check failed network requests.
+11. Review accessibility basics:
+    - buttons have accessible names
+    - forms have labels
+    - keyboard navigation works for critical flow
+12. Run a **post-implementation critic round as a Workflow** — invoke the Workflow
+    tool with `scriptPath: {{KIT}}/workflows/critic-panel.js` and
+    `args: { "focus": "the changed flows for $ARGUMENTS", "priorEvidence": "<git diff summary + the typecheck/lint/unit/build/E2E results + a11y/browser findings from steps 2-11>", "priorRecords": <loop-setup query --latest --writer critic-panel --brief>, "treeId": "<loop-setup tree-id>" }`.
+    The critics run as parallel subagents and verify against that evidence; every
+    blocker, and each important finding up to the round's verifier cap
+    (`args.maxVerifiers`, default 30), gets a typed verdict from a separate skeptic (no
+    single agent simulating the panel). Record the verdicts per the **consumer
+    protocol** in `{{KIT}}/rules/trace-policy.md` (scratchpad file →
+    `loop-setup write <file>` → `loop-setup act --from <file>`).
+13. Report the workflow's `error` first if present (every lens failed, or
+    `budgetStopped`: the token budget floor stopped the round before any reviewer
+    started — no review happened, re-run), then its `completion` (the claim next to
+    `completion.verdict`, and its `missing`), then the `confirmed` findings (with verdicts
+    and qualifiers), the `deferred` ones with their `missing` evidence (the cap-deferred
+    ones too: `counts.capDeferred`, failedGates `not-verified:verifier-cap` — no skeptic
+    adjudicated them), the `revised` ones with their `repair`, any `failedReviewers`, and
+    recommended next actions.
+
+Never mark as complete if build, tests, or the critical browser flow fails, or if the
+critic round's `completion.verdict` is not `accept`: any open blocker (confirmed, deferred
+or revised — a defer is not a pass until its `missing` evidence is supplied and
+re-adjudicated, or a human accepts the risk), a reviewer that failed in the critic round,
+or an `error` (a `budgetStopped` round included: it is incomplete) keeps it incomplete.

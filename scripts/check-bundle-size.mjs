@@ -1,21 +1,21 @@
 // Performance gate — the objective half of the quality bar.
 // Sums the gzipped size of the client JS chunks Next emits and fails if it exceeds
-// the budget. The budget lives in ONE place: the `perf-budget-kb-gzip` marker in
-// .claude/memory/topics/quality-bar.md (single source of truth). Run after `next build`.
+// the budget. The budget lives in ONE place: `qualityBar.perfBudgetKbGzip` in package.json
+// (single source of truth; package.json is project contract, so CI needs no loop workspace).
+// The quality-bar wiki page explains the target; it does not hold the number. Run after `next build`.
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { basename, join } from "node:path";
 
-const BAR = ".claude/memory/topics/quality-bar.md";
+const BAR = "package.json";
 const CHUNKS = ".next/static/chunks";
 const MANIFEST = ".next/build-manifest.json";
 
-const marker = readFileSync(BAR, "utf8").match(/perf-budget-kb-gzip:\s*(\d+(?:\.\d+)?)/);
-if (!marker) {
-  console.error(`check-bundle-size: no 'perf-budget-kb-gzip' marker in ${BAR}`);
+const budgetKB = Number(JSON.parse(readFileSync(BAR, "utf8")).qualityBar?.perfBudgetKbGzip);
+if (!(budgetKB > 0)) {
+  console.error(`check-bundle-size: no positive qualityBar.perfBudgetKbGzip in ${BAR}`);
   process.exit(2);
 }
-const budgetKB = Number(marker[1]);
 
 if (!existsSync(CHUNKS)) {
   console.error(`check-bundle-size: ${CHUNKS} not found — run \`next build\` first.`);
@@ -56,7 +56,7 @@ console.log(
 if (!ok) {
   console.error(
     `check-bundle-size: over budget by ${(kb - budgetKB).toFixed(1)} KB. ` +
-      `Reduce the bundle, or consciously raise the budget in ${BAR} with a reason.`,
+      `Reduce the bundle, or consciously raise qualityBar.perfBudgetKbGzip in ${BAR} with a reason.`,
   );
   process.exit(1);
 }

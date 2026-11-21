@@ -36,11 +36,11 @@ As a [user type], I want [capability], so that [benefit].
 
 **Final status:**
 Not started / Partially implemented / Implemented / Unit tested / E2E tested / Browser verified / Done / Blocked / Deprecated
-Record: `TR-xxxxxxxxxxxx` (the TRACE-lite record behind this status — `pnpm trace show <id>`)
+Record: `TR-xxxxxxxxxxxx` (the TRACE-lite record behind this status — `loop-setup show <id>`)
 
 **Next action:**
 One concrete next action.
 
-Plan nodes: (optional) the `.claude/memory/loop-plan.md` nodes that deliver this story — their
-`origin` carries `story:US-NNN#ACk`; `pnpm trace story-lint` lists the open ones. A node never
+Plan nodes: (optional) the `.claude/loop-workspace/loop-plan.md` nodes that deliver this story — their
+`origin` carries `story:US-NNN#ACk`; `loop-setup story-lint` lists the open ones. A node never
 moves this story's status.

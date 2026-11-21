@@ -1,0 +1,165 @@
+# Integrating hardened recurring loops into an existing project
+
+A practical guide to adding safe, recurring `/loop` automations ("loop
+engineering") to a project that already uses this template's workflow. Adapted from
+[cobusgreyling/loop-engineering](https://github.com/cobusgreyling/loop-engineering).
+
+> **A loop is a recurring goal:** an agent iterates toward an objective on a cadence
+> (triage → act → verify → record), escalating to a human when needed. The risk is
+> the same project's caveat — *unattended loops make unattended mistakes and token
+> costs explode* — so a loop is only as safe as its operating rules.
+
+**Prerequisite:** you've adopted the base workflow (see
+[`adoption-guide.md`](./adoption-guide.md)). This guide adds the *recurring-loop*
+layer on top.
+
+---
+
+## 1. What you're adding (nothing to copy)
+
+The loop ships with the loop-setup kit, which is **installed into `~/.claude`** (`loop-setup
+install`; on Claude Code on the web, from the environment's setup script). Its state lives in
+the project's workspace (`loop-setup init` / `restore`), reached from the project as
+`.claude/loop-workspace/`:
+
+```txt
+~/.claude/loop-setup/kit/loop.md                 Hardened loop operating prompt (trust levels, denylist, stop
+                                                 rules, run-log step), installed as the /loop-tick command
+~/.claude/loop-setup/kit/loop-checklist.md       Readiness rubric to promote a loop's trust level (L0→L3)
+~/.claude/loop-setup/kit/workflows/loop-iteration.js   The maker/checker Workflow that the loop's step 10 runs at L2/L3
+~/.claude/loop-setup/kit/workflows/critic-panel.js     The critic-round Workflow that the loop's step 7 runs
+~/.claude/loop-setup/kit/rules/trace-policy.md   The record policy: typed verdicts, evidence gate, consumer actions
+.claude/loop-workspace/loop-run-log.md           Durable, append-only loop run state
+.claude/loop-workspace/loop-plan.md              The plan/DAG every L2/L3 action traces to (incl. the `deferred` status)
+.claude/loop-workspace/trace/records.jsonl       TRACE-lite record store, written only via `loop-setup`
+```
+
+Run the standing loop as `/loop 30m /loop-tick` (or `/loop /loop-tick` to let the model pace
+itself), and run `loop-setup sync` at the end of a session so the run log, plan and records
+reach `claude/loop-state`.
+
+A node only becomes `done` with an `accept`/`qualify` record and a `CLEAR` action; a
+`defer` verdict parks it as `deferred` with the `missing` evidence named, so a hold is
+resolvable rather than a dead end. Before promoting a loop to L3, run `/bench-checkers`
+and clear checklist §10's measured-checker item.
+
+The loop's rules reach every session through the kit's SessionStart hook (the digest of
+`rules/KIT.md`); your `CLAUDE.md` needs no loop paragraph.
+
+## 2. The operating model in one breath
+
+Declare a **trust level** and stay inside it; keep **durable state** in the run-log;
+obey a **denylist**, **escalation triggers**, **red-flag stop conditions**, and a
+**budget cap**; and keep the **verifier separate from the implementer** (no
+self-approve).
+
+| Level | The loop may… | Promote only when |
+|---|---|---|
+| **L1 — Report** | triage → write the run-log; **no** code changes | checklist §1–3, §5 |
+| **L2 — Assisted** | small in-scope fixes with a verifier; **no** auto-merge | checklist §1–7 |
+| **L3 — Unattended** | act without a human watching | **all** checklist sections |
+
+## 3. Step-by-step
+
+1. **Copy the files above**; merge the `CLAUDE.md` loop guidance.
+2. **Define purpose & scope** for the loop: one-sentence goal, explicit non-goals,
+   and the watched scope (which repos, branches, PRs, tickets, paths). Fill §1 of
+   `kit/loop-checklist.md`.
+3. **Set cadence & lifecycle:** an interval that matches urgency, first-run and
+   restart behavior, off-hours behavior, and **self-stop when the watchlist empties**.
+4. **Adapt the denylist to your repo:** keep auth, payments, secrets/`.env`,
+   infra/deploy, CI config, and DB migrations off-limits; add anything
+   project-specific. Keep the loop's own gates off-limits too: `.claude/`, `CLAUDE.md`,
+   the root `scripts/` directory, the root `package.json` and the test/lint/type/E2E
+   runner configs (a one-line change to the `test` script or to vitest's include would
+   make `pnpm test` skip every `scripts/**` gate). If your gate tests or runner configs
+   live elsewhere, add those paths. Adjust the localhost/command references to your stack.
+5. **Set the budget & limits:** a **per-run cap** (turn budget, e.g. 25 turns, or a
+   token ceiling), max iterations per item, max auto-PRs/day, and a kill switch.
+   Record remaining budget in each run-log entry.
+6. **Wire the state:** read `.claude/loop-workspace/loop-run-log.md` at the **start of each
+   iteration** and append an entry at the **end of each iteration**; prune resolved
+   items; record human overrides. (Rotates past 500 lines, like the memory log.)
+7. **Start at L1 (report-only).** Run it, read the run-log, confirm it triages
+   correctly and changes nothing. Notifications should fire **only** when action is
+   needed — not every run.
+8. **Promote to L2** only after checklist §1–7 pass: allow small, in-scope, low-risk
+   fixes, each confirmed by a **separate verifier** pass (the implementer never
+   marks its own work done); still no auto-merge.
+9. **Promote to L3** only after **all** checklist sections pass and you trust it
+   unattended. Re-read the red flags first.
+
+## 4. Pick a loop pattern (recipes)
+
+Common recurring loops — each is a `/loop` with its own scope, cadence, and budget:
+
+| Pattern | What it does | Start at | Cadence |
+|---|---|---|---|
+| **Daily triage** | scan for issues/regressions, report | L1 | 1–2 h |
+| **PR babysitter** | watch a PR's CI + reviews, fix red, re-push | L2 | 5–15 m |
+| **CI sweeper** | keep `main` green | L2 | 5–15 m |
+| **Dependency sweeper** | propose dep bumps with passing `verify` | L1→L2 | 6 h–1 d |
+| **Changelog / post-merge cleanup / issue triage** | housekeeping | L1 | 1 d |
+
+> In this template, **PR babysitter** is already available via
+> `subscribe_pr_activity` + a scheduled self check-in — the same maker/checker +
+> escalation rules apply.
+
+## 5. Parallel / file-mutating loops → worktrees
+
+If a loop (or its sub-agents) mutates files in parallel, run the **implementer via
+`Agent` with `isolation: worktree`** so concurrent work can't clobber a shared tree
+(`loop-iteration` does). The worktree is a fresh checkout without dependencies: the
+implementer records the commit it started from (`git rev-parse HEAD`), installs from the
+lockfile (`pnpm install --frozen-lockfile --prefer-offline`), and edits and runs
+typecheck, lint and unit tests only there. **Implementers never run dev, build or E2E**:
+a build rewrites tracked files into the diff, and the dev server's port belongs to the
+user. The Lead runs those after applying the diff.
+
+- **Base.** The Lead passes `args.headSha` (`git rev-parse HEAD`), and `loop-iteration`
+  defers any item whose worktree started from another commit (`base-mismatch`), before
+  verification. Set `worktree.baseRef` to `"head"` in your Claude Code settings so loop
+  worktrees branch from your local HEAD; without it, the base check defers every item
+  whose base differs (a safe stall: those items are neither verified nor applied).
+- **The verifier is instructed, not isolated.** It gets no worktree of its own, so it
+  starts in the shared checkout. Its prompt tells it to verify in its own scratch copy of
+  the working tree, never to apply the diff to or edit files in the shared checkout, and
+  not to pipe a check through `head` or `tail` when its exit status is the evidence. That
+  is a prompt instruction, not enforced. The Lead applies a licensed diff only after
+  `git apply --check` passes.
+- **Zero-install alternative.** `worktree.symlinkDirectories: ["node_modules"]` links
+  the main checkout's `node_modules` into each worktree, so a worktree starts with
+  dependencies. The trade-offs: every worktree shares one install and its caches, and an
+  item that changes the lockfile runs against stale dependencies. The implementer's
+  `pnpm install` still runs, and through the link it writes into the main checkout's
+  shared install, once per item and concurrently: an item that changes dependencies and
+  reinstalls rewrites your own `node_modules`.
+- **Cleanup.** The built-in sweep keeps any worktree with changes, so implementer
+  worktrees outlive their run. `/loop` removes an applied item's worktree after its
+  `CLEAR`, and only after validating it (listed by `git worktree list --porcelain`, under
+  `.claude/worktrees/`, nothing in it beyond the applied patch); it keeps deferred, held
+  and escalated ones. To clean up by hand: `git worktree list`, then
+  `git worktree remove --force <path>` for each one you no longer need, then
+  `git worktree prune`.
+
+## 6. Red flags — stop and fix before raising a level
+
+- Same PR/issue with **>3 fix attempts** without progress.
+- Verifier is the **same session** as the implementer.
+- **No run-log** (memory loss between iterations).
+- Notifications on **every** run regardless of findings.
+- **Auto-merge** without a path allowlist.
+
+## 7. Adapt to where the loop runs
+
+- **Local / Claude Code on the web:** `/loop <interval>` drives `kit/loop.md`;
+  the run-log is the durable state across iterations.
+- **CI / scheduled (GitHub Actions, cron):** the same operating rules apply; the
+  run-log lives in the repo, and the denylist/budget/escalation must be explicit
+  because no human is watching.
+
+## 8. Before you call a loop "ready"
+
+Run through [`kit/loop-checklist.md`](../kit/loop-checklist.md) and only
+raise the trust level when its sections for that level pass. **When in doubt, stay
+at L1** — report-only loops are almost always safe; acting loops are not.
