@@ -109,3 +109,36 @@ Każdy krok to jeden commit przez pathspec, po zielonym `pnpm verify`.
 - import historii `.claude/memory` do workspace'u;
 - ścieżka A0 „nowy projekt z szablonu”;
 - Windows.
+
+## Status (2026-11-21)
+
+Faza A jest zrobiona na gałęzi `claude/blissful-galileo-akxz8w`.
+
+**Commity:**
+
+| Commit | Zakres |
+|---|---|
+| ec6d24b | A1/A2: przeniesienie do `kit/`, trzy korzenie |
+| 9654bfb | A3–A5: install / init / restore / sync / hooki |
+| 4ccf257 | A6/A7: podział CLAUDE.md / KIT.md, dokumentacja, CI |
+| 7617b61 | A8: stan przeniesiony do workspace'u `loop-setup-e3ed255a` na `claude/loop-state` |
+| 5af23ca | poprawka po rundzie krytyków (TR-4fe142478925, CLEAR po osobnej rundzie sprawdzającej) |
+
+**Środowisko:** setup script środowiska „Full access cloud” instaluje kit przy budowie kontenera (A9).
+
+**Weryfikacja:**
+
+- `pnpm typecheck`, `pnpm lint`, `pnpm test` (742/742) i `pnpm build` (143,2 KB ≤ 155) — exit 0;
+- `pnpm test:e2e` (16/16) — exit 0, ze scratchpadowym shimem przeglądarki (obraz ma Chromium 1243, Playwright jest przypięty do 1194);
+- `loop-setup doctor` — wszystko ok;
+- symulacja świeżej sesji (pusty `~/.claude` i świeży klon z GitHub) — auto-restore działa.
+
+**Otwarte, faza B / do potwierdzenia:**
+
+- **S10.** Czy instalacja z setup scriptu ładuje się w świeżej sesji w chmurze. Fakt czeka w kwarantannie wiki: TR-325b6a5ea4fb.
+- **Drobne uwagi krytyków (nie naprawione, kontrola zakresu):**
+  - `settings.json`, który jest poprawnym JSON-em, ale nie obiektem, daje częściową instalację;
+  - ścieżki w poleceniach hooków nie są escapowane;
+  - `ensureLink` rozpoznaje „swój” link wyrażeniem regularnym zamiast przez `workspacesRoot`.
+- Infografiki SVG/PNG w `docs/` pokazują stary model kopiowania.
+- Pozycje fazy B z tabeli powyżej.
