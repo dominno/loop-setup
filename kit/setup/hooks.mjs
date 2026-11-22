@@ -154,6 +154,9 @@ export function stop(input, { env = process.env } = {}) {
   if (!facts.projectRoot) return null;
   const layout = resolveLayout(facts);
   if (!layout.ok) return null;
+  // Policy v4: anchor what this turn appended (verified first, never over a failure, which the next
+  // SessionStart reports); it never changes the Stop decision.
+  if (layout.mode !== "legacy") integrityFailure(layout, facts.claudeHome);
   const { status: s, refusal } = stateStatus(layout, facts.claudeHome);
   if (refusal) {
     return {

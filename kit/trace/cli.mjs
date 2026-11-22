@@ -12,7 +12,7 @@ import { claudeHomeOf, layoutError } from "../setup/facts.mjs";
 import { postureSummary, sandboxPosture, withSandbox } from "../setup/sandbox.mjs";
 import { settingsSources } from "../setup/settings.mjs";
 import { evidenceHome } from "../setup/layout.mjs";
-import { anchorAdvanced, anchorReport, storeKey, withStoreLock, writerId } from "../setup/anchors.mjs";
+import { anchorAdvanced, anchorReport, storeKey, unwritable, withStoreLock, writerId } from "../setup/anchors.mjs";
 import { verifiedKitFile } from "../setup/kitfiles.mjs";
 import { kitGate, parseLevel } from "../setup/integrity.mjs";
 import { verifyKit } from "../setup/verifykit.mjs";
@@ -319,14 +319,33 @@ export async function main(argv = process.argv.slice(2)) {
   // under the store lock, with this machine's writer id, then the writer's own checkpoint.
   const claudeHome = claudeHomeOf();
   const anchorKeyOf = () => storeKey({ claudeHome, storePath, workspace: LAYOUT.ok ? LAYOUT.workspace : null, workspaceId: LAYOUT.workspaceId });
+  // The hooks (outside any sandbox) create the writer id and anchor every stream; a sandboxed writer,
+  // which cannot write <home>/loop-setup/anchors/, still chains with the id the hooks created, runs
+  // unlocked and leaves its own checkpoint to the next hook.
   const chainedWrite = (fn) => {
     const key = anchorKeyOf();
-    return withStoreLock(claudeHome, key, () => {
-      const w = writerId(claudeHome, key, { create: true });
-      const res = fn({ chain: w, workspace: key.startsWith("store-") ? null : key });
-      anchorAdvanced({ claudeHome, key, entries: loadEntries(storePath), only: w });
-      return res;
-    });
+    return withStoreLock(
+      claudeHome,
+      key,
+      () => {
+        let w;
+        try {
+          w = writerId(claudeHome, key, { create: true });
+        } catch (e) {
+          if (!unwritable(e)) throw e;
+          w = writerId(claudeHome, key);
+        }
+        if (!w) throw new Error(`this machine has no writer id for the store (anchors key ${key}) and cannot create one here — start a new session (the SessionStart hook creates it), then write again`);
+        const res = fn({ chain: w, workspace: key.startsWith("store-") ? null : key });
+        try {
+          anchorAdvanced({ claudeHome, key, entries: loadEntries(storePath), only: w });
+        } catch (e) {
+          if (!unwritable(e)) throw e;
+        }
+        return res;
+      },
+      { bestEffort: true },
+    );
   };
   const now = new Date().toISOString();
 

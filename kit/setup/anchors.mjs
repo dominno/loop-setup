@@ -52,6 +52,9 @@ export function writerId(claudeHome, key, { create = false } = {}) {
   return w;
 }
 
+/** A write refused by the file system's permissions (a sandboxed process outside its write paths). */
+export const unwritable = (e) => ["EACCES", "EPERM", "EROFS"].includes(e && e.code);
+
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 const alive = (pid) => {
   try {
@@ -80,17 +83,20 @@ function stale(lock) {
  * and sync. A stale lock is taken over by an atomic rename; a live one is waited for, then refused.
  * opts.wait: ms to wait (default 10 s); opts.onBusy: called instead of throwing when the wait ends.
  */
-export function withStoreLock(claudeHome, key, fn, { wait = 10000, onBusy = null } = {}) {
+export function withStoreLock(claudeHome, key, fn, { wait = 10000, onBusy = null, bestEffort = false } = {}) {
   const { lock } = anchorPaths(claudeHome, key);
-  mkdirSync(dirname(lock), { recursive: true });
   const deadline = Date.now() + wait;
   for (;;) {
     try {
+      mkdirSync(dirname(lock), { recursive: true });
       const fd = openSync(lock, "wx");
       writeSync(fd, JSON.stringify({ pid: process.pid, host: hostname(), at: new Date().toISOString() }));
       closeSync(fd);
       break;
     } catch (e) {
+      // A sandboxed writer cannot write <home>/loop-setup/anchors/: it runs unlocked (a fork by two
+      // concurrent sandboxed writers is then possible, and lint reports it).
+      if (bestEffort && unwritable(e)) return fn();
       if (e.code !== "EEXIST") throw e;
       if (stale(lock)) {
         const aside = `${lock}.stale-${randomBytes(4).toString("hex")}`;
@@ -158,6 +164,13 @@ export function anchorAdvanced({ claudeHome, key, entries, only = null, now = ne
   return true;
 }
 
+/** Make sure this machine has a writer id and an anchors file for the store (the hooks, outside the sandbox). */
+export function ensureAnchors(claudeHome, key) {
+  const { anchors } = anchorPaths(claudeHome, key);
+  writerId(claudeHome, key, { create: true });
+  if (!existsSync(anchors)) appendFileSync(anchors, "");
+}
+
 /** A human's acknowledgement of a real count drop: the anchors file moves aside and a new one records why. */
 export function resetAnchors({ claudeHome, key, reason, now = new Date().toISOString() }) {
   const { anchors } = anchorPaths(claudeHome, key);
@@ -181,6 +194,16 @@ export function storeIntegrity({ claudeHome, workspace, workspaceId = null, anch
   const report = anchorReport({ claudeHome, key, entries });
   const errors = [...chains.errors, ...report.errors];
   let appended = false;
-  if (anchor && !errors.length) appended = withStoreLock(claudeHome, key, () => anchorAdvanced({ claudeHome, key, entries: loadEntries(storePath) }), { wait: 2000, onBusy: () => false });
+  if (anchor && !errors.length) {
+    appended = withStoreLock(
+      claudeHome,
+      key,
+      () => {
+        ensureAnchors(claudeHome, key);
+        return anchorAdvanced({ claudeHome, key, entries: loadEntries(storePath) });
+      },
+      { wait: 2000, onBusy: () => false },
+    );
+  }
   return { errors, warnings: [...chains.warnings, ...report.warnings], anchored: report.anchored, resets: report.resets, appended, key };
 }

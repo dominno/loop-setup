@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { KIT_ROOT } from "./facts.mjs";
 import { anchorsRoot, stateGitDir, workspaceDir } from "./layout.mjs";
 import { install } from "./install.mjs";
-import { sessionStart } from "./hooks.mjs";
+import { sessionStart, stop } from "./hooks.mjs";
 
 let T;
 let kitSrc;
@@ -230,6 +230,18 @@ describe("anchors: SessionStart checkpoints every stream; a dropped count is cau
     expect(sessionStart({ cwd: proj }, { env: envFor(home) }).hookSpecificOutput.additionalContext).toMatch(/Record store integrity check FAILED: .*not valid JSON/);
     writeFileSync(af, keep);
     ok(lint(home, proj));
+  });
+
+  it("the Stop hook anchors what a sandboxed writer could not (its own checkpoint missing)", () => {
+    ok(run(home, proj, ["write", "-"], draft("demo:stop-anchor")));
+    const af = anchorsFile(home, id);
+    const withOwn = readFileSync(af, "utf8");
+    writeFileSync(af, withOwn.trim().split("\n").slice(0, -1).join("\n") + "\n"); // as if the writer could not append it
+    ok(lint(home, proj)); // fewer checkpoints are no violation
+    stop({ cwd: proj }, { env: envFor(home) });
+    const last = JSON.parse(readFileSync(af, "utf8").trim().split("\n").pop());
+    const w = parsed(home, id).slice(-1)[0].chain.w;
+    expect(last.checkpoints.find((c) => c.w === w)).toMatchObject({ n: parsed(home, id).filter((v) => v.chain && v.chain.w === w).length });
   });
 
   it("two concurrent writes on one machine share the lock: both stored, the chain intact", async () => {
