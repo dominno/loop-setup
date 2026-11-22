@@ -106,7 +106,7 @@ revised with the pre-implementation round's findings before any code).
 Pre-flight: `loop-setup doctor` exit 0 (no fail).
 
 Commits: 00587ca (the approved design), 180a3d5 (S01–S05), 6269bf0 (S03.1: hooks anchor; a
-sandboxed writer is best-effort).
+sandboxed writer is best-effort), c03a9da (S06.1/S06.2: post-round fixes), 70eb16c (S06.3: re-check fix).
 
 Success criteria and evidence:
 1. **Schema 1.1, additive.** 1.0 lines replay unchanged (the live store: 184 lines, all 1.0, the new
@@ -173,3 +173,23 @@ failed, `notRechecked` empty.
 
 Nice-to-haves: stale-takeover tests (taken); sync holds the lock across fetch and push (left, a
 risk).
+
+Re-check round (tree 9eedc021ebe8e717, HEAD c03a9da): `completion` accept, `notRechecked` empty.
+TR-eac079ab5043, TR-cc11d9353dc3, TR-fbcce4b1397a CLEARed; the restated claims of the three revise
+records not re-raised (HELD with that note). One new confirmed important finding:
+
+| Critic | Severity | Verdict | Finding | Evidence | Recommended action |
+|---|---|---|---|---|---|
+| regression | important | accept (TR-9d0a9461d049) | after S06.1 a rejected first write left a writer id with no anchors file: a permanent false "anchors were deleted" | reproduced by command | a new writer id comes with its anchors file → fixed in 70eb16c (S06.3), RED then GREEN |
+
+Second re-check round (tree 6649b11ed79417ac, HEAD 70eb16c; the third and last): `completion` accept,
+no findings, `notRechecked` empty. TR-9d0a9461d049 CLEARed. Full chain at 70eb16c: typecheck 0,
+lint 0 (0 warnings), test 0 (24 files, 986), build 0, test:e2e 0 (16); `loop-setup lint` 0 (187
+records), `wiki-check` 0, `doctor` 0. No open critic-panel blocker in the store.
+
+Remaining risks: listed in `docs/plans/record-chain/steps.md` (the machine-local guarantee, no owned
+Edit-deny on anchors/, sandboxed writers unlocked, the takeover window, sync holding the lock across
+push, rotation and clock order, the v4 upgrade rule, the live kit still 2dd64dd).
+
+**C4 status: done** (green checkpoint: tests and chain pass, the last round accepts with no open
+blocker, records written, sync done, commits pushed).

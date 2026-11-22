@@ -187,16 +187,16 @@ was run again; the second run's records are TR-9b325336d7bf … TR-05e230f34069.
 
 | id | description | scope | check | after | status | commit |
 |---|---|---|---|---|---|---|
-| S01 | Tests first (RED): chain core, writer and replay, real-git two-clone test, contracts | kit/trace/chain.test.mjs, kit/trace/lib.test.mjs, kit/setup/chainrepo.test.mjs, kit/trace/contracts.test.mjs | `pnpm exec vitest run kit/trace/chain.test.mjs kit/trace/lib.test.mjs kit/setup/chainrepo.test.mjs kit/trace/contracts.test.mjs` | — | done | — |
-| S02 | Core: `chain.mjs` (digest, chainViolations, nextChain, checkpointsFor, anchorViolations); schema 1.1; replay rules for 1.0/1.1 | kit/trace/chain.mjs, kit/trace/lib.mjs, kit/schema/schema-v1.json | same | S01 | done | — |
-| S03 | Adapters: anchors paths (layout.mjs), `anchors.mjs` (writer id, checkpoints, lock, reset); `chainedWriter()` at all five CLI writers and rotate; lint; sync under the lock | kit/setup/layout.mjs, kit/setup/anchors.mjs, kit/trace/cli.mjs, kit/trace/lib.mjs, kit/setup/workspace.mjs, kit/setup/commands.mjs | same | S02 | done | — |
-| S04 | SessionStart anchoring and its failure line; the doctor check | kit/setup/hooks.mjs, kit/setup/commands.mjs | same | S03 | done | — |
-| S05 | Policy v4: trace-policy.md marker, sentence and Record guarantees bullet (the precise guarantee, the upgrade rule); `anchors reset` in the adoption guide | kit/rules/trace-policy.md, kit/docs/adoption-guide.md | `pnpm exec vitest run kit/trace/contracts.test.mjs` | S04 | done | — |
-| S03.1 | Pre-round revise TR-2684185404a4 (its repair and failed gates): under the L3 sandbox a writer cannot write `~/.claude/loop-setup/anchors/`, so the hooks (outside the sandbox) create the writer id and the anchors file and anchor every stream — SessionStart and now the Stop hook too (verified first, never over a failure); a writer runs its lock and its own checkpoint best-effort when the directory is not writable, and fails closed only when it has no writer id at all | kit/setup/anchors.mjs, kit/setup/hooks.mjs, kit/trace/cli.mjs, kit/setup/chainrepo.test.mjs | `pnpm exec vitest run kit/setup/chainrepo.test.mjs` | S04 | done | — |
-| S06 | Self-verify chain and the post-implementation critic round | — | `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | S05 | done | — |
-| S06.3 | Re-check round TR-9d0a9461d049 (accept): after S06.1 a rejected or no-op first write left a writer id with no anchors file, a permanent false "anchors were deleted" error (explicit `--store`/`TRACE_STORE` stores have no hook to repair it); a new writer id now always comes with its anchors file | kit/trace/cli.mjs, kit/setup/chainrepo.test.mjs | `pnpm exec vitest run kit/setup/chainrepo.test.mjs -t "rejected first write"` | S06.1 | done | — |
-| S06.1 | Post-round TR-eac079ab5043 (qualify; unsandboxed writers): the writer re-created a deleted anchors file without verifying, laundering the loss past `anchors reset`; it now anchors only into an existing file, or a first one with a writer id it just created | kit/trace/cli.mjs, kit/setup/chainrepo.test.mjs | `pnpm exec vitest run kit/setup/chainrepo.test.mjs -t "never re-creates"` | S06 | done | — |
-| S06.2 | Post-round TR-cc11d9353dc3 (accept): stale-lock takeover could rename away a live lock created in between; the lock now carries a nonce, a takeover checks what it renamed and puts a live lock back (`link`, never overwrite), and a holder releases only its own lock | kit/setup/anchors.mjs, kit/setup/anchors.test.mjs | `pnpm exec vitest run kit/setup/anchors.test.mjs` | S06 | done | — |
+| S01 | Tests first (RED): chain core, writer and replay, real-git two-clone test, contracts | kit/trace/chain.test.mjs, kit/trace/lib.test.mjs, kit/setup/chainrepo.test.mjs, kit/trace/contracts.test.mjs | `pnpm exec vitest run kit/trace/chain.test.mjs kit/trace/lib.test.mjs kit/setup/chainrepo.test.mjs kit/trace/contracts.test.mjs` | — | done | 180a3d5 |
+| S02 | Core: `chain.mjs` (digest, chainViolations, nextChain, checkpointsFor, anchorViolations); schema 1.1; replay rules for 1.0/1.1 | kit/trace/chain.mjs, kit/trace/lib.mjs, kit/schema/schema-v1.json | same | S01 | done | 180a3d5 |
+| S03 | Adapters: anchors paths (layout.mjs), `anchors.mjs` (writer id, checkpoints, lock, reset); `chainedWriter()` at all five CLI writers and rotate; lint; sync under the lock | kit/setup/layout.mjs, kit/setup/anchors.mjs, kit/trace/cli.mjs, kit/trace/lib.mjs, kit/setup/workspace.mjs, kit/setup/commands.mjs | same | S02 | done | 180a3d5 |
+| S04 | SessionStart anchoring and its failure line; the doctor check | kit/setup/hooks.mjs, kit/setup/commands.mjs | same | S03 | done | 180a3d5 |
+| S05 | Policy v4: trace-policy.md marker, sentence and Record guarantees bullet (the precise guarantee, the upgrade rule); `anchors reset` in the adoption guide | kit/rules/trace-policy.md, kit/docs/adoption-guide.md | `pnpm exec vitest run kit/trace/contracts.test.mjs` | S04 | done | 180a3d5 |
+| S03.1 | Pre-round revise TR-2684185404a4 (its repair and failed gates): under the L3 sandbox a writer cannot write `~/.claude/loop-setup/anchors/`, so the hooks (outside the sandbox) create the writer id and the anchors file and anchor every stream — SessionStart and now the Stop hook too (verified first, never over a failure); a writer runs its lock and its own checkpoint best-effort when the directory is not writable, and fails closed only when it has no writer id at all | kit/setup/anchors.mjs, kit/setup/hooks.mjs, kit/trace/cli.mjs, kit/setup/chainrepo.test.mjs | `pnpm exec vitest run kit/setup/chainrepo.test.mjs` | S04 | done | 6269bf0 |
+| S06 | Self-verify chain and the post-implementation critic round | — | `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | S05 | done | 70eb16c |
+| S06.3 | Re-check round TR-9d0a9461d049 (accept): after S06.1 a rejected or no-op first write left a writer id with no anchors file, a permanent false "anchors were deleted" error (explicit `--store`/`TRACE_STORE` stores have no hook to repair it); a new writer id now always comes with its anchors file | kit/trace/cli.mjs, kit/setup/chainrepo.test.mjs | `pnpm exec vitest run kit/setup/chainrepo.test.mjs -t "rejected first write"` | S06.1 | done | 70eb16c |
+| S06.1 | Post-round TR-eac079ab5043 (qualify; unsandboxed writers): the writer re-created a deleted anchors file without verifying, laundering the loss past `anchors reset`; it now anchors only into an existing file, or a first one with a writer id it just created | kit/trace/cli.mjs, kit/setup/chainrepo.test.mjs | `pnpm exec vitest run kit/setup/chainrepo.test.mjs -t "never re-creates"` | S06 | done | c03a9da |
+| S06.2 | Post-round TR-cc11d9353dc3 (accept): stale-lock takeover could rename away a live lock created in between; the lock now carries a nonce, a takeover checks what it renamed and puts a live lock back (`link`, never overwrite), and a holder releases only its own lock | kit/setup/anchors.mjs, kit/setup/anchors.test.mjs | `pnpm exec vitest run kit/setup/anchors.test.mjs` | S06 | done | c03a9da |
 
 RED → GREEN:
 - Before S02: `chain.test.mjs` did not load (no `chain.mjs`); 4 chained-writer tests in `lib.test.mjs`
@@ -238,3 +238,28 @@ finding, TR-9d0a9461d049 (accept), a regression S06.1 introduced: fixed in S06.3
 fails with the S06.1 code; GREEN with the fix). Nice-to-have left as a risk: the stale-lock takeover
 has a window between the rename and the link-back in which two holders can overlap; a fork that
 results is a lint error, never silent.
+
+Second re-check round (tree 6649b11ed79417ac, HEAD 70eb16c; the third and last post-implementation
+round): `completion` accept, no findings, `notRechecked` empty; the reviewer ran the rejected-first-
+write scenario in a temp copy. TR-9d0a9461d049 CLEARed. No critic-panel blocker is open: the latest
+blocker records are TR-73f53598baa2 (CLEARed) and two revise records (TR-e8de2cbc87d7 from C3,
+TR-6d5893f4387f from C4), each re-adjudicated by a separate round and HELD with that note.
+
+Remaining risks:
+- The guarantee is machine-local: tamper evidence holds only on a machine that kept its anchors;
+  insertion, authorship and tampering with the anchors themselves are not covered (policy bullet).
+- `~/.claude/loop-setup/anchors/**` is not under the installer's owned Edit-deny rules (the sandbox
+  is the boundary; `integrity.test.mjs` pins the owned deny list).
+- Under the L3 sandbox a writer runs unlocked and leaves its checkpoint to the next hook: two
+  concurrent sandboxed writers can fork a chain (a lint error, never silent), and lines written and
+  deleted within one turn are not anchored.
+- The stale-lock takeover has a window between the rename and the link-back in which two holders can
+  overlap (a fork is a lint error).
+- `sync` holds the store lock across fetch and push: a writer waits up to 10 s during a slow push,
+  then fails with a clear message.
+- Rotation keeps a writer's order only while its `created_at` grows (a backwards clock across a year
+  boundary could reorder its lines across archives).
+- Policy v4 needs every machine sharing a workspace on a v4 kit: an older kit refuses 1.1 lines as a
+  schema error (its message does not say "upgrade"); the adoption guide and the policy say so.
+- The live kit in this container is still 2dd64dd, so the live store stays 1.0 until a kit with this
+  change is installed.
