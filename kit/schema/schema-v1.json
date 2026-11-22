@@ -89,7 +89,7 @@
         "created_at": { "$ref": "#/$defs/isoTime" },
         "record_id": { "$ref": "#/$defs/recordId" },
         "consumer": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
-        "action": { "type": "string", "enum": ["CLEAR", "HOLD", "COMMIT", "COMMIT_QUALIFIED", "QUARANTINE", "REJECT", "REUSE", "REAUDIT"] },
+        "action": { "type": "string", "enum": ["CLEAR", "HOLD", "COMMIT", "COMMIT_QUALIFIED", "QUARANTINE", "REJECT", "REUSE", "REAUDIT", "LAND"] },
         "ref": { "type": "string" },
         "note": { "type": "string" },
         "chain": { "$ref": "#/$defs/chain" }

@@ -13,12 +13,13 @@ repair; consumers act only on records. We adopt that **contract** for our own ma
 declared policy, **not** objective truth: gates verify field consistency, not field
 truth (paper §7.2).
 
-<!-- trace-policy-version: 4 -->
+<!-- trace-policy-version: 5 -->
 (machine-readable; `kit/trace/lib.mjs` stamps it on every record and refuses records
 written under a newer policy — bump it whenever a table below or a record rule changes.)
 v3 adds the memory write boundary for `wiki:` records; v4 adds the per-writer hash chain (schema
-`trace-lite/1.1`) and machine-local anchors (both under **Record guarantees**); records written
-under v1–v3 replay unchanged.
+`trace-lite/1.1`) and machine-local anchors (both under **Record guarantees**); v5 adds the human
+`LAND` action (a done plan node's change landed where git cannot show it); records written under
+v1–v4 replay unchanged.
 
 - Schema: `kit/schema/schema-v1.json` · Store: `.claude/loop-workspace/trace/records.jsonl`
   (append-only JSONL, archives `<YYYY>.jsonl`) · Writer/linter: `loop-setup …`
@@ -73,6 +74,7 @@ fails on drift — including drift between this table and the code.
 | REJECT | any | dream (not filed), improve-skills (edit declined) |
 | REUSE | any | critic-panel (prior verdict reused on an identical working tree — `loop-setup tree-id`) |
 | REAUDIT | any | dream lint (evidence file changed since the record's commit, or that commit is unreachable) |
+| LAND | accept, qualify | human only (`--ref <node>`): the node's change landed where git cannot show it — a combined commit with no `Plan:` trailer, a rewrite; refused from inside Claude Code |
 
 **Fail closed:** CLEAR/COMMIT/COMMIT_QUALIFIED are refused on a non-licensing verdict, on
 a superseded record, and on any record that is no longer the newest for its `claim_id`
@@ -113,6 +115,11 @@ denylist path still needs a human).
 - **Human release** (only a human writes it): `loop-setup act <record> human HOLD --ref <node>
   --note "release: <decision>"` lets an escalated node return to ready/blocked; the record
   still licenses nothing (no CLEAR). `plan-lint` `[unsupported-reset]` reads it.
+- **Human landing** (policy v5; only a human writes it, refused from inside Claude Code): `loop-setup
+  act <the node's record> human LAND --ref <node> --note "<commit or reason>"` counts a done node's
+  change as landed in HEAD when git cannot show it (`plan-ready`, `plan-items` and `plan-lint` read
+  it); otherwise a done node satisfies `after` only once its CLEAR's commit is an ancestor of HEAD, a
+  commit in HEAD's history has its `patch-id`, or one carries the trailer `Plan: <node>`.
 - **"Fixed"** = a `CLEAR` on the finding's latest licensing record, written only after the
   separate checker (post-implementation round / loop verifier + the post-apply check)
   shows it resolved; `--note` says what showed it.

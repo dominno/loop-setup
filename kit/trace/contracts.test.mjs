@@ -145,8 +145,9 @@ describe("policy page ↔ code", () => {
     expect(readPolicyVersion()).toBeGreaterThanOrEqual(1);
   });
 
-  it("policy v4: the page declares 4 and documents the per-writer chain the schema defines", () => {
-    expect(readPolicyVersion()).toBe(4);
+  // The policy moved to v5 (C5's LAND action); the v4 contents this test pins are unchanged.
+  it("policy v4: the page documents the per-writer chain the schema defines", () => {
+    expect(readPolicyVersion()).toBeGreaterThanOrEqual(4);
     expect(schema.$defs.schemaVersion.enum).toEqual(["trace-lite/1.0", "trace-lite/1.1"]);
     expect(Object.keys(schema.$defs.chain.properties).sort()).toEqual(["prev", "w"]);
     for (const kind of ["record", "action"]) {
@@ -157,6 +158,13 @@ describe("policy page ↔ code", () => {
     expect(page).toMatch(/\*\*Tamper evidence \(policy v4\)\*\*/);
     expect(page).toMatch(/`chain: \{ w, prev \}`/);
     expect(page).toMatch(/trace-lite\/1\.1/);
+  });
+
+  it("policy v5: the page declares 5 and documents the human LAND action the schema and the writer allow", () => {
+    expect(readPolicyVersion()).toBe(5);
+    expect(schema.$defs.action.properties.action.enum).toContain("LAND");
+    expect(ACTION_ALLOWED.LAND).toEqual(["accept", "qualify"]);
+    expect(page).toMatch(/\*\*Human landing\*\* \(policy v5/);
   });
 
   it("the evidence-standard table matches EVIDENCE_POLICY", () => {

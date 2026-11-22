@@ -128,6 +128,7 @@ export const ACTION_ALLOWED = {
   REJECT: VERDICTS,
   REUSE: VERDICTS,
   REAUDIT: VERDICTS,
+  LAND: ["accept", "qualify"], // policy v5: a human records that a done node's change landed where git cannot show it
 };
 export const CLEARING_ACTIONS = ["CLEAR", "COMMIT", "COMMIT_QUALIFIED"];
 
@@ -1311,6 +1312,7 @@ export function appendActions(drafts, { storePath, now, policyVersion, schema, f
     seenIds.add(a.action_id);
     contents.set(ck, a.action_id);
     const violations = [...writerOwnedViolations(drafts[i]), ...validate(sch.$defs.action, a, sch)];
+    if (a.action === "LAND" && (a.consumer !== "human" || !a.ref)) violations.push("LAND is a human's record that a done node's change landed: consumer human and --ref <node>");
     violations.push(...screenText(JSON.stringify(a), forbidden));
     const rec = prior.records.get(a.record_id);
     if (!rec) violations.push(`unknown record ${a.record_id} — a consumer cannot act on a record that does not exist`);

@@ -62,6 +62,7 @@ import {
 } from "./lib.mjs";
 import { DEFAULT_PLAN, MAX_SCOPE, conflictFreeBatch, newNodeId, parsePlan, parseRunLog, planDrift, planStatus, planItems, planViolations, readyIds } from "./plan.mjs";
 import { STORY_MAP, STORY_MAP_PATHS, parseStory, storyMapViolations } from "./story-map.mjs";
+import { landedMap } from "./landed.mjs";
 
 const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (policy: kit/rules/trace-policy.md)
 
@@ -302,6 +303,48 @@ function reachable(commit) {
   return git(["cat-file", "-e", `${commit}^{commit}`]) !== null;
 }
 
+/**
+ * The landed port's git adapter (phase C, C5): facts about one done node's change in the project's
+ * HEAD, each true | false | null (git cannot tell). History is scanned from the recorded base when it
+ * is an ancestor of HEAD, else HEAD's last 1000 commits; scans are cached per range.
+ */
+const historyCache = new Map();
+function historyOf(base) {
+  const anc = base ? spawnSync("git", ["merge-base", "--is-ancestor", base, "HEAD"], { cwd: PROJECT_ROOT, stdio: "ignore" }).status : 1;
+  const range = anc === 0 ? [`${base}..HEAD`] : ["--max-count=1000", "HEAD"];
+  const key = range.join(" ");
+  if (historyCache.has(key)) return historyCache.get(key);
+  let h = null;
+  try {
+    const log = execFileSync("git", ["log", "-p", "--no-merges", "--no-color", "--no-ext-diff", ...range], { cwd: PROJECT_ROOT, maxBuffer: 1 << 30, stdio: ["ignore", "pipe", "ignore"] });
+    const ids = execFileSync("git", ["patch-id", "--stable"], { cwd: PROJECT_ROOT, input: log, encoding: "utf8", maxBuffer: 1 << 28, stdio: ["pipe", "pipe", "ignore"] });
+    const trailers = execFileSync("git", ["log", "--format=%(trailers:key=Plan,valueonly,separator=%x2C)", ...range], { cwd: PROJECT_ROOT, encoding: "utf8", maxBuffer: 1 << 28, stdio: ["ignore", "pipe", "ignore"] });
+    h = {
+      patchIds: new Set(ids.split("\n").map((l) => l.split(" ")[0]).filter(Boolean)),
+      planIds: new Set(trailers.split(/[\s,]+/).filter(Boolean)),
+    };
+  } catch {
+    h = null; // git cannot tell (no HEAD, a broken history): every fact is null
+  }
+  historyCache.set(key, h);
+  return h;
+}
+function landingFacts({ id, base, patchId, commit }) {
+  let ancestor = false;
+  if (commit) {
+    const st = spawnSync("git", ["merge-base", "--is-ancestor", commit, "HEAD"], { cwd: PROJECT_ROOT, stdio: "ignore" }).status;
+    ancestor = st === 0 ? true : st === 1 ? false : null;
+  }
+  const h = historyOf(base);
+  return { ancestor, patchId: h ? (patchId ? h.patchIds.has(patchId) : false) : null, trailer: h ? h.planIds.has(id) : null };
+}
+
+/** LAND is a human's step (policy v5): refused from inside Claude Code, like anchors reset. */
+function refuseLand() {
+  process.stderr.write("loop-setup act LAND refused: recording that a node's change landed is a human's step (CLAUDECODE is set) — run it in a terminal outside Claude Code\n");
+  return 2;
+}
+
 function out(obj, asJson) {
   if (asJson) process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
   else process.stdout.write((typeof obj === "string" ? obj : JSON.stringify(obj, null, 2)) + "\n");
@@ -492,6 +535,7 @@ export async function main(argv = process.argv.slice(2)) {
     // Leak guard: the store is in the tree bench agents grep, so a draft naming a bench
     // fixture or its defect is refused (fail closed) — redact it and write again.
     const forbidden = benchForbidden();
+    if (String(flags["then-act"] || "").toUpperCase() === "LAND" && process.env.CLAUDECODE) return refuseLand();
     if (flags["then-act"] && !flags.consumer) {
       out("--then-act needs --consumer <name>");
       return 2;
@@ -535,6 +579,7 @@ export async function main(argv = process.argv.slice(2)) {
       }
       drafts = [{ record_id, consumer, action: String(action).toUpperCase(), ref: flags.ref, note: flags.note }];
     }
+    if (drafts.some((d) => String(d && d.action).toUpperCase() === "LAND") && process.env.CLAUDECODE) return refuseLand();
     return chainedWrite((writer) => {
       const results = appendActions(drafts, { storePath, now, policyVersion, schema, forbidden: benchForbidden(), chain: writer.chain });
       out(results, true);
@@ -571,7 +616,7 @@ export async function main(argv = process.argv.slice(2)) {
     }
     const plan = readPlan();
     if (unparsed(plan)) return 1;
-    let ids = readyIds(plan.nodes, { max, state });
+    let ids = readyIds(plan.nodes, { max, state, landed: landedMap(plan.nodes, state, landingFacts) });
     if (batchN !== undefined) {
       const { batch, skipped } = conflictFreeBatch(plan.nodes, ids, batchN);
       for (const k of skipped) process.stderr.write(`skip: ${k.id} conflicts with ${k.conflictsWith} (overlapping scope; it waits for a later call)\n`);
@@ -620,7 +665,7 @@ export async function main(argv = process.argv.slice(2)) {
     } catch {
       // no run log yet: an own claim is stale, another owner's is live
     }
-    const { errors, warnings } = planViolations(plan, state, { preDispatch, maxScope, stories, owner: currentOwner(), runs });
+    const { errors, warnings } = planViolations(plan, state, { preDispatch, maxScope, stories, owner: currentOwner(), runs, landed: landedMap(plan.nodes, state, landingFacts) });
     for (const w of warnings) process.stderr.write(`warn: ${w}\n`);
     for (const e of errors) process.stderr.write(`error: ${e}\n`);
     out({ ok: errors.length === 0, errors: errors.length, warnings: warnings.length, nodes: plan.nodes.length, preDispatch, plan: planPath, store: storePath }, true);
@@ -717,7 +762,7 @@ export async function main(argv = process.argv.slice(2)) {
     const plan = readPlan();
     if (unparsed(plan)) return 1;
     // All or nothing: a batch with any id that is not ready is never half-emitted.
-    const { items, refused } = planItems(plan.nodes, pos, state);
+    const { items, refused } = planItems(plan.nodes, pos, state, { landed: landedMap(plan.nodes, state, landingFacts) });
     for (const r of refused) process.stderr.write(`error: ${r.id}: ${r.reason}\n`);
     if (refused.length) return 1;
     out(items, true);

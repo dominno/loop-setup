@@ -8,6 +8,7 @@
 //
 // It lives under kit/trace/, which the loop denylist covers, so a loop cannot weaken the gate
 // that picks its own work. Pure (no fs / git): cli.mjs reads the plan and replays the store.
+import { isLanded } from "./landed.mjs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { LICENSING, WORKSPACE } from "./lib.mjs";
@@ -204,8 +205,10 @@ export function priorityRank(node, state) {
  * ranked by their origin record's severity (blocker < important < other/human), table order
  * breaking ties; without one, table order. `max` keeps the first N after ranking.
  */
-export function readyIds(nodes, { max, state } = {}) {
-  const done = new Set(nodes.filter((n) => n.status === "done").map((n) => n.id));
+export function readyIds(nodes, { max, state, landed } = {}) {
+  // Policy (phase C, C5): a done node satisfies `after` only once its change has landed in HEAD
+  // (the landed port, computed by the git adapter); without a port, every done node does.
+  const done = new Set(nodes.filter((n) => n.status === "done" && isLanded(landed, n.id)).map((n) => n.id));
   const ready = nodes
     .filter((n) => STATUSES.includes(n.status) && !NOT_READY.includes(n.status) && n.after.every((d) => done.has(d)))
     .map((n, i) => ({ id: n.id, rank: priorityRank(n, state), i }))
@@ -326,7 +329,7 @@ const EMPTY_STATE = { records: new Map(), actions: new Map(), superseded: new Se
  * warns; an `in-progress` node is an error only with preDispatch, since the contract test can run
  * mid-loop.
  */
-export function planViolations(plan, state = EMPTY_STATE, { preDispatch = false, maxScope = MAX_SCOPE, stories, owner, runs } = {}) {
+export function planViolations(plan, state = EMPTY_STATE, { preDispatch = false, maxScope = MAX_SCOPE, stories, owner, runs, landed } = {}) {
   const { nodes, errors: parseErrors } = Array.isArray(plan) ? { nodes: plan, errors: [] } : plan;
   const errors = [...parseErrors];
   const warnings = [];
@@ -426,6 +429,10 @@ export function planViolations(plan, state = EMPTY_STATE, { preDispatch = false,
         if (!actionsOn(rec.record_id, "CLEAR").some((a) => a.ref === n.id)) problems.push(`${rec.record_id} carries no CLEAR whose ref is ${n.id}`);
       }
       if (problems.length) errors.push(`[done-record] ${at(n)}: done needs the node's own loop-iteration verifier record (claim ${claimOf(n.id)}), accept/qualify, not superseded, with a CLEAR --ref ${n.id} — ${problems.join("; ")}`);
+      // The landed port (C5): warnings, never errors — a CLEARed change waiting for its commit is normal.
+      const l = landed && landed.get(n.id);
+      if (l && l.status !== "landed") warnings.push(`[done-unlanded] ${at(n)}: done, but its change is not known to be in HEAD (${l.why}) — its dependents wait; commit it (a "Plan: ${n.id}" trailer ties a combined commit), or a human records \`loop-setup act ${n.record || "<record>"} human LAND --ref ${n.id} --note "<commit or reason>"\``);
+      else if (l && l.why === "legacy") warnings.push(`[done-legacy] ${at(n)}: done before landing was recorded (its CLEAR has no patch-id or commit), so it counts as landed`);
     }
     if (n.status === "deferred") {
       if (!n.record) problems.push("it cites no record");
@@ -726,9 +733,9 @@ export function planDrift(nodes, baseNodes, state = EMPTY_STATE) {
  * round's --latest priors. Without a store, no record is passed on (fail closed).
  * All or nothing: any id that is not ready, unknown or listed twice refuses the whole batch.
  */
-export function planItems(nodes, ids, state = EMPTY_STATE) {
+export function planItems(nodes, ids, state = EMPTY_STATE, { landed } = {}) {
   const byId = indexById(nodes);
-  const ready = new Set(readyIds(nodes));
+  const ready = new Set(readyIds(nodes, { landed }));
   const refused = [];
   const seen = new Set();
   for (const id of ids) {
@@ -736,7 +743,7 @@ export function planItems(nodes, ids, state = EMPTY_STATE) {
     if (seen.has(id)) refused.push({ id, reason: "listed twice" });
     else if (!n) refused.push({ id, reason: "not in the plan" });
     else if (!ready.has(id)) {
-      const open = n.after.filter((d) => byId.get(d)?.status !== "done");
+      const open = n.after.filter((d) => byId.get(d)?.status !== "done" || !isLanded(landed, d)).map((d) => (byId.get(d)?.status === "done" ? `${d} (done, not landed in HEAD)` : d));
       refused.push({ id, reason: `not ready: ${NOT_READY.includes(n.status) || !STATUSES.includes(n.status) ? `status ${n.status}` : `waits on ${open.join(", ")}`}` });
     }
     seen.add(id);

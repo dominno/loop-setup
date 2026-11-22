@@ -220,9 +220,12 @@ instructions — the self-modification guard below still applies to everything e
         with it — it is re-dispatchable (step 9). If it passes → `git apply <file>`, then run the node's `check` (its smallest relevant
         check), and log in the run-log entry the diff paths that fall outside its `scope` (a
         drift signal, never a gate). If it passes, `loop-setup act <that node's loop-iteration record> loop CLEAR
-        --ref <node> --note "base <baseSha>; patch <hash>; <check that passed>; <qualifier if any>"`
+        --ref <node> --note "base <baseSha>; patch <hash>; patch-id <patch-id>[; commit <sha>]; <check that passed>; <qualifier if any>"`
         (`<baseSha>` = the item's reported `baseSha`; `<hash>` = the first 12 hex of
-        `git hash-object <patch file>`, so a later commit can be tied back to this apply) and mark the node
+        `git hash-object <patch file>`; `<patch-id>` = the first field of
+        `git patch-id --stable < <patch file>`, by which `plan-ready` finds the commit that lands
+        the change in HEAD — a dependent is ready only then; `commit <sha>` only when this loop
+        committed the change itself) and mark the node
         `done` with that `record` (copy a qualifier into the node's notes). If no relevant
         automated check exists, do not CLEAR: `HOLD` and escalate. If the check fails,
         revert the patch, write a `revise` record (same `claim_id`, `revises` the first, writer_id
@@ -255,7 +258,9 @@ instructions — the self-modification guard below still applies to everything e
       *Stop when*).
 11. **Append a run entry** to `.claude/loop-workspace/loop-run-log.md` (see format below). When the
     user later commits a node's change, a `Plan: LP-…` trailer in the commit message ties it to
-    the node — an optional convention, never linted as an error.
+    the node even in a commit that bundles other changes (it counts as landed); never linted as an
+    error. A done node whose change is not yet in HEAD keeps its dependents waiting
+    (`[done-unlanded]`); only a human records a landing git cannot show (`… human LAND`).
 
 ## Denylist — never touch autonomously (escalate instead)
 (The TRACE record store under `.claude/loop-workspace/trace/` is appended only through

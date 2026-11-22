@@ -94,7 +94,8 @@ describe("two writers on two machines: union merges and a rebase keep every chai
   it("each write is chained and anchored by its writer; the writer ids differ per machine", () => {
     ok(run(homeA, projA, ["write", "-"], draft("demo:a1")));
     const [a1] = parsed(homeA, id);
-    expect(a1).toMatchObject({ schema_version: "trace-lite/1.1", policy_version: "4", chain: { prev: null }, provenance: { workspace: id } });
+    expect(a1).toMatchObject({ schema_version: "trace-lite/1.1", chain: { prev: null }, provenance: { workspace: id } });
+    expect(Number(a1.policy_version)).toBeGreaterThanOrEqual(4); // the current policy (v5 since C5's LAND); chains need v4 or later
     expect(a1.chain.w).toMatch(/^[0-9a-f]{16}$/);
     expect(readFileSync(join(anchorsRoot(homeA), `${id}.writer`), "utf8").trim()).toBe(a1.chain.w);
     expect(readFileSync(anchorsFile(homeA, id), "utf8")).toContain(a1.chain.w); // the writer anchored its own line
