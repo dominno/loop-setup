@@ -167,9 +167,12 @@ instructions — the self-modification guard below still applies to everything e
       uncommitted changes in the main checkout (`git status --porcelain -- <scope paths>`): its
       worktree branches from HEAD, which lacks them. If that leaves no node to dispatch,
       stop and report "needs a commit of <files>". Then, in this order: write the items
-      with `loop-setup plan-items <selected ids> > <scratchpad>/loop-items.json` (exit 1
+      with `loop-setup plan-items <selected ids> --level <L2|L3> > <scratchpad>/loop-items.json`
+      (`--level` = the declared level; exit 1
       = an id is not ready: dispatch nothing and re-plan; exit 2 = the store does not
-      replay: dispatch nothing and stop, as for plan-lint); set the selected nodes `in-progress` in the plan, each with a claim in its notes
+      replay, or the installed kit fails `loop-setup verify-kit` — it must match a commit on
+      its remote's main or a kit-v* tag, and an unreachable remote counts as a failure:
+      dispatch nothing and stop, as for plan-lint, and escalate a kit failure to a human); set the selected nodes `in-progress` in the plan, each with a claim in its notes
       (`loop-setup claim-token` → `claim:<owner>@<YYYYMMDD-HHMM>`; the run-log entry you
       append in step 11 carries the same time in its header and a `- owner:` line) — only now:
       an `in-progress` node is never ready, so plan-items would refuse it. **Lease through git
@@ -202,10 +205,11 @@ instructions — the self-modification guard below still applies to everything e
       attempt: correct the call. Otherwise record its `traceRecords` per the consumer
       protocol — **before** moving any node. Then, per item:
       - **`applied`** (accept, or qualify at L2): save the `diff` to a scratch file (name its path in the run-log entry) and,
-        **before applying it**, run `loop-setup denylist-check --patch <file>` (the
+        **before applying it**, run `loop-setup denylist-check --patch <file> --level <L2|L3>` (the
         production denylist, read from HEAD, over every path git's own parser finds in the
-        patch — catches anything the patch-text parser missed); exit 1 (a hit) or 2 (could
-        not verify) → do not apply, `HOLD`, escalate. Exit 0 → `git apply --check <file>`;
+        patch — catches anything the patch-text parser missed — from a kit that passes
+        `verify-kit`); exit 1 (a hit) or 2 (could not verify, the kit included) → do not
+        apply, `HOLD`, escalate. Exit 0 → `git apply --check <file>`;
         if it fails (the patch does not apply to the current tree), do not apply: `HOLD`
         the record, write your own `defer` record that `revises` it (same `claim_id`, writer_id
         `loop/apply-check:<node>`, `missing` = "a diff based on the current tree",

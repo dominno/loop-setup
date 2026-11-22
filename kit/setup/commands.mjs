@@ -5,6 +5,7 @@ import { KIT_ROOT, claudeHomeOf, currentLayout, gitOut } from "./facts.mjs";
 import { LINK_NAME, STATE_BRANCH, loopHome, statePaths } from "./layout.mjs";
 import { install, normalizeRemote, uninstall, verifyInstall } from "./install.mjs";
 import { runHook } from "./hooks.mjs";
+import { verifyKit } from "./verifykit.mjs";
 import { init, linkIgnored, linkTracked, originUrl, remoteHasState, restore, sync, syncStatus } from "./workspace.mjs";
 
 const USAGE = `loop-setup — the loop kit, installed in ~/.claude with one workspace per project
@@ -17,6 +18,9 @@ const USAGE = `loop-setup — the loop kit, installed in ~/.claude with one work
   loop-setup sync [--message <m>] [--no-push] [--force]  commit, merge ${STATE_BRANCH}, lint, push
   loop-setup where [--json]                            show the kit, project and workspace paths
   loop-setup doctor [--json]                           check the install and this project's binding
+  loop-setup verify-kit [--json]                       check the installed kit against a commit on its remote's main or a
+                                                       kit-v* tag: every kit file, command and owned settings entry
+                                                       (exit 0 verified, 1 tampered, 2 cannot verify — e.g. offline)
   loop-setup hook session-start|stop                   (run by Claude Code; never blocks on error)
   loop-setup <trace command> …                         TRACE-lite: write, act, lint, query, … (loop-setup help)`;
 
@@ -163,6 +167,13 @@ export async function runLifecycle(cmd, argv) {
       if (flags.path) print(w.workspace || "");
       else print(w, true);
       return w.ok ? 0 : 2;
+    }
+    if (cmd === "verify-kit") {
+      const r = verifyKit({ installedShim: join(loopHome(claudeHomeOf(env)), "bin", "loop-setup"), projectRoot: gitOut(process.cwd(), ["rev-parse", "--show-toplevel"]) });
+      if (json) print(r, true);
+      else if (r.ok) print(`verify-kit: ok — the installed kit (${KIT_ROOT}) matches ${r.commit.slice(0, 12)} (on ${r.protectedBy.join(", ")}) of ${r.remote}: ${r.checked.files} files, ${r.checked.commands} commands, ${r.checked.settings} owned settings entries`);
+      else print(`verify-kit: ${r.code === "TAMPERED" ? "TAMPERED" : "cannot verify"} — ${r.problems.length} problem(s)\n${r.problems.map((p) => `  - ${p}`).join("\n")}`);
+      return r.ok ? 0 : r.code === "TAMPERED" ? 1 : 2;
     }
     if (cmd === "doctor") {
       const checks = doctor({ env });

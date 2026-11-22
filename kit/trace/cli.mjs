@@ -11,6 +11,8 @@ import { fileURLToPath } from "node:url";
 import { layoutError } from "../setup/facts.mjs";
 import { legacyTarget } from "../setup/layout.mjs";
 import { verifiedKitFile } from "../setup/kitfiles.mjs";
+import { kitGate, parseLevel } from "../setup/integrity.mjs";
+import { verifyKit } from "../setup/verifykit.mjs";
 import {
   appendActions,
   BENCH_BUNDLE,
@@ -69,10 +71,11 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
                                        --severity: exact match on a record's severity (blocker|important|nice-to-have; a
                                        missing or other value exits 2), combinable with the other filters
                                        --brief: compact JSON (newest 40, only the fields critic-panel reads) for args.priorRecords
-  loop-setup denylist-check --patch <file>
+  loop-setup denylist-check --patch <file> --level L1|L2|L3
                                        BEFORE applying a patch: run the loop's production denylist (read from HEAD) over
                                        every path git's own parser finds in it (git apply --numstat) — exit 1 on a hit,
-                                       exit 2 when it cannot be verified (git error, no paths)
+                                       exit 2 when it cannot be verified (git error, no paths, or an installed kit that
+                                       fails verify-kit at L2/L3 or with no --level; at L1 that only warns)
   loop-setup lint                      replay the whole store and check every contract invariant (exit 1 on error)
   loop-setup plan-ready [--max N | --batch N] [--json] [--plan p]
                                        the loop plan's ready node ids as a JSON array (loop-plan.md's ready-node rule),
@@ -98,11 +101,12 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
                                        advisory, exit 0: done nodes whose CLEARed diff touched paths outside their scope,
                                        and the nodes added, removed or moved since the base plan (default: the plan at
                                        the last commit of the run log) — consistency, not truth; never evidence
-  loop-setup plan-items <ids…> [--plan p]
+  loop-setup plan-items <ids…> --level L1|L2|L3 [--plan p]
                                        loop-iteration args.items for ready nodes: [{id, description, priorRecordId?,
                                        missing?}]; priorRecordId only for the node's own loop:<id> record, never a
                                        critic one — exit 1 and no items when any id is not ready, 2 when the store
-                                       does not replay
+                                       does not replay or an installed kit fails verify-kit at L2/L3 or with no
+                                       --level (at L1 that only warns)
   loop-setup story-lint [--root dir]   the story map (${STORY_MAP}/: story files, index, dashboard, verification log, E2E
                                        coverage map) against itself and the store (consistency, not truth): one status
                                        per story everywhere, plus the log row, coverage and licensing Record: line its
@@ -161,6 +165,23 @@ function parseArgs(argv) {
     } else pos.push(a);
   }
   return { pos, flags };
+}
+
+/** True when the running kit is the project's own kit/ source tree (anchored by the project's git HEAD). */
+function kitInProject() {
+  const rel = relative(PROJECT_ROOT, KIT_ROOT).split(sep).join("/");
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+}
+
+/**
+ * The kit integrity gate of the L2/L3 dispatch commands (denylist-check, plan-items): an installed kit
+ * must pass verify-kit (a protected commit on its remote; offline counts as a failure). L2, L3 and an
+ * undeclared level refuse, L1 warns (kitGate). The project's own kit/ source tree, run directly, is
+ * anchored by the project's git instead.
+ */
+function kitIntegrity(level) {
+  if (kitInProject()) return { allow: true, message: null };
+  return kitGate(level, verifyKit({ kitRoot: KIT_ROOT, projectRoot: PROJECT_ROOT }));
 }
 
 function readJsonInput(src) {
@@ -319,8 +340,15 @@ export async function main(argv = process.argv.slice(2)) {
     // Lead's own bookkeeping and unrelated uncommitted edits, and which a patch could
     // rewrite to weaken the very check that inspects it). Paths come from git's own
     // parser, the denylist from HEAD; anything that cannot be verified exits 2 (fail closed).
+    let level;
+    try {
+      level = parseLevel(flags.level);
+    } catch (e) {
+      out(`usage: loop-setup denylist-check --patch <file> --level L1|L2|L3   (${e.message})`);
+      return 2;
+    }
     if (typeof flags.patch !== "string") {
-      out("usage: loop-setup denylist-check --patch <file>   (run it BEFORE git apply <file>)");
+      out("usage: loop-setup denylist-check --patch <file> --level L1|L2|L3   (run it BEFORE git apply <file>)");
       return 2;
     }
     const sh = (args) => execFileSync("git", args, { cwd: PROJECT_ROOT, encoding: "utf8", maxBuffer: 1 << 28, stdio: ["ignore", "pipe", "pipe"] });
@@ -335,8 +363,7 @@ export async function main(argv = process.argv.slice(2)) {
       // The trusted copy: in the kit source repo, the committed file (HEAD); for an installed kit,
       // the installed file verified against the sha256 the installer recorded. Never the working tree.
       const kitRel = relative(PROJECT_ROOT, KIT_ROOT).split(sep).join("/");
-      const kitInProject = kitRel !== "" && !kitRel.startsWith("..") && !isAbsolute(kitRel);
-      const source = kitInProject ? sh(["show", `HEAD:${kitRel}/workflows/loop-iteration.js`]) : verifiedKitFile(KIT_ROOT, "workflows/loop-iteration.js");
+      const source = kitInProject() ? sh(["show", `HEAD:${kitRel}/workflows/loop-iteration.js`]) : verifiedKitFile(KIT_ROOT, "workflows/loop-iteration.js");
       ({ hitsDenylist } = loadWorkflowBlock("loop-iteration.js", "loop-denylist", ["hitsDenylist"], { source }));
     } catch (e) {
       out({ ok: false, error: `could not verify the patch: ${String(e.stderr || e.message || e).trim().split("\n")[0]}` }, true);
@@ -346,6 +373,13 @@ export async function main(argv = process.argv.slice(2)) {
       out({ ok: false, error: "git found no paths in the patch — nothing can be verified" }, true);
       return 2;
     }
+    // The installed kit the denylist came from must itself verify against its remote (L1 only warns).
+    const gate = kitIntegrity(level);
+    if (!gate.allow) {
+      out({ ok: false, error: gate.message.replace(/^error: /, "") }, true);
+      return 2;
+    }
+    if (gate.message) process.stderr.write(`${gate.message}\n`);
     const hits = paths.filter((p) => hitsDenylist([p]));
     out({ ok: hits.length === 0, checked: paths.length, paths, hits }, true);
     return hits.length ? 1 : 0;
@@ -560,10 +594,21 @@ export async function main(argv = process.argv.slice(2)) {
   }
 
   if (cmd === "plan-items") {
-    if (flags.plan === true || !pos.length) {
-      out("usage: loop-setup plan-items <id> [<id>…] [--plan p] [--store s]");
+    let level;
+    try {
+      level = parseLevel(flags.level);
+    } catch (e) {
+      out(`usage: loop-setup plan-items <id> [<id>…] --level L1|L2|L3 [--plan p] [--store s]   (${e.message})`);
       return 2;
     }
+    if (flags.plan === true || !pos.length) {
+      out("usage: loop-setup plan-items <id> [<id>…] --level L1|L2|L3 [--plan p] [--store s]");
+      return 2;
+    }
+    // Dispatch only from a kit that verifies against its remote (L1 only warns; stdout stays the items file).
+    const gate = kitIntegrity(level);
+    if (gate.message) process.stderr.write(`${gate.message}\n`);
+    if (!gate.allow) return 2;
     // Whose record a node cites (its own loop:<id> record becomes priorRecordId) only the replayed
     // store tells, so one that does not replay yields no items. Errors go to stderr: stdout is the items file.
     if (state.errors.length) {

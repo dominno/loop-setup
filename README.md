@@ -287,7 +287,8 @@ loop-setup reaudit                 # wiki facts whose evidence changed since the
 loop-setup metrics                 # consumer coverage, defer quality, repeated-error rate
 loop-setup plan-ready              # the loop plan's ready nodes, computed (table order; --max N)
 loop-setup plan-lint               # the loop plan vs its contract and the records (consistency, not truth)
-loop-setup plan-items LP-002 …     # loop-iteration args.items for ready nodes (refuses a non-ready id)
+loop-setup plan-items LP-002 … --level L2  # loop-iteration args.items for ready nodes (refuses a non-ready id, or a kit that fails verify-kit at L2/L3)
+loop-setup verify-kit              # the installed kit vs a commit on its remote's main or a kit-v* tag (files, commands, owned settings)
 loop-setup story-lint              # the story map vs itself and the records (consistency, not truth)
 loop-setup wiki-check              # the memory wiki vs the records: rec: comments, quarantine rows, page sizes
 loop-setup l3-check                # the L3 measured-checker item, computed: latest bench record vs the current verifier

@@ -991,7 +991,8 @@ function tempRepo({ manifest, repo = "commit" } = {}) {
     writeFileSync(join(d, rel), readFileSync(join(ROOT, rel)));
   };
   for (const f of ["lib.mjs", "cli.mjs", "bench-judge.mjs", "plan.mjs", "story-map.mjs"]) copy(`kit/trace/${f}`);
-  for (const f of ["layout.mjs", "facts.mjs", "kitfiles.mjs"]) copy(`kit/setup/${f}`);
+  // The CLI's kit/setup imports (the dispatch gates verify the kit through verifykit.mjs and its adapters).
+  for (const f of ["layout.mjs", "facts.mjs", "kitfiles.mjs", "kittree.mjs", "integrity.mjs", "verifykit.mjs", "kitremote.mjs", "install.mjs"]) copy(`kit/setup/${f}`);
   for (const f of ["kit/workflows/loop-iteration.js", "kit/schema/schema-v1.json", "kit/rules/trace-policy.md"]) copy(f);
   const bundle = join(d, "kit/bench/fixtures.bundle");
   const setBundle = (m) => {

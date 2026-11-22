@@ -1,7 +1,8 @@
 // loop-setup install / uninstall — puts the kit into the Claude config dir (~/.claude):
 //   <home>/loop-setup/kit/          the kit's files, copied from a COMMITTED source (git HEAD of the
 //                                   source repo) or a kit directory, with {{KIT}} rendered in prompts
-//   <home>/loop-setup/installed.json every installed file's sha256, the owned commands and settings
+//   <home>/loop-setup/installed.json every installed file's sha256, the owned commands and settings, and the
+//                                   source (commit, remote, kit prefix) that `loop-setup verify-kit` anchors to
 //   <home>/loop-setup/bin/loop-setup the shim (absolute node + kit paths baked in)
 //   <home>/commands/<name>.md       the kit's commands (user scope: bare /names in every project)
 //   <home>/settings.json            owned hooks (SessionStart, Stop) and permission rules, merged
@@ -11,13 +12,15 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { loopHome } from "./layout.mjs";
-import { manifestPathFor, sha256 } from "./kitfiles.mjs";
+import { manifestPathFor } from "./kitfiles.mjs";
+import { redactRemote } from "./integrity.mjs";
+import { DEV_ONLY, ownedSettings as ownedSettingsFor, readKitTree, renderInstall, sha256, shimText } from "./kittree.mjs";
+
+// The install contract (renderKit, loopTickCommand, the owned settings) lives in the pure kittree.mjs,
+// shared with verify-kit; it is re-exported here for existing callers.
+export { loopTickCommand, renderKit } from "./kittree.mjs";
 
 export const MANIFEST_SCHEMA = 1;
-/** Kit paths that are development-only: never installed. */
-const DEV_ONLY = (rel) => rel.endsWith(".test.mjs") || rel.startsWith("test/");
-/** The commands registered at user scope: every kit/commands/*.md plus /loop-tick (the standing loop prompt). */
-const LOOP_TICK = "loop-tick";
 
 const readJson = (p, fallback) => {
   try {
@@ -33,8 +36,9 @@ const writeJson = (p, v) => {
 
 /**
  * The kit's files as { rel → Buffer }, from `from`:
- *  - a git checkout whose HEAD has kit/kit.json: the committed tree (never the working tree), and its commit;
- *  - otherwise a directory holding kit.json (an unpacked kit): its files, commit null.
+ *  - a git checkout whose HEAD has kit/kit.json: the committed tree (never the working tree), its
+ *    commit, its kit prefix and its origin remote (password stripped; null without one);
+ *  - otherwise a directory holding kit.json (an unpacked kit): its files, commit, prefix and remote null.
  */
 export function readKitSource(from) {
   const src = resolve(from);
@@ -58,15 +62,14 @@ export function readKitSource(from) {
     }
     if (prefix !== null) {
       const commit = git(["rev-parse", "HEAD"], { encoding: "utf8", cwd: top }).trim();
-      const base = prefix ? `${prefix}/` : "";
-      const names = git(["ls-tree", "-r", "-z", "--name-only", "HEAD", "--", prefix || "."], { encoding: "utf8", cwd: top }).split("\0").filter(Boolean);
-      const files = new Map();
-      for (const name of names) {
-        const rel = name.slice(base.length);
-        if (DEV_ONLY(rel)) continue;
-        files.set(rel, git(["show", `HEAD:${name}`], { cwd: top }));
+      const files = readKitTree((args, opts = {}) => git(args, { cwd: top, input: opts.input, stdio: ["pipe", "pipe", "ignore"] }), commit, prefix);
+      let remote = null;
+      try {
+        remote = redactRemote(git(["remote", "get-url", "origin"], { encoding: "utf8", cwd: top }).trim()) || null;
+      } catch {
+        remote = null;
       }
-      return { files, commit, from: top };
+      return { files, commit, prefix, remote, from: top };
     }
   }
   if (!existsSync(join(src, "kit.json"))) throw new Error(`${src} is neither a git checkout with a committed kit/ nor a kit directory (no kit.json)`);
@@ -80,31 +83,12 @@ export function readKitSource(from) {
     }
   };
   walk(src);
-  return { files, commit: null, from: src };
-}
-
-/** {{KIT}} → the installed kit's absolute path; in a permission rule "({{KIT}}" becomes the absolute "(//…" form. */
-export function renderKit(text, kitDir) {
-  return String(text).replace(/\(\{\{KIT\}\}/g, `(/${kitDir}`).replace(/\{\{KIT\}\}/g, kitDir);
-}
-
-/** The /loop-tick command: the standing loop prompt, run as `/loop 30m /loop-tick`. */
-export function loopTickCommand(loopPrompt) {
-  return `---\ndescription: loop-setup kit — one iteration of the hardened watchdog loop (run as /loop 30m /loop-tick; declare the trust level first)\nargument-hint: [L1|L2|L3] [focus]\n---\n\n${loopPrompt}`;
+  return { files, commit: null, prefix: null, remote: null, from: src };
 }
 
 /** The owned settings entries for a kit at kitDir under loopDir (re-derived on every install; the manifest remembers them). */
 export function ownedSettings({ kitDir, loopDir, shim, withStopGate = false, nodePath = process.execPath }) {
-  const q = (s) => `"${s}"`;
-  const hooks = {
-    SessionStart: [{ matcher: "startup|resume|clear|compact", hooks: [{ type: "command", command: `${q(shim)} hook session-start`, timeout: 60 }] }],
-    Stop: [{ hooks: [{ type: "command", command: `${q(shim)} hook stop`, timeout: 30 }] }],
-  };
-  if (withStopGate) hooks.Stop.push({ hooks: [{ type: "command", command: `${q(nodePath)} ${q(join(kitDir, "hooks/stop-gate.mjs"))}`, timeout: 600 }] });
-  const READ_ONLY = ["where", "doctor", "lint", "query", "show", "tree-id", "metrics", "status", "plan-ready", "plan-lint", "plan-items", "plan-drift", "story-lint", "wiki-check", "l3-check", "claim-token"];
-  const allow = [`Read(/${kitDir}/**)`, ...READ_ONLY.flatMap((c) => [`Bash(loop-setup ${c})`, `Bash(loop-setup ${c} *)`])];
-  const deny = [`Edit(/${kitDir}/**)`, `Edit(/${join(loopDir, "bin")}/**)`, `Edit(/${join(loopDir, "installed.json")})`];
-  return { hooks, allow, deny };
+  return ownedSettingsFor({ kitDir, loopDir, shim, withStopGate, nodePath });
 }
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -179,7 +163,8 @@ export function install({ from, claudeHome, linkBin = null, withStopGate = false
   const kitDir = join(loopDir, "kit");
   const manifestPath = manifestPathFor(kitDir);
   const previous = readJson(manifestPath, null);
-  const { files, commit, from: source } = readKitSource(from);
+  const { files, commit, prefix, remote, from: source } = readKitSource(from);
+  const { tree, commands } = renderInstall(files, kitDir);
   const kitJson = JSON.parse(files.get("kit.json").toString("utf8"));
   // Read the user's settings first: one that does not parse stops the install before anything changes.
   const settingsPath = join(claudeHome, "settings.json");
@@ -187,12 +172,6 @@ export function install({ from, claudeHome, linkBin = null, withStopGate = false
 
   // Commands first, so a clash stops the install before anything changes.
   const commandsDir = join(claudeHome, "commands");
-  const commands = new Map();
-  for (const [rel, buf] of files) {
-    const m = /^commands\/([a-z0-9-]+)\.md$/.exec(rel);
-    if (m) commands.set(m[1], renderKit(buf.toString("utf8"), kitDir));
-  }
-  if (files.has("loop.md")) commands.set(LOOP_TICK, loopTickCommand(renderKit(files.get("loop.md").toString("utf8"), kitDir)));
   const clashes = [];
   for (const name of commands.keys()) {
     const p = join(commandsDir, `${name}.md`);
@@ -209,8 +188,7 @@ export function install({ from, claudeHome, linkBin = null, withStopGate = false
   const stage = `${kitDir}.new`;
   rmSync(stage, { recursive: true, force: true });
   const fileHashes = {};
-  for (const [rel, buf] of files) {
-    const out = rel.endsWith(".md") ? Buffer.from(renderKit(buf.toString("utf8"), kitDir)) : buf;
+  for (const [rel, out] of tree) {
     const p = join(stage, rel);
     mkdirSync(dirname(p), { recursive: true });
     writeFileSync(p, out);
@@ -245,7 +223,7 @@ export function install({ from, claudeHome, linkBin = null, withStopGate = false
   // Shim: absolute node and kit paths, so neither PATH nor the environment can redirect it.
   const shim = join(loopDir, "bin", "loop-setup");
   mkdirSync(dirname(shim), { recursive: true });
-  writeFileSync(shim, `#!/bin/sh\nexec "${process.execPath}" "${join(kitDir, "bin/loop-setup.mjs")}" "$@"\n`);
+  writeFileSync(shim, shimText(process.execPath, kitDir));
   chmodSync(shim, 0o755);
   let linked = null;
   if (linkBin) {
@@ -269,7 +247,7 @@ export function install({ from, claudeHome, linkBin = null, withStopGate = false
   const manifest = {
     schema: MANIFEST_SCHEMA,
     kit: { name: kitJson.name, version: kitJson.version },
-    source: { from: source, commit },
+    source: { from: source, commit, remote, prefix },
     installedAt: now,
     files: fileHashes,
     commands: commandHashes,
