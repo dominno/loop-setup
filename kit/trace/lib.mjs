@@ -131,6 +131,8 @@ export const ACTION_ALLOWED = {
   LAND: ["accept", "qualify"], // policy v5: a human records that a done node's change landed where git cannot show it
 };
 export const CLEARING_ACTIONS = ["CLEAR", "COMMIT", "COMMIT_QUALIFIED"];
+/** Actions that must name the latest, unsuperseded record of their claim (a LAND on an old verdict says nothing). */
+const LATEST_ONLY_ACTIONS = [...CLEARING_ACTIONS, "LAND"];
 
 // ---------------------------------------------------------------------------
 // Minimal JSON-Schema validator for the subset the TRACE schema uses. Unsupported
@@ -534,13 +536,13 @@ export function actionViolation(rec, action, superseded, latestOfClaim) {
   if (!allowed.includes(rec.final_status)) {
     return `${action} is not allowed on a "${rec.final_status}" record (allowed: ${allowed.join("|")}) — fail closed`;
   }
-  if (CLEARING_ACTIONS.includes(action) && superseded && superseded.has(rec.record_id)) {
+  if (LATEST_ONLY_ACTIONS.includes(action) && superseded && superseded.has(rec.record_id)) {
     return `${action} on ${rec.record_id}, which has been superseded by a revision — act on the latest revision`;
   }
   // A newer record about the same claim (even one that does not formally `revises` this
   // one) makes this record stale: never clear a claim on an outdated verdict.
   const latest = latestOfClaim && latestOfClaim.get(rec.claim_id);
-  if (CLEARING_ACTIONS.includes(action) && latest && latest !== rec.record_id) {
+  if (LATEST_ONLY_ACTIONS.includes(action) && latest && latest !== rec.record_id) {
     return `${action} on ${rec.record_id}, but ${latest} is a newer record for claim ${rec.claim_id} — act on the latest record`;
   }
   return null;

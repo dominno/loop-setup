@@ -258,8 +258,9 @@ instructions — the self-modification guard below still applies to everything e
       *Stop when*).
 11. **Append a run entry** to `.claude/loop-workspace/loop-run-log.md` (see format below). When the
     user later commits a node's change, a `Plan: LP-…` trailer in the commit message ties it to
-    the node even in a commit that bundles other changes (it counts as landed); never linted as an
-    error. A done node whose change is not yet in HEAD keeps its dependents waiting
+    the node even in a commit that bundles other changes (it counts as landed — the trailer asserts
+    the landing, it does not prove the whole change; a merge commit's trailer does not count); never
+    linted as an error. A done node whose change is not yet in HEAD keeps its dependents waiting
     (`[done-unlanded]`); only a human records a landing git cannot show (`… human LAND`).
 
 ## Denylist — never touch autonomously (escalate instead)

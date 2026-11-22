@@ -119,7 +119,9 @@ denylist path still needs a human).
   act <the node's record> human LAND --ref <node> --note "<commit or reason>"` counts a done node's
   change as landed in HEAD when git cannot show it (`plan-ready`, `plan-items` and `plan-lint` read
   it); otherwise a done node satisfies `after` only once its CLEAR's commit is an ancestor of HEAD, a
-  commit in HEAD's history has its `patch-id`, or one carries the trailer `Plan: <node>`.
+  commit in HEAD's history has its `patch-id`, or one carries the trailer `Plan: <node>`. LAND
+  names the latest, unsuperseded record and is permanent; its human-only and CLAUDECODE checks guard
+  against accidents, they do not authenticate a human.
 - **"Fixed"** = a `CLEAR` on the finding's latest licensing record, written only after the
   separate checker (post-implementation round / loop verifier + the post-apply check)
   shows it resolved; `--note` says what showed it.

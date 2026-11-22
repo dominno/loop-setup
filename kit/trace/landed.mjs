@@ -11,9 +11,16 @@ const baseOf = token("base", HEX(7, 64));
 const patchIdOf = token("patch-id", HEX(40, 64));
 const commitOf = token("commit", HEX(7, 64));
 
-/** The landing tokens of a CLEAR note: { base, patchId, commit } (each or null). */
+/** A `;`-separated segment that names a landing token but whose value is not a lowercase hex id. */
+const malformedSegment = (seg) => (/^patch-id\b/.test(seg) && !new RegExp(`^patch-id ${HEX(40, 64)}$`).test(seg)) || (/^commit\b/.test(seg) && !new RegExp(`^commit ${HEX(7, 64)}$`).test(seg));
+
+/** The landing tokens of a CLEAR note: { base, patchId, commit } (each or null), and whether one is malformed. */
 export function landingOf(note) {
-  return { base: baseOf(note), patchId: patchIdOf(note), commit: commitOf(note) };
+  const malformed = String(note || "")
+    .split(";")
+    .map((x) => x.trim())
+    .some(malformedSegment);
+  return { base: baseOf(note), patchId: patchIdOf(note), commit: commitOf(note), malformed };
 }
 
 const actionsOn = (state, recordId, action) => (state?.actions?.get(recordId) || []).filter((a) => a.action === action);
@@ -22,7 +29,9 @@ const actionsOn = (state, recordId, action) => (state?.actions?.get(recordId) ||
 export function nodeLanding(node, state) {
   const clear = actionsOn(state, node.record, "CLEAR").filter((a) => a.ref === node.id).pop() || null;
   const land = actionsOn(state, node.record, "LAND").some((a) => a.ref === node.id && a.consumer === "human");
-  return { id: node.id, clear: clear ? landingOf(clear.note) : null, land };
+  // A chained CLEAR (schema 1.1) was written by a kit that records the patch-id: only an unchained
+  // one can be legacy.
+  return { id: node.id, clear: clear ? landingOf(clear.note) : null, land, chained: !!(clear && clear.chain) };
 }
 
 /**
@@ -32,9 +41,10 @@ export function nodeLanding(node, state) {
  *   trailer   a commit in HEAD's history carries the trailer "Plan: <node id>"
  * → { status: "landed" | "unknown", why }
  */
-export function landedStatus({ clear, land }, facts = {}) {
+export function landedStatus({ clear, land, chained = false }, facts = {}) {
   if (land) return { status: "landed", why: "human" };
-  if (!clear || (!clear.patchId && !clear.commit)) return { status: "landed", why: "legacy" };
+  if (clear && clear.malformed) return { status: "unknown", why: "its CLEAR's patch-id or commit is malformed" };
+  if (!clear || (!clear.patchId && !clear.commit)) return chained ? { status: "unknown", why: "its CLEAR records no patch-id or commit" } : { status: "landed", why: "legacy" };
   if (facts.ancestor === true) return { status: "landed", why: "ancestor" };
   if (facts.patchId === true) return { status: "landed", why: "patch-id" };
   if (facts.trailer === true) return { status: "landed", why: "trailer" };
@@ -43,16 +53,18 @@ export function landedStatus({ clear, land }, facts = {}) {
 }
 
 /**
- * Map(node id → { status, why }) for every done node. factsOf is the git port: it is asked once per
- * done node that recorded a patch-id or a commit, with { id, base, patchId, commit }.
+ * Map(node id → { status, why }) for every done node an open node waits on. factsOf is the git port:
+ * it is asked once per such node that recorded a patch-id or a commit, with { id, base, patchId, commit }.
  */
 export function landedMap(nodes, state, factsOf) {
+  // Only a done node that an open node still waits on matters for readiness: the others cost no git.
+  const waitedOn = new Set(nodes.filter((n) => !["done", "dropped"].includes(n.status)).flatMap((n) => n.after));
   const out = new Map();
   for (const n of nodes) {
-    if (n.status !== "done") continue;
+    if (n.status !== "done" || !waitedOn.has(n.id)) continue;
     const l = nodeLanding(n, state);
-    const needsGit = !l.land && l.clear && (l.clear.patchId || l.clear.commit);
-    out.set(n.id, landedStatus(l, needsGit ? factsOf({ id: n.id, ...l.clear }) : {}));
+    const needsGit = !l.land && l.clear && !l.clear.malformed && (l.clear.patchId || l.clear.commit);
+    out.set(n.id, landedStatus(l, needsGit ? factsOf({ id: n.id, base: l.clear.base, patchId: l.clear.patchId, commit: l.clear.commit }) : {}));
   }
   return out;
 }

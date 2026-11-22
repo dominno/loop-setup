@@ -1269,6 +1269,17 @@ describe("the chained writer (schema trace-lite/1.1)", () => {
     expect(anchorViolations(after, anchored)).toEqual([]);
   });
 
+  it("LAND (policy v5) is a human's, on the latest licensing record, with --ref: refused otherwise", () => {
+    const [r1] = writeRecords([draft({ claim_id: "loop:lp-aaaa", writer_id: "loop-iteration/verify:LP-aaaa-0" })], chained());
+    const ok = appendActions([{ record_id: r1.record_id, consumer: "human", action: "LAND", ref: "LP-aaaa", note: "rebased" }], chained());
+    expect(ok[0].stored).toBe(true);
+    expect(appendActions([{ record_id: r1.record_id, consumer: "loop", action: "LAND", ref: "LP-aaaa" }], chained())[0].validation.fail.join()).toMatch(/consumer human and --ref/);
+    expect(appendActions([{ record_id: r1.record_id, consumer: "human", action: "LAND" }], chained())[0].validation.fail.join()).toMatch(/consumer human and --ref/);
+    const [r2] = writeRecords([draft({ claim_id: "loop:lp-aaaa", writer_id: "loop-iteration/verify:LP-aaaa-1", reason: "re-verified", revises: r1.record_id })], chained());
+    expect(r2.stored).toBe(true);
+    expect(appendActions([{ record_id: r1.record_id, consumer: "human", action: "LAND", ref: "LP-aaaa", note: "late" }], chained())[0].validation.fail.join()).toMatch(/superseded|newer record/);
+  });
+
   it("a library caller without a writer still writes 1.0 lines (the API and its tests unchanged)", () => {
     const [res] = writeRecords([draft()], ctx());
     expect(res.schema_version).toBe("trace-lite/1.0");

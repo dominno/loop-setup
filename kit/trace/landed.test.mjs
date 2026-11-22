@@ -8,14 +8,16 @@ const PID = "0123456789abcdef0123456789abcdef01234567";
 
 describe("landingOf (the CLEAR note's tokens)", () => {
   it("reads base, patch-id and commit, in any order and next to free text", () => {
-    expect(landingOf(`base abc1234; patch 0a1b2c3d4e5f; patch-id ${PID}; commit fedcba9876543; pnpm test passed; qualifier x`)).toEqual({ base: "abc1234", patchId: PID, commit: "fedcba9876543" });
-    expect(landingOf(`patch-id ${PID}; base abc1234def56`)).toEqual({ base: "abc1234def56", patchId: PID, commit: null });
+    expect(landingOf(`base abc1234; patch 0a1b2c3d4e5f; patch-id ${PID}; commit fedcba9876543; pnpm test passed; qualifier x`)).toEqual({ base: "abc1234", patchId: PID, commit: "fedcba9876543", malformed: false });
+    expect(landingOf(`patch-id ${PID}; base abc1234def56`)).toEqual({ base: "abc1234def56", patchId: PID, commit: null, malformed: false });
   });
   it("a note before this change (base and patch hash only) or junk has neither patch-id nor commit", () => {
-    expect(landingOf("base abc1234; patch 0a1b2c3d4e5f; pnpm test passed")).toEqual({ base: "abc1234", patchId: null, commit: null });
-    expect(landingOf("")).toEqual({ base: null, patchId: null, commit: null });
-    expect(landingOf(undefined)).toEqual({ base: null, patchId: null, commit: null });
-    expect(landingOf("patch-id nothex; commit zz")).toEqual({ base: null, patchId: null, commit: null });
+    expect(landingOf("base abc1234; patch 0a1b2c3d4e5f; pnpm test passed")).toEqual({ base: "abc1234", patchId: null, commit: null, malformed: false });
+    expect(landingOf("")).toEqual({ base: null, patchId: null, commit: null, malformed: false });
+    expect(landingOf(undefined)).toEqual({ base: null, patchId: null, commit: null, malformed: false });
+  });
+  it("a patch-id or commit token whose value is not a hex id is malformed (never read as 'no token')", () => {
+    for (const note of ["patch-id nothex", "patch-id: " + PID, "patch-id " + PID.toUpperCase(), "patch-id", "commit zz"]) expect(landingOf(note).malformed, note).toBe(true);
   });
 });
 
@@ -34,9 +36,13 @@ describe("landedStatus (the landed table)", () => {
     expect(landedStatus({ clear, land: false }, { ancestor: null, patchId: null, trailer: null })).toMatchObject({ status: "unknown", why: "git cannot tell" });
     expect(landedStatus({ clear, land: false }, {})).toMatchObject({ status: "unknown" });
   });
-  it("a done node recorded before this change (no patch-id, no commit) counts as landed, flagged legacy", () => {
-    expect(landedStatus({ clear: { base: "abc1234", patchId: null, commit: null }, land: false }, {})).toEqual({ status: "landed", why: "legacy" });
-    expect(landedStatus({ clear: null, land: false }, {})).toEqual({ status: "landed", why: "legacy" });
+  it("a done node recorded before this change (an unchained CLEAR with no patch-id or commit) counts as landed, flagged legacy", () => {
+    expect(landedStatus({ clear: { base: "abc1234", patchId: null, commit: null, malformed: false }, land: false, chained: false }, {})).toEqual({ status: "landed", why: "legacy" });
+    expect(landedStatus({ clear: null, land: false, chained: false }, {})).toEqual({ status: "landed", why: "legacy" });
+  });
+  it("fails safe: a chained (new) CLEAR without a patch-id or commit, or with a malformed one, is unknown — never legacy", () => {
+    expect(landedStatus({ clear: { base: "abc1234", patchId: null, commit: null, malformed: false }, land: false, chained: true }, {})).toMatchObject({ status: "unknown", why: "its CLEAR records no patch-id or commit" });
+    expect(landedStatus({ clear: { base: null, patchId: null, commit: null, malformed: true }, land: false, chained: false }, {})).toMatchObject({ status: "unknown", why: "its CLEAR's patch-id or commit is malformed" });
   });
 });
 
@@ -55,11 +61,19 @@ const CLEAR = { action: "CLEAR", consumer: "loop", ref: "LP-aaaa", note: `base a
 describe("nodeLanding and landedMap (the port's composition)", () => {
   const { nodes } = parsePlan(TABLE);
   it("nodeLanding reads the node's own CLEAR (ref = the node) and a human LAND on its record", () => {
-    expect(nodeLanding(nodes[0], stateWith([CLEAR]))).toEqual({ id: "LP-aaaa", clear: { base: "abc1234", patchId: PID, commit: null }, land: false });
+    expect(nodeLanding(nodes[0], stateWith([CLEAR]))).toEqual({ id: "LP-aaaa", clear: { base: "abc1234", patchId: PID, commit: null, malformed: false }, land: false, chained: false });
+    expect(nodeLanding(nodes[0], stateWith([{ ...CLEAR, chain: { w: "0123456789abcdef", prev: null } }])).chained).toBe(true);
     expect(nodeLanding(nodes[0], stateWith([CLEAR, { action: "LAND", consumer: "human", ref: "LP-aaaa", note: "squashed with LP-dddd" }])).land).toBe(true);
     expect(nodeLanding(nodes[0], stateWith([CLEAR, { action: "LAND", consumer: "loop", ref: "LP-aaaa" }])).land).toBe(false); // only a human lands it
     expect(nodeLanding(nodes[0], stateWith([CLEAR, { action: "LAND", consumer: "human", ref: "LP-cccc" }])).land).toBe(false); // another node's
   });
+  it("landedMap settles only the done nodes something still waits on (a done node no open node depends on costs no git)", () => {
+    const lone = parsePlan(TABLE.replace("| LP-bbbb | Second — done when: y | LP-aaaa | blocked |", "| LP-bbbb | Second — done when: y | — | blocked |")).nodes;
+    const asked = [];
+    expect(landedMap(lone, stateWith([CLEAR]), (q) => (asked.push(q), {})).size).toBe(0);
+    expect(asked).toEqual([]);
+  });
+
   it("landedMap asks the facts port once per done node and decides with the table", () => {
     const asked = [];
     const m = landedMap(nodes, stateWith([CLEAR]), (q) => (asked.push(q), { ancestor: false, patchId: q.patchId === PID, trailer: false }));

@@ -305,38 +305,50 @@ function reachable(commit) {
 
 /**
  * The landed port's git adapter (phase C, C5): facts about one done node's change in the project's
- * HEAD, each true | false | null (git cannot tell). History is scanned from the recorded base when it
- * is an ancestor of HEAD, else HEAD's last 1000 commits; scans are cached per range.
+ * HEAD, each true | false | null (git cannot tell). History is read from the recorded base when it is
+ * an ancestor of HEAD, else HEAD's last 1000 commits; non-merge commits only; each scan is cached per
+ * range and done lazily: an ancestor commit answers alone, then the trailers, then the patch-ids.
  */
-const historyCache = new Map();
-function historyOf(base) {
+const scanCache = new Map();
+const scanned = (key, run) => {
+  if (!scanCache.has(key)) {
+    let v = null;
+    try {
+      v = run();
+    } catch {
+      v = null; // git cannot tell (no HEAD, a broken history)
+    }
+    scanCache.set(key, v);
+  }
+  return scanCache.get(key);
+};
+const rangeOf = (base) => {
   const anc = base ? spawnSync("git", ["merge-base", "--is-ancestor", base, "HEAD"], { cwd: PROJECT_ROOT, stdio: "ignore" }).status : 1;
-  const range = anc === 0 ? [`${base}..HEAD`] : ["--max-count=1000", "HEAD"];
-  const key = range.join(" ");
-  if (historyCache.has(key)) return historyCache.get(key);
-  let h = null;
-  try {
+  return anc === 0 ? [`${base}..HEAD`] : ["--max-count=1000", "HEAD"];
+};
+const planIdsIn = (range) =>
+  scanned(`trailers ${range.join(" ")}`, () => {
+    const out = execFileSync("git", ["log", "--no-merges", "--format=%(trailers:key=Plan,valueonly,separator=%x2C)", ...range], { cwd: PROJECT_ROOT, encoding: "utf8", maxBuffer: 1 << 28, stdio: ["ignore", "pipe", "ignore"] });
+    return new Set(out.split(/[\s,]+/).filter(Boolean));
+  });
+const patchIdsIn = (range) =>
+  scanned(`patch-ids ${range.join(" ")}`, () => {
     const log = execFileSync("git", ["log", "-p", "--no-merges", "--no-color", "--no-ext-diff", ...range], { cwd: PROJECT_ROOT, maxBuffer: 1 << 30, stdio: ["ignore", "pipe", "ignore"] });
     const ids = execFileSync("git", ["patch-id", "--stable"], { cwd: PROJECT_ROOT, input: log, encoding: "utf8", maxBuffer: 1 << 28, stdio: ["pipe", "pipe", "ignore"] });
-    const trailers = execFileSync("git", ["log", "--format=%(trailers:key=Plan,valueonly,separator=%x2C)", ...range], { cwd: PROJECT_ROOT, encoding: "utf8", maxBuffer: 1 << 28, stdio: ["ignore", "pipe", "ignore"] });
-    h = {
-      patchIds: new Set(ids.split("\n").map((l) => l.split(" ")[0]).filter(Boolean)),
-      planIds: new Set(trailers.split(/[\s,]+/).filter(Boolean)),
-    };
-  } catch {
-    h = null; // git cannot tell (no HEAD, a broken history): every fact is null
-  }
-  historyCache.set(key, h);
-  return h;
-}
+    return new Set(ids.split("\n").map((l) => l.split(" ")[0]).filter(Boolean));
+  });
 function landingFacts({ id, base, patchId, commit }) {
   let ancestor = false;
   if (commit) {
     const st = spawnSync("git", ["merge-base", "--is-ancestor", commit, "HEAD"], { cwd: PROJECT_ROOT, stdio: "ignore" }).status;
-    ancestor = st === 0 ? true : st === 1 ? false : null;
+    if (st === 0) return { ancestor: true };
+    ancestor = st === 1 ? false : null;
   }
-  const h = historyOf(base);
-  return { ancestor, patchId: h ? (patchId ? h.patchIds.has(patchId) : false) : null, trailer: h ? h.planIds.has(id) : null };
+  const range = rangeOf(base);
+  const plans = planIdsIn(range);
+  if (plans && plans.has(id)) return { ancestor, trailer: true };
+  const ids = patchId ? patchIdsIn(range) : new Set();
+  return { ancestor, trailer: plans ? false : null, patchId: ids ? (patchId ? ids.has(patchId) : false) : null };
 }
 
 /** LAND is a human's step (policy v5): refused from inside Claude Code, like anchors reset. */
