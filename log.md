@@ -406,3 +406,13 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
 - Narrowed: the Stop hook firing at turn end was not observed, so the new claim leaves it out.
 - Scope: only quarantine review (1d) and store checks (1b: `loop-setup lint` ok, `wiki-check` ok);
   TR-3439a2c9a95a stays quarantined (no reproduction); skills index / diagrams not reviewed.
+
+## [2026-11-22] ingest | the runtime fires the kit's Stop hook (phase-B closing proof)
+- Deliberate capture: right after `loop-setup write` of the phase-B critic record TR-191b1092a326
+  (doctor: 1 changed, 0 unpushed), the turn was ended; the runtime returned the kit's reason verbatim
+  as "Stop hook feedback: The loop workspace loop-setup-e3ed255a has unsynced state (1 changed
+  file(s), 0 unpushed commit(s)). Run `loop-setup sync` …" (transcript line 1850, 08:31:59Z,
+  `hook_blocking_error` attachment, hookEvent Stop). Closes the gap TR-1a9be639eba8 narrowed away.
+- Admission: 0 committed, 1 qualified (TR-6eab59a1408c → topics/remote-env.md, condition: cloud
+  session with the setup-script install; at most once per turn via `stop_hook_active`),
+  0 quarantined, 0 rejected.

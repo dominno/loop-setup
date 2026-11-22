@@ -40,5 +40,12 @@
   the runtime writes its own `~/.claude/launcher-settings.json` with its own SessionStart/Stop
   hooks. Check with `stat -c %w ~/.claude/loop-setup/installed.json` (it predates the session
   transcript) and `loop-setup doctor`. <!-- rec:TR-1a9be639eba8 -->
+- The runtime also runs the kit's Stop hook (`loop-setup hook stop`, owned in `~/.claude/settings.json`)
+  when a turn ends: with unsynced workspace state it blocks, and its reason comes back to the agent
+  verbatim as "Stop hook feedback: The loop workspace <id> has unsynced state (N changed file(s), M
+  unpushed commit(s)). Run `loop-setup sync` …" (logged as a `hook_blocking_error` attachment in the
+  session transcript). Observed in a cloud session (2026-11-22) with the kit installed by the setup
+  script; it blocks at most once per turn — it returns no decision when the stop is already a
+  Stop-hook continuation (`stop_hook_active`). <!-- rec:TR-6eab59a1408c -->
 
 Related: [tooling](./tooling.md) · [testing](./testing.md) · [build-and-verify](./build-and-verify.md)
