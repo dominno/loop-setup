@@ -17,6 +17,11 @@ was passed as fcf5b35e8dbb5d5a by mistake — the tree it reviewed is 64207630ac
 - revise — design wording: under CLAUDECODE the CLI always refuses (its target is the session's home);
   "a different home still works" is the in-process `install({ claudeHome, env })` case. No code change.
 
+Post-implementation rounds: round 1 (tree 19ded0ee3ae11d81) confirmed TR-6acaf502b2c6 (array-valued
+`hooks`/`permissions` passed the implicit shape check), fixed in S05.1 and CLEARed; round 2 (tree
+b472881aa9adbc20) accept, nothing confirmed, deferred or revised. CLEARed: TR-6acaf502b2c6,
+TR-cb313357f282; HOLD: TR-a03131ccd9dc (revise, repair applied), TR-e9a549aae8be (revise, wording).
+
 Layers: **core** = `kit/setup/guard.mjs` (`lifecycleRefusal`), `kit/setup/kittree.mjs` (`shellArg`,
 owned deny rules), `kit/setup/layout.mjs` (`isWorkspacePath`, also used by `resolveLayout`);
 **adapters** = `kit/setup/install.mjs` (resolves the homes, reads settings fail-closed through
@@ -29,8 +34,8 @@ owned deny rules), `kit/setup/layout.mjs` (`isWorkspacePath`, also used by `reso
 | S02 | A settings.json that is not a plain object, or whose hooks/permissions have the wrong shape, is refused before any change | kit/setup/install.mjs, kit/setup/settings.mjs, kit/setup/hardening.test.mjs | same | — | done | b7e805e |
 | S03 | Shell-safe paths: `shellArg` quotes (double, or single when the path holds `"`) and rejects metacharacters; used by the hook commands, the shim and the CLAUDE_ENV_FILE PATH line; validated before any write | kit/setup/kittree.mjs, kit/setup/install.mjs, kit/setup/hooks.mjs, kit/setup/hardening.test.mjs | same | — | done | b7e805e |
 | S04 | `ensureLink(projectRoot, ws, claudeHome)` repairs only a link whose target is directly under `workspacesRoot(claudeHome)` (`isWorkspacePath`) | kit/setup/layout.mjs, kit/setup/workspace.mjs, kit/setup/hooks.mjs, kit/setup/hardening.test.mjs | same | — | done | b7e805e |
-| S05 | Self-verify chain and the post-implementation critic round | — | `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | S01–S04 | in-progress | |
-| S05.1 | Post-implementation round TR-6acaf502b2c6 (qualify): array-valued `hooks`/`permissions` passed the implicit shape check (an array is truthy; JSON drops the merged entries) — explicit pure `settingsShapeProblem` before the merge | kit/setup/kittree.mjs, kit/setup/install.mjs, kit/setup/hardening.test.mjs | `pnpm exec vitest run kit/setup/hardening.test.mjs` | S05 | done | |
+| S05 | Self-verify chain and the post-implementation critic round | — | `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | S01–S04 | done | f77d59f |
+| S05.1 | Post-implementation round TR-6acaf502b2c6 (qualify): array-valued `hooks`/`permissions` passed the implicit shape check (an array is truthy; JSON drops the merged entries) — explicit pure `settingsShapeProblem` before the merge | kit/setup/kittree.mjs, kit/setup/install.mjs, kit/setup/hardening.test.mjs | `pnpm exec vitest run kit/setup/hardening.test.mjs` | S05 | done | f77d59f |
 
 Tests first: every new test in `kit/setup/hardening.test.mjs` failed against the old behaviour
 (temporary stubs with today's semantics: 15 failed, 1 — "a different home still works" — passed, as
