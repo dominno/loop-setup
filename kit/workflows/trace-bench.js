@@ -124,6 +124,11 @@ const DENYLIST = [
   // scripts/** gate. So the root package.json, the test/lint/type/E2E runner configs and every path
   // under the root scripts/ directory escalate too. e2e/ and src/ stay open: the loop's real work.
   /^package\.json$/i, /^(vitest|playwright|eslint)\.config\.[^/]+$/i, /^tsconfig\.json$/i, /^scripts(\/|$)/i,
+  // ...and the repository's own configuration at the root: .gitignore and .gitattributes decide what
+  // git tracks, diffs and checks out (a hidden file, an export-ignore, a merge or eol attribute),
+  // .worktreeinclude what a fresh worktree copies, and .mcp.json the MCP servers every session in the
+  // project starts. A nested .gitignore, .gitattributes or .mcp.json under src/ or e2e/ stays open.
+  /^\.gitignore$/i, /^\.gitattributes$/i, /^\.worktreeinclude$/i, /^\.mcp\.json$/i,
 ]
 const hitsDenylist = (files) => (files || []).some((f) => DENYLIST.some((re) => re.test(f)))
 
@@ -136,6 +141,9 @@ const hitsDenylist = (files) => (files || []).some((f) => DENYLIST.some((re) => 
 // that does not match its own line counts, marks the whole diff `unparsable` — the
 // caller escalates instead of trusting a partial path list. (The Lead re-checks the
 // patch with git's own parser before applying it: `loop-setup denylist-check --patch`.)
+// A `diff --git a/<old> b/<new>` header; git C-quotes a side only when its path needs it, so either
+// side may be quoted alone.
+const DIFF_GIT = /^diff --git (?:a\/(.+?)|"a\/(.+?)") (?:b\/(.+)|"b\/(.+)")$/
 function diffPathScan(diff) {
   const paths = []
   let unparsable = false
@@ -167,8 +175,7 @@ function diffPathScan(diff) {
       }
       if (oldN > 0 || newN > 0) unparsable = true
     } else if (line.startsWith('diff --git ')) {
-      // git C-quotes a side only when its path needs it, so either side may be quoted alone.
-      if ((m = /^diff --git (?:a\/(.+?)|"a\/(.+?)") (?:b\/(.+)|"b\/(.+)")$/.exec(line))) paths.push(m[1] || m[2], m[3] || m[4])
+      if ((m = DIFF_GIT.exec(line))) paths.push(m[1] || m[2], m[3] || m[4])
       else unparsable = true
     } else if (line.startsWith('--- ') || line.startsWith('+++ ')) {
       side(line.slice(4))
@@ -181,6 +188,34 @@ function diffPathScan(diff) {
   return { paths, unparsable }
 }
 const parseDiffPaths = (diff) => diffPathScan(diff).paths
+
+// What a patch WRITES escalates too, wherever it lands (src/ and e2e/ included): a symlink can aim a
+// later read or write outside the tree or at a protected file, a gitlink pins code from outside the
+// repo, and a mode change makes a file executable. diffModeHits names the files whose section writes
+// a symlink (120000), a gitlink (160000) or any other non-regular mode, or changes a mode. It reads
+// every line, hunks included: a header line never passes as hunk content (each hunk line starts with
+// ' ', '+', '-' or '\'), so it sees every mode line git reads. Fail closed: a mode is regular only as
+// git writes it, exactly 100644 or 100755 (git also reads '0120000' or ' 120000' as a symlink), and
+// any `old mode`/`new mode` line is a mode change. Deleting a file, a symlink included, is not a hit.
+const REGULAR_MODE = /^100(644|755)$/
+function diffModeHits(diff) {
+  const hits = []
+  let file = '(no diff --git header)'
+  for (const raw of String(diff || '').split('\n')) {
+    const line = raw.replace(/\r$/, '')
+    let m
+    if (line.startsWith('diff --git ')) file = (m = DIFF_GIT.exec(line)) ? m[3] || m[4] : line.slice(11)
+    else if (/^(old|new) mode\b/.test(line)) hits.push(file)
+    else if ((m = /^new file mode\b(.*)$/.exec(line) || /^index [^ ]*\.\.[^ ]* (.*)$/.exec(line)) && !REGULAR_MODE.test(m[1].trim())) hits.push(file)
+  }
+  return [...new Set(hits)]
+}
+// The text cannot show a rename, a copy or a retarget of a symlink or gitlink that already exists: such
+// a section carries no mode line (git takes the mode from the preimage). The tree can: treeModeHits
+// names the paths whose existing mode ({ mode, path }, as `git ls-tree` lists them) is not regular.
+// Only `loop-setup denylist-check` has a tree (HEAD's modes for every path git finds in the patch);
+// this workflow gate sees the text alone.
+const treeModeHits = (entries) => [...new Set((entries || []).filter((e) => !REGULAR_MODE.test(e.mode)).map((e) => e.path))]
 // </loop-denylist>
 // <loop-verifier>
 const EVIDENCE_KINDS = ['file_line', 'command', 'browser', 'measurement', 'rule', 'diff', 'reading', 'record', 'human']
@@ -295,8 +330,9 @@ if (ARMS.includes('verifier')) {
           noVerdict: !v,
           preGateVerdict: (v && v.verdict) || null, verdict: g.verdict,
           failedGates: g.failedGates, missing: g.missing,
-          // As in production: an unparsable diff is escalated by the hard gate, never licensed.
-          denylistHit: hitsDenylist(changedFiles) || diffPathScan(f.patch).unparsable,
+          // As in production: an unparsable diff, or one that writes a symlink, a gitlink or a mode
+          // change, is escalated by the hard gate, never licensed.
+          denylistHit: hitsDenylist(changedFiles) || diffPathScan(f.patch).unparsable || diffModeHits(f.patch).length > 0,
           reason: (v && v.reason) || 'verifier returned no verdict',
         }
       })

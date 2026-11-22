@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { KIT_ROOT, gatherFacts, gitOut } from "./facts.mjs";
 import { STATE_BRANCH, loopHome, resolveLayout } from "./layout.mjs";
 import { manifestPathFor } from "./kitfiles.mjs";
+import { shellArg } from "./kittree.mjs";
 import { normalizeRemote } from "./install.mjs";
 import { ensureLink, restore, syncStatus } from "./workspace.mjs";
 
@@ -95,7 +96,7 @@ export function sessionStart(input, { env = process.env } = {}) {
   }
   if (layout.mode === "bound" && (layout.warnings || []).includes("link-missing")) {
     try {
-      ensureLink(layout.projectRoot, layout.workspace);
+      ensureLink(layout.projectRoot, layout.workspace, facts.claudeHome);
       layout = { ...layout, warnings: layout.warnings.filter((w) => w !== "link-missing") };
     } catch {
       // leave the warning in place
@@ -103,7 +104,7 @@ export function sessionStart(input, { env = process.env } = {}) {
   }
   if (env.CLAUDE_ENV_FILE) {
     try {
-      appendFileSync(env.CLAUDE_ENV_FILE, `export PATH="${join(loopHome(facts.claudeHome), "bin")}:$PATH"\n`);
+      appendFileSync(env.CLAUDE_ENV_FILE, `export PATH=${shellArg(join(loopHome(facts.claudeHome), "bin"))}:"$PATH"\n`); // one shell word, whatever the home's path
     } catch {
       // PATH stays as it is; prompts can use the absolute shim path
     }

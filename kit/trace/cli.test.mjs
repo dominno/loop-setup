@@ -1,21 +1,27 @@
 // The sanctioned writer is the CLI, so test it as a process: exit codes, fail-closed
 // paths, and the bench-judge safety helpers.
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, afterAll } from "vitest";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DEFAULT_STORE, encodeBench, latestByClaim, loadEntries, loadSchema, opaqueFixtureId, readBench, readPolicyVersion, replay, ROOT, WORKSPACE } from "./lib.mjs";
 import { appliedFixtures, benchPreconditionStep, benchPreflight, judgeEnv, runBenchJudge, runJudge, SIGNALS } from "./bench-judge.mjs";
 import { DEFAULT_PLAN, parsePlan, readyIds } from "./plan.mjs";
 import { STORY_MAP_PATHS } from "./story-map.mjs";
+import { MODE_PATCHES } from "../test/denylist-modes.mjs";
 
 const CLI = join(ROOT, "kit/trace/cli.mjs");
 let dir;
 let store;
-const trace = (args, input) =>
-  spawnSync(process.execPath, [CLI, ...args], { cwd: ROOT, encoding: "utf8", input, env: { ...process.env, TRACE_STORE: store } });
+// A Claude config dir whose user settings switch the sandbox on and hold the unsandboxed fallback
+// closed (what l3-check requires besides the bench): the CLI never reads the developer's own settings.
+const SANDBOX_HOME = mkdtempSync(join(tmpdir(), "trace-claude-"));
+writeFileSync(join(SANDBOX_HOME, "settings.json"), JSON.stringify({ sandbox: { enabled: true, allowUnsandboxedCommands: false } }));
+afterAll(() => rmSync(SANDBOX_HOME, { recursive: true, force: true }));
+const trace = (args, input, env = {}) =>
+  spawnSync(process.execPath, [CLI, ...args], { cwd: ROOT, encoding: "utf8", input, env: { ...process.env, TRACE_STORE: store, CLAUDE_CONFIG_DIR: SANDBOX_HOME, ...env } });
 const draft = (over = {}) =>
   JSON.stringify({
     writer_id: "test",
@@ -33,7 +39,10 @@ const draft = (over = {}) =>
 // default its verifier arm measured the whole (2 bad / 2 good) manifest.
 const verifierSha = (text) => createHash("sha256").update(/\/\/ <loop-verifier>\n[\s\S]*?\/\/ <\/loop-verifier>\n/.exec(text)[0]).digest("hex");
 const CURRENT_VERIFIER = verifierSha(readFileSync(join(ROOT, "kit/workflows/loop-iteration.js"), "utf8"));
-const benchDraft = ({ status = "accept", repeats = 2, gates = ["F2 (informational)"], hash = CURRENT_VERIFIER, measured = { bad: 2, good: 2 } } = {}) =>
+// The same for the <loop-denylist> block, which a bench record pins beside the verifier.
+const denylistSha = (text) => createHash("sha256").update(/\/\/ <loop-denylist>\n[\s\S]*?\/\/ <\/loop-denylist>\n/.exec(text)[0]).digest("hex");
+const CURRENT_DENYLIST = denylistSha(readFileSync(join(ROOT, "kit/workflows/loop-iteration.js"), "utf8"));
+const benchDraft = ({ status = "accept", repeats = 2, gates = ["F2 (informational)"], hash = CURRENT_VERIFIER, denylist = CURRENT_DENYLIST, measured = { bad: 2, good: 2 } } = {}) =>
   JSON.stringify({
     writer_id: "trace-bench/score",
     claim_id: "bench:trace-bench-lite",
@@ -42,6 +51,7 @@ const benchDraft = ({ status = "accept", repeats = 2, gates = ["F2 (informationa
     evidence: [
       { kind: "measurement", ref: "loop-setup bench-score runs.json [runs 0a1b2c3d]", result: JSON.stringify({ fixtures: { bad: 2, good: 2 }, arms: { verifier: { repeats, measured } } }) },
       { kind: "file_line", ref: "kit/workflows/loop-iteration.js", result: `<loop-verifier> sha256=${hash}` },
+      ...(denylist ? [{ kind: "file_line", ref: "kit/workflows/loop-iteration.js", result: `<loop-denylist> sha256=${denylist}` }] : []),
     ],
     failed_gates: gates,
     missing: [],
@@ -863,6 +873,12 @@ describe("round-3 CLI fixes", () => {
       expect(out.status).toBe(0);
       expect(JSON.parse(out.stdout)).toMatchObject({ ok: true, unmet: [], verdict: "accept", repeats: 2, recordHash: CURRENT_VERIFIER, currentHash: CURRENT_VERIFIER });
     });
+    it("the recorded run also names the working tree's <loop-denylist> block, which l3-check compares", () => {
+      expect(setup((m) => covering(m, RUN, 2), { repeats: 2 })().status).toBe(0);
+      const rec = JSON.parse(readFileSync(store, "utf8").trim().split("\n").at(-1));
+      expect(rec.evidence).toContainEqual({ kind: "file_line", ref: "kit/workflows/loop-iteration.js", result: `<loop-denylist> sha256=${CURRENT_DENYLIST}` });
+      expect(JSON.parse(trace(["l3-check", "--json"]).stdout)).toMatchObject({ ok: true, denylistRecordHash: CURRENT_DENYLIST, denylistCurrentHash: CURRENT_DENYLIST });
+    });
     it("a clean run over part of the manifest (the good fixtures only, repeat 2) is recorded with the counts it measured, and l3-check exits 1 on the full-manifest condition alone", () => {
       const good = (f) => f.kind === "good";
       expect(setup((m) => covering({ fixtures: m.fixtures.filter(good) }, RUN, 2), { repeats: 2, only: good })().status).toBe(0);
@@ -950,6 +966,35 @@ describe("l3-check (CLI process)", () => {
     expect(text.stdout).toMatch(re);
   });
 
+  it("exits 1 on a record that does not pin the <loop-denylist> block, asking for a re-bench", () => {
+    expect(trace(["write", "-"], benchDraft({ denylist: null })).status).toBe(0);
+    const json = trace(["l3-check", "--json"]);
+    expect(json.status).toBe(1);
+    expect(JSON.parse(json.stdout).unmet).toEqual([expect.stringMatching(/no <loop-denylist> hash .*re-bench with \/bench-checkers/)]);
+  });
+
+  it("is NOT met when the effective settings show the sandbox off, or the unsandboxed fallback not held closed at user scope — the bench alone is not enough", () => {
+    expect(trace(["write", "-"], benchDraft()).status).toBe(0);
+    const home = join(dir, "claude-home");
+    mkdirSync(home);
+    const off = trace(["l3-check", "--json"], undefined, { CLAUDE_CONFIG_DIR: home }); // no settings at all
+    expect(off.status).toBe(1);
+    const res = JSON.parse(off.stdout);
+    expect(res).toMatchObject({ ok: false, sandbox: { ok: false, enabled: false, heldBy: null } });
+    expect(res.unmet).toEqual([expect.stringMatching(/^the sandbox is off/), expect.stringMatching(/^sandbox\.allowUnsandboxedCommands is not held false at user scope/)]);
+    writeFileSync(join(home, "settings.json"), JSON.stringify({ sandbox: { enabled: true } }));
+    const open = trace(["l3-check", "--json"], undefined, { CLAUDE_CONFIG_DIR: home });
+    expect(open.status).toBe(1);
+    expect(JSON.parse(open.stdout).unmet).toEqual([expect.stringMatching(/^sandbox\.allowUnsandboxedCommands is not held false at user scope/)]);
+    const text = trace(["l3-check"], undefined, { CLAUDE_CONFIG_DIR: home });
+    expect(text.status).toBe(1);
+    expect(text.stdout).toMatch(/^l3-check: NOT met/);
+    expect(text.stdout).toMatch(/allowUnsandboxedCommands is not held false/);
+    const met = trace(["l3-check"]);
+    expect(met.status).toBe(0);
+    expect(met.stdout).toMatch(/sandbox on \(user\), unsandboxed fallback held closed \(user\)/);
+  });
+
   it("at HEAD: while the committed store's latest bench record names no verifier, l3-check exits 1 for the missing hash", () => {
     // The committed store is append-only state a re-bench extends: compare, never pin it.
     const state = replay(loadEntries(DEFAULT_STORE), loadSchema(), readPolicyVersion());
@@ -991,7 +1036,8 @@ function tempRepo({ manifest, repo = "commit" } = {}) {
     writeFileSync(join(d, rel), readFileSync(join(ROOT, rel)));
   };
   for (const f of ["lib.mjs", "cli.mjs", "bench-judge.mjs", "plan.mjs", "story-map.mjs"]) copy(`kit/trace/${f}`);
-  for (const f of ["layout.mjs", "facts.mjs", "kitfiles.mjs"]) copy(`kit/setup/${f}`);
+  // The CLI's kit/setup imports (the dispatch gates verify the kit through verifykit.mjs and its adapters).
+  for (const f of ["layout.mjs", "facts.mjs", "kitfiles.mjs", "kittree.mjs", "integrity.mjs", "verifykit.mjs", "kitremote.mjs", "install.mjs", "settings.mjs", "sandbox.mjs", "guard.mjs"]) copy(`kit/setup/${f}`);
   for (const f of ["kit/workflows/loop-iteration.js", "kit/schema/schema-v1.json", "kit/rules/trace-policy.md"]) copy(f);
   const bundle = join(d, "kit/bench/fixtures.bundle");
   const setBundle = (m) => {
@@ -1007,7 +1053,7 @@ function tempRepo({ manifest, repo = "commit" } = {}) {
     git("commit", "-qm", "init");
   }
   const cli = (args, input) =>
-    spawnSync(process.execPath, [join(d, "kit/trace/cli.mjs"), ...args], { cwd: d, encoding: "utf8", input, env: { ...process.env, TRACE_STORE: join(d, "store.jsonl"), LOOP_SETUP_WORKSPACE: ws } });
+    spawnSync(process.execPath, [join(d, "kit/trace/cli.mjs"), ...args], { cwd: d, encoding: "utf8", input, env: { ...process.env, TRACE_STORE: join(d, "store.jsonl"), LOOP_SETUP_WORKSPACE: ws, CLAUDE_CONFIG_DIR: SANDBOX_HOME } });
   const cleanup = () => {
     rmSync(d, { recursive: true, force: true });
     rmSync(ws, { recursive: true, force: true });
@@ -1027,6 +1073,109 @@ describe("CLI wiring, end to end in a throwaway repo", () => {
       const p = join(r.d, "x.patch");
       writeFileSync(p, "diff --git a/kit/loop.md b/kit/loop.md\n--- a/kit/loop.md\n+++ b/kit/loop.md\n@@ -1 +1 @@\n-a\n+b\n");
       expect(r.cli(["denylist-check", "--patch", p]).status).toBe(1);
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  // The repository's own configuration files are protected at the root only: a nested one under
+  // src/ or e2e/ stays open, as the workflow gate's HIT/CLEAR lists say (kit/trace/workflows.test.mjs).
+  it("denylist-check escalates the root .gitignore, .gitattributes, .worktreeinclude and .mcp.json, and leaves a nested one open", () => {
+    const r = tempRepo();
+    try {
+      const edit = (f) => `diff --git a/${f} b/${f}\n--- a/${f}\n+++ b/${f}\n@@ -1 +1 @@\n-a\n+b\n`;
+      const check = (f) => {
+        const p = join(r.d, "x.patch");
+        writeFileSync(p, edit(f));
+        const out = r.cli(["denylist-check", "--patch", p]);
+        return [f, out.status, JSON.parse(out.stdout).hits];
+      };
+      const root = [".gitignore", ".gitattributes", ".worktreeinclude", ".mcp.json"];
+      expect(root.map(check)).toEqual(root.map((f) => [f, 1, [f]]));
+      const nested = ["src/.gitignore", "e2e/.gitattributes", "src/app/.mcp.json"];
+      expect(nested.map(check)).toEqual(nested.map((f) => [f, 0, []]));
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  // Parity with the workflow gate: the same corpus (kit/test/denylist-modes.mjs) and the same answer.
+  it("denylist-check escalates every corpus patch that writes a symlink, a gitlink or a mode change (exit 1, listed in hits and modeHits) and passes the rest", () => {
+    const r = tempRepo();
+    try {
+      const p = join(r.d, "x.patch");
+      const got = MODE_PATCHES.map((c) => {
+        writeFileSync(p, c.patch);
+        const out = r.cli(["denylist-check", "--patch", p]);
+        const body = out.stdout ? JSON.parse(out.stdout) : {};
+        return [c.name, out.status, body.hits, body.modeHits];
+      });
+      expect(got).toEqual(MODE_PATCHES.map((c) => [c.name, c.hits.length ? 1 : 0, c.hits, c.hits]));
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  // A rename, a copy or a retarget of an EXISTING symlink or gitlink carries no mode line (git takes the
+  // mode from the preimage), so the patch text cannot show it: denylist-check reads HEAD's mode of every
+  // path git finds in the patch (both sides). The workflow gate has no tree; this check is the CLI's.
+  it("denylist-check escalates a patch that touches an existing symlink or gitlink in HEAD: a rename, a copy or a retarget with no mode line", () => {
+    const r = tempRepo();
+    try {
+      mkdirSync(join(r.d, "src"), { recursive: true });
+      symlinkSync("../kit/loop.md", join(r.d, "src/link"));
+      writeFileSync(join(r.d, "src/a.ts"), "a\n");
+      r.git("add", "-A");
+      r.git("update-index", "--add", "--cacheinfo", `160000,${r.git("rev-parse", "HEAD").stdout.trim()},src/vendor`);
+      r.git("commit", "-qm", "a symlink, a gitlink and a regular file");
+      const staged = (prep, ...diffArgs) => {
+        prep();
+        const out = r.git("diff", "--cached", "--src-prefix=a/", "--dst-prefix=b/", ...diffArgs).stdout;
+        r.git("reset", "-q", "--hard", "HEAD");
+        return out;
+      };
+      const rename = staged(() => r.git("mv", "src/link", "src/moved"), "-M");
+      const copy = staged(() => {
+        symlinkSync("../kit/loop.md", join(r.d, "src/copy"));
+        r.git("add", "src/copy");
+      }, "-C", "--find-copies-harder");
+      const retarget = "diff --git a/src/link b/src/link\n--- a/src/link\n+++ b/src/link\n@@ -1 +1 @@\n-../kit/loop.md\n\\ No newline at end of file\n+../../outside\n\\ No newline at end of file\n";
+      const gitlink = "diff --git a/src/vendor b/src/vendor2\nsimilarity index 100%\nrename from src/vendor\nrename to src/vendor2\n";
+      const plain = staged(() => r.git("mv", "src/a.ts", "src/b.ts"), "-M");
+      for (const [name, patch] of [["rename", rename], ["copy", copy]]) expect(patch, name).not.toMatch(/^(new file|old|new) mode|^index /m); // no mode line: only the tree can tell
+      const p = join(r.d, "x.patch");
+      const check = (name, patch) => {
+        writeFileSync(p, patch);
+        const out = r.cli(["denylist-check", "--patch", p]);
+        const body = JSON.parse(out.stdout);
+        return [name, out.status, body.hits, body.modeHits];
+      };
+      expect([check("rename", rename), check("copy", copy), check("retarget", retarget), check("gitlink", gitlink), check("plain", plain)]).toEqual([
+        ["rename", 1, ["src/link"], ["src/link"]],
+        ["copy", 1, ["src/link"], ["src/link"]],
+        ["retarget", 1, ["src/link"], ["src/link"]],
+        ["gitlink", 1, ["src/vendor"], ["src/vendor"]],
+        ["plain", 0, [], []],
+      ]);
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  it("denylist-check fails closed (exit 2) when the trusted copy of the denylist block has no mode rule", () => {
+    const r = tempRepo();
+    try {
+      const wf = join(r.d, "kit/workflows/loop-iteration.js");
+      const src = readFileSync(wf, "utf8");
+      const old = src.replace(/\bdiffModeHits\b/g, "olderName");
+      expect(old).not.toBe(src);
+      writeFileSync(wf, old);
+      r.git("commit", "-qam", "a denylist block from before the mode rule");
+      const p = join(r.d, "x.patch");
+      writeFileSync(p, MODE_PATCHES.find((c) => !c.hits.length).patch);
+      const out = r.cli(["denylist-check", "--patch", p]);
+      expect(out.status).toBe(2);
+      expect(JSON.parse(out.stdout).error).toMatch(/could not verify the patch/);
     } finally {
       r.cleanup();
     }
@@ -1078,6 +1227,26 @@ describe("CLI wiring, end to end in a throwaway repo", () => {
       expect(rec.status).toBe(0); // with a judge of `false`, running on would fail the baseline
       expect(JSON.parse(rec.stdout).reversed).toEqual([opaqueFixtureId("B90-synthetic")]);
       expect(existsSync(join(r.d, file))).toBe(false);
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  it("l3-check hashes the working tree's <loop-denylist> block too: an edit inside it after the bench fails the record with an explicit reason", () => {
+    const r = tempRepo();
+    try {
+      expect(r.cli(["write", "-"], benchDraft()).status).toBe(0);
+      expect(r.cli(["l3-check"]).status).toBe(0);
+      const wf = join(r.d, "kit/workflows/loop-iteration.js");
+      const src = readFileSync(wf, "utf8");
+      const weakened = src.replace("/^kit(\\/|$)/i, ", "");
+      expect(weakened).not.toBe(src);
+      expect(denylistSha(weakened)).not.toBe(CURRENT_DENYLIST);
+      expect(verifierSha(weakened)).toBe(CURRENT_VERIFIER); // only the denylist changed
+      writeFileSync(wf, weakened);
+      const edited = r.cli(["l3-check", "--json"]);
+      expect(edited.status).toBe(1);
+      expect(JSON.parse(edited.stdout).unmet).toEqual([expect.stringMatching(/another <loop-denylist> block .*the denylist changed after the bench: re-bench with \/bench-checkers/)]);
     } finally {
       r.cleanup();
     }

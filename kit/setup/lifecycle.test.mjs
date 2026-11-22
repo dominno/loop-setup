@@ -45,6 +45,12 @@ beforeAll(() => {
   git(kitSrc, "init", "-q");
   git(kitSrc, "add", "-A");
   git(kitSrc, "commit", "-qm", "kit");
+  // The kit's own remote, with the commit on main: denylist-check from an installed kit gates on
+  // verify-kit, which anchors the install to a protected ref of the kit source's origin.
+  const kitRemote = join(T, "kit.git");
+  git(T, "init", "-q", "--bare", kitRemote);
+  git(kitSrc, "remote", "add", "origin", kitRemote);
+  git(kitSrc, "push", "-q", "origin", "HEAD:refs/heads/main");
   remote = join(T, "remote.git");
   git(T, "init", "-q", "--bare", remote);
   const seed = join(T, "seed");

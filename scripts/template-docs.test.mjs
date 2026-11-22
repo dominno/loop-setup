@@ -107,6 +107,24 @@ describe("loop.md consumer procedure", () => {
   });
 });
 
+describe("L3 requires the sandbox (kit/loop-checklist.md and kit/rules/KIT.md)", () => {
+  // One sentence, carried by both the readiness checklist and the kit rules (parity): without the
+  // sandbox the loop's Bash runs as the user and can rewrite the kit, its manifest and the settings.
+  const STATEMENT = "sandbox-off L2 has no local tamper resistance";
+  const checklist = prose("kit/loop-checklist.md");
+  const kitRules = prose("kit/rules/KIT.md");
+
+  it("the checklist and the kit rules both state that sandbox-off L2 has no local tamper resistance", () => {
+    expect(checklist.toLowerCase()).toContain(STATEMENT.toLowerCase());
+    expect(kitRules.toLowerCase()).toContain(STATEMENT.toLowerCase());
+  });
+
+  it("the checklist's L3 items name the sandbox settings l3-check reads, both pinned blocks, and doctor's report", () => {
+    const anchors = ["`sandbox.enabled: true`", "`sandbox.allowUnsandboxedCommands: false`", "`sandbox.excludedCommands`", "user scope", "`<loop-verifier>`", "`<loop-denylist>`", "`loop-setup l3-check`", "`loop-setup doctor`"];
+    expect(anchors.filter((a) => !checklist.includes(a))).toEqual([]);
+  });
+});
+
 describe("planning upgrade (docs/plans/planning-upgrade/04-spec.md)", () => {
   it("W0: L2 needs one logged L1 iteration with a re-plan delta and a passing pre-dispatch plan-lint", () => {
     const checklist = prose("kit/loop-checklist.md");

@@ -5,6 +5,9 @@ import { KIT_ROOT, claudeHomeOf, currentLayout, gitOut } from "./facts.mjs";
 import { LINK_NAME, STATE_BRANCH, loopHome, statePaths } from "./layout.mjs";
 import { install, normalizeRemote, uninstall, verifyInstall } from "./install.mjs";
 import { runHook } from "./hooks.mjs";
+import { verifyKit } from "./verifykit.mjs";
+import { postureSummary, sandboxPosture } from "./sandbox.mjs";
+import { settingsSources } from "./settings.mjs";
 import { init, linkIgnored, linkTracked, originUrl, remoteHasState, restore, sync, syncStatus } from "./workspace.mjs";
 
 const USAGE = `loop-setup — the loop kit, installed in ~/.claude with one workspace per project
@@ -12,11 +15,16 @@ const USAGE = `loop-setup — the loop kit, installed in ~/.claude with one work
   loop-setup install --from <kit repo|kit dir> [--link-bin <dir>] [--auto-restore <host/owner/repo>[,…]]
                      [--with-stop-gate] [--force]      install or upgrade the kit into ~/.claude
   loop-setup uninstall                                 remove what install owns (never a workspace)
+                                                       (both are a human's step: refused from inside Claude Code,
+                                                       CLAUDECODE set, for the session's own Claude home)
   loop-setup init [--from-legacy] [--id <id>]          create this project's workspace and bind it
   loop-setup restore                                   clone the workspace from ${STATE_BRANCH} and bind it
   loop-setup sync [--message <m>] [--no-push] [--force]  commit, merge ${STATE_BRANCH}, lint, push
   loop-setup where [--json]                            show the kit, project and workspace paths
   loop-setup doctor [--json]                           check the install and this project's binding
+  loop-setup verify-kit [--json]                       check the installed kit against a commit on its remote's main or a
+                                                       kit-v* tag: every kit file, command and owned settings entry
+                                                       (exit 0 verified, 1 tampered, 2 cannot verify — e.g. offline)
   loop-setup hook session-start|stop                   (run by Claude Code; never blocks on error)
   loop-setup <trace command> …                         TRACE-lite: write, act, lint, query, … (loop-setup help)`;
 
@@ -79,6 +87,10 @@ export function doctor({ cwd = process.cwd(), env = process.env } = {}) {
     add("SessionStart and Stop hooks registered", has("SessionStart") && has("Stop"));
   }
   const layout = currentLayout({ cwd, env });
+  // L3 needs the sandbox on with the unsandboxed fallback held closed (the same decision as l3-check);
+  // without it a loop is fine at L1/L2, so this is a warning, never a failure.
+  const posture = sandboxPosture(settingsSources({ claudeHome, projectRoot: layout.projectRoot }));
+  add("sandbox (L3 requires it)", true, posture.ok ? postureSummary(posture) : `${posture.problems.join("; ")} — L3 is unavailable; sandbox-off L2 has no local tamper resistance`, posture.ok ? "ok" : "warn");
   if (!layout.projectRoot) {
     add("inside a git project", false, "not inside a git repository");
     return checks;
@@ -134,12 +146,13 @@ export async function runLifecycle(cmd, argv) {
         withStopGate: !!flags["with-stop-gate"],
         autoRestore: typeof flags["auto-restore"] === "string" ? flags["auto-restore"].split(",") : [],
         force: !!flags.force,
+        env,
       });
       print(json ? m : `installed ${m.kit.name} ${m.kit.version} (${m.source.commit ? m.source.commit.slice(0, 12) : "from a directory"}) into ${join(loopHome(claudeHomeOf(env)), "kit")}\n  commands: ${Object.keys(m.commands).map((c) => `/${c}`).join(" ")}\n  shim: ${m.bin.shim}${m.bin.linked ? ` (linked as ${m.bin.linked})` : ""}\n  auto-restore: ${m.autoRestore.join(", ") || "none"}`, json);
       return 0;
     }
     if (cmd === "uninstall") {
-      const r = uninstall({ claudeHome: claudeHomeOf(env) });
+      const r = uninstall({ claudeHome: claudeHomeOf(env), env });
       print(json ? r : `uninstalled${r.kept.length ? ` (kept modified: ${r.kept.join(", ")})` : ""}; workspaces kept in ${join(loopHome(claudeHomeOf(env)), "workspaces")}`, json);
       return 0;
     }
@@ -163,6 +176,13 @@ export async function runLifecycle(cmd, argv) {
       if (flags.path) print(w.workspace || "");
       else print(w, true);
       return w.ok ? 0 : 2;
+    }
+    if (cmd === "verify-kit") {
+      const r = verifyKit({ claudeHome: claudeHomeOf(env), installedShim: join(loopHome(claudeHomeOf(env)), "bin", "loop-setup"), projectRoot: gitOut(process.cwd(), ["rev-parse", "--show-toplevel"]) });
+      if (json) print(r, true);
+      else if (r.ok) print(`verify-kit: ok — the installed kit (${KIT_ROOT}) matches ${r.commit.slice(0, 12)} (on ${r.protectedBy.join(", ")}) of ${r.remote}: ${r.checked.files} files, ${r.checked.commands} commands, ${r.checked.settings} owned settings entries`);
+      else print(`verify-kit: ${r.code === "TAMPERED" ? "TAMPERED" : "cannot verify"} — ${r.problems.length} problem(s)\n${r.problems.map((p) => `  - ${p}`).join("\n")}`);
+      return r.ok ? 0 : r.code === "TAMPERED" ? 1 : 2;
     }
     if (cmd === "doctor") {
       const checks = doctor({ env });

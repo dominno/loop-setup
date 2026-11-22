@@ -1,7 +1,8 @@
 // loop-setup install / uninstall — puts the kit into the Claude config dir (~/.claude):
 //   <home>/loop-setup/kit/          the kit's files, copied from a COMMITTED source (git HEAD of the
 //                                   source repo) or a kit directory, with {{KIT}} rendered in prompts
-//   <home>/loop-setup/installed.json every installed file's sha256, the owned commands and settings
+//   <home>/loop-setup/installed.json every installed file's sha256, the owned commands and settings, and the
+//                                   source (commit, remote, kit prefix) that `loop-setup verify-kit` anchors to
 //   <home>/loop-setup/bin/loop-setup the shim (absolute node + kit paths baked in)
 //   <home>/commands/<name>.md       the kit's commands (user scope: bare /names in every project)
 //   <home>/settings.json            owned hooks (SessionStart, Stop) and permission rules, merged
@@ -11,13 +12,18 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { loopHome } from "./layout.mjs";
-import { manifestPathFor, sha256 } from "./kitfiles.mjs";
+import { claudeHomeOf } from "./facts.mjs";
+import { lifecycleRefusal } from "./guard.mjs";
+import { NOT_OBJECT, readSettingsFile } from "./settings.mjs";
+import { manifestPathFor } from "./kitfiles.mjs";
+import { redactRemote } from "./integrity.mjs";
+import { DEV_ONLY, ownedSettings as ownedSettingsFor, readKitTree, renderInstall, settingsShapeProblem, sha256, shimText } from "./kittree.mjs";
+
+// The install contract (renderKit, loopTickCommand, the owned settings) lives in the pure kittree.mjs,
+// shared with verify-kit; it is re-exported here for existing callers.
+export { loopTickCommand, renderKit } from "./kittree.mjs";
 
 export const MANIFEST_SCHEMA = 1;
-/** Kit paths that are development-only: never installed. */
-const DEV_ONLY = (rel) => rel.endsWith(".test.mjs") || rel.startsWith("test/");
-/** The commands registered at user scope: every kit/commands/*.md plus /loop-tick (the standing loop prompt). */
-const LOOP_TICK = "loop-tick";
 
 const readJson = (p, fallback) => {
   try {
@@ -33,8 +39,9 @@ const writeJson = (p, v) => {
 
 /**
  * The kit's files as { rel → Buffer }, from `from`:
- *  - a git checkout whose HEAD has kit/kit.json: the committed tree (never the working tree), and its commit;
- *  - otherwise a directory holding kit.json (an unpacked kit): its files, commit null.
+ *  - a git checkout whose HEAD has kit/kit.json: the committed tree (never the working tree), its
+ *    commit, its kit prefix and its origin remote (password stripped; null without one);
+ *  - otherwise a directory holding kit.json (an unpacked kit): its files, commit, prefix and remote null.
  */
 export function readKitSource(from) {
   const src = resolve(from);
@@ -58,15 +65,14 @@ export function readKitSource(from) {
     }
     if (prefix !== null) {
       const commit = git(["rev-parse", "HEAD"], { encoding: "utf8", cwd: top }).trim();
-      const base = prefix ? `${prefix}/` : "";
-      const names = git(["ls-tree", "-r", "-z", "--name-only", "HEAD", "--", prefix || "."], { encoding: "utf8", cwd: top }).split("\0").filter(Boolean);
-      const files = new Map();
-      for (const name of names) {
-        const rel = name.slice(base.length);
-        if (DEV_ONLY(rel)) continue;
-        files.set(rel, git(["show", `HEAD:${name}`], { cwd: top }));
+      const files = readKitTree((args, opts = {}) => git(args, { cwd: top, input: opts.input, stdio: ["pipe", "pipe", "ignore"] }), commit, prefix);
+      let remote = null;
+      try {
+        remote = redactRemote(git(["remote", "get-url", "origin"], { encoding: "utf8", cwd: top }).trim()) || null;
+      } catch {
+        remote = null;
       }
-      return { files, commit, from: top };
+      return { files, commit, prefix, remote, from: top };
     }
   }
   if (!existsSync(join(src, "kit.json"))) throw new Error(`${src} is neither a git checkout with a committed kit/ nor a kit directory (no kit.json)`);
@@ -80,31 +86,12 @@ export function readKitSource(from) {
     }
   };
   walk(src);
-  return { files, commit: null, from: src };
-}
-
-/** {{KIT}} → the installed kit's absolute path; in a permission rule "({{KIT}}" becomes the absolute "(//…" form. */
-export function renderKit(text, kitDir) {
-  return String(text).replace(/\(\{\{KIT\}\}/g, `(/${kitDir}`).replace(/\{\{KIT\}\}/g, kitDir);
-}
-
-/** The /loop-tick command: the standing loop prompt, run as `/loop 30m /loop-tick`. */
-export function loopTickCommand(loopPrompt) {
-  return `---\ndescription: loop-setup kit — one iteration of the hardened watchdog loop (run as /loop 30m /loop-tick; declare the trust level first)\nargument-hint: [L1|L2|L3] [focus]\n---\n\n${loopPrompt}`;
+  return { files, commit: null, prefix: null, remote: null, from: src };
 }
 
 /** The owned settings entries for a kit at kitDir under loopDir (re-derived on every install; the manifest remembers them). */
 export function ownedSettings({ kitDir, loopDir, shim, withStopGate = false, nodePath = process.execPath }) {
-  const q = (s) => `"${s}"`;
-  const hooks = {
-    SessionStart: [{ matcher: "startup|resume|clear|compact", hooks: [{ type: "command", command: `${q(shim)} hook session-start`, timeout: 60 }] }],
-    Stop: [{ hooks: [{ type: "command", command: `${q(shim)} hook stop`, timeout: 30 }] }],
-  };
-  if (withStopGate) hooks.Stop.push({ hooks: [{ type: "command", command: `${q(nodePath)} ${q(join(kitDir, "hooks/stop-gate.mjs"))}`, timeout: 600 }] });
-  const READ_ONLY = ["where", "doctor", "lint", "query", "show", "tree-id", "metrics", "status", "plan-ready", "plan-lint", "plan-items", "plan-drift", "story-lint", "wiki-check", "l3-check", "claim-token"];
-  const allow = [`Read(/${kitDir}/**)`, ...READ_ONLY.flatMap((c) => [`Bash(loop-setup ${c})`, `Bash(loop-setup ${c} *)`])];
-  const deny = [`Edit(/${kitDir}/**)`, `Edit(/${join(loopDir, "bin")}/**)`, `Edit(/${join(loopDir, "installed.json")})`];
-  return { hooks, allow, deny };
+  return ownedSettingsFor({ kitDir, loopDir, shim, withStopGate, nodePath });
 }
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -140,17 +127,42 @@ export function mergeSettings(settings, owned, previous = null) {
 }
 
 /**
- * The user's settings.json: {} only when the file does not exist. A file that exists but does not
- * parse is the user's data — refuse (nothing is changed) instead of replacing it with the kit's entries.
+ * The user's settings.json: {} only when the file does not exist. A file that cannot be read, does not
+ * parse, or parses to something other than a JSON object (a string, an array, a number, null) is the
+ * user's data — refuse (nothing is changed) instead of replacing it with the kit's entries.
  */
 export function readSettings(path) {
-  if (!existsSync(path)) return {};
-  const text = readFileSync(path, "utf8");
+  const v = readSettingsFile(path);
+  if (v === null) return {};
+  if (!v.error) return v;
+  const why = v.error === NOT_OBJECT ? "parses but is not a JSON object (a string, an array, a number or null)" : v.error.startsWith("cannot be read") ? v.error : `does not parse as JSON (${v.error})`;
+  throw new Error(`${path} ${why} — fix it first; loop-setup changed nothing`);
+}
+
+/** settings merged with the owned entries; a settings.json whose hooks or permissions have the wrong shape throws a clear error. */
+function mergedSettings(path, settings, owned, previous) {
+  const wrong = (why) => new Error(`${path}: its hooks or permissions have the wrong shape (${why}) — fix it first; loop-setup changed nothing`);
+  const problem = settingsShapeProblem(settings);
+  if (problem) throw wrong(problem);
   try {
-    return JSON.parse(text);
+    return mergeSettings(settings, owned, previous);
   } catch (e) {
-    throw new Error(`${path} does not parse as JSON (${e.message}) — fix it first; loop-setup changed nothing`);
+    throw wrong(e.message);
   }
+}
+
+/** A home as the filesystem resolves it (realpath), or lexically when it does not exist yet. */
+const resolvedHome = (p) => {
+  try {
+    return realpathSync(p);
+  } catch {
+    return resolve(p);
+  }
+};
+/** Throw (before anything is read or written) when a lifecycle write would hit this Claude Code session's own home. */
+function refuseAgentWrite(cmd, claudeHome, env) {
+  const why = lifecycleRefusal({ cmd, claudecode: env.CLAUDECODE, targetHome: resolvedHome(claudeHome), sessionHome: resolvedHome(claudeHomeOf(env)) });
+  if (why) throw new Error(why);
 }
 
 /**
@@ -171,28 +183,31 @@ function writeSettings(path, value) {
 }
 
 /**
- * Install (or upgrade in place) the kit from `from` into claudeHome. Idempotent.
- * opts: { from, claudeHome, linkBin?, withStopGate?, autoRestore?: string[], force?, now? }
+ * Install (or upgrade in place) the kit from `from` into claudeHome. Idempotent. Refused from inside
+ * Claude Code for the session's own home (guard.mjs); env is the process environment by default.
+ * opts: { from, claudeHome, linkBin?, withStopGate?, autoRestore?: string[], force?, now?, env? }
  */
-export function install({ from, claudeHome, linkBin = null, withStopGate = false, autoRestore = [], force = false, now = new Date().toISOString() }) {
+export function install({ from, claudeHome, linkBin = null, withStopGate = false, autoRestore = [], force = false, now = new Date().toISOString(), env = process.env }) {
+  refuseAgentWrite("install", claudeHome, env);
   const loopDir = loopHome(claudeHome);
   const kitDir = join(loopDir, "kit");
   const manifestPath = manifestPathFor(kitDir);
   const previous = readJson(manifestPath, null);
-  const { files, commit, from: source } = readKitSource(from);
+  const { files, commit, prefix, remote, from: source } = readKitSource(from);
+  const { tree, commands } = renderInstall(files, kitDir);
   const kitJson = JSON.parse(files.get("kit.json").toString("utf8"));
   // Read the user's settings first: one that does not parse stops the install before anything changes.
   const settingsPath = join(claudeHome, "settings.json");
   const userSettings = readSettings(settingsPath);
+  // The owned entries, the shim and the merged settings, before any write: an unsafe path (shellArg)
+  // or a wrongly shaped settings.json stops the install here, with nothing changed.
+  const shim = join(loopDir, "bin", "loop-setup");
+  const owned = ownedSettings({ kitDir, loopDir, shim, withStopGate });
+  const shimBody = shimText(process.execPath, kitDir);
+  const merged = mergedSettings(settingsPath, userSettings, owned, previous?.settings || null);
 
   // Commands first, so a clash stops the install before anything changes.
   const commandsDir = join(claudeHome, "commands");
-  const commands = new Map();
-  for (const [rel, buf] of files) {
-    const m = /^commands\/([a-z0-9-]+)\.md$/.exec(rel);
-    if (m) commands.set(m[1], renderKit(buf.toString("utf8"), kitDir));
-  }
-  if (files.has("loop.md")) commands.set(LOOP_TICK, loopTickCommand(renderKit(files.get("loop.md").toString("utf8"), kitDir)));
   const clashes = [];
   for (const name of commands.keys()) {
     const p = join(commandsDir, `${name}.md`);
@@ -209,8 +224,7 @@ export function install({ from, claudeHome, linkBin = null, withStopGate = false
   const stage = `${kitDir}.new`;
   rmSync(stage, { recursive: true, force: true });
   const fileHashes = {};
-  for (const [rel, buf] of files) {
-    const out = rel.endsWith(".md") ? Buffer.from(renderKit(buf.toString("utf8"), kitDir)) : buf;
+  for (const [rel, out] of tree) {
     const p = join(stage, rel);
     mkdirSync(dirname(p), { recursive: true });
     writeFileSync(p, out);
@@ -243,9 +257,8 @@ export function install({ from, claudeHome, linkBin = null, withStopGate = false
   }
 
   // Shim: absolute node and kit paths, so neither PATH nor the environment can redirect it.
-  const shim = join(loopDir, "bin", "loop-setup");
   mkdirSync(dirname(shim), { recursive: true });
-  writeFileSync(shim, `#!/bin/sh\nexec "${process.execPath}" "${join(kitDir, "bin/loop-setup.mjs")}" "$@"\n`);
+  writeFileSync(shim, shimBody);
   chmodSync(shim, 0o755);
   let linked = null;
   if (linkBin) {
@@ -263,13 +276,12 @@ export function install({ from, claudeHome, linkBin = null, withStopGate = false
   }
 
   // Settings.
-  const owned = ownedSettings({ kitDir, loopDir, shim, withStopGate });
-  writeSettings(settingsPath, mergeSettings(userSettings, owned, previous?.settings || null));
+  writeSettings(settingsPath, merged);
 
   const manifest = {
     schema: MANIFEST_SCHEMA,
     kit: { name: kitJson.name, version: kitJson.version },
-    source: { from: source, commit },
+    source: { from: source, commit, remote, prefix },
     installedAt: now,
     files: fileHashes,
     commands: commandHashes,
@@ -281,8 +293,9 @@ export function install({ from, claudeHome, linkBin = null, withStopGate = false
   return manifest;
 }
 
-/** Remove what the manifest owns (unchanged files only); workspaces are never touched. */
-export function uninstall({ claudeHome }) {
+/** Remove what the manifest owns (unchanged files only); workspaces are never touched. Refused like install. */
+export function uninstall({ claudeHome, env = process.env }) {
+  refuseAgentWrite("uninstall", claudeHome, env);
   const loopDir = loopHome(claudeHome);
   const kitDir = join(loopDir, "kit");
   const manifestPath = manifestPathFor(kitDir);
@@ -290,6 +303,7 @@ export function uninstall({ claudeHome }) {
   if (!manifest) throw new Error(`the kit is not installed in ${claudeHome} (no ${manifestPath})`);
   const settingsPath = join(claudeHome, "settings.json");
   const userSettings = readSettings(settingsPath); // refuses before anything is removed
+  const merged = existsSync(settingsPath) ? mergedSettings(settingsPath, userSettings, null, manifest.settings) : null; // so does a wrong shape
   const kept = [];
   for (const [name, hash] of Object.entries(manifest.commands || {})) {
     const p = join(claudeHome, "commands", `${name}.md`);
@@ -297,7 +311,7 @@ export function uninstall({ claudeHome }) {
     if (sha256(readFileSync(p)) === hash) rmSync(p);
     else kept.push(p);
   }
-  if (existsSync(settingsPath)) writeSettings(settingsPath, mergeSettings(userSettings, null, manifest.settings));
+  if (merged) writeSettings(settingsPath, merged);
   if (manifest.bin?.linked) {
     try {
       if (lstatSync(manifest.bin.linked).isSymbolicLink()) unlinkSync(manifest.bin.linked);

@@ -268,7 +268,8 @@ the live store. Pre-registered — results that count **against** our design:
 **L3 freshness (`loop-setup l3-check`):** a bench record names the verifier it measured — a
 `file_line` item on `kit/workflows/loop-iteration.js` whose result is `<loop-verifier>
 sha256=<hex>`, the hash of that block (marker lines included) as `bench-score --record` reads
-it from the working tree (a run without a verifier arm names none). `loop-setup l3-check` is
+it from the working tree — and the denylist that guarded it, a second such item `<loop-denylist>
+sha256=<hex>` (a run without a verifier arm names neither). `loop-setup l3-check` is
 the measured-checker item of `kit/loop-checklist.md`, computed: the latest
 `bench:trace-bench-lite` record, licensing or not, must be `accept`, from a verifier arm run at
 `repeat ≥ 2` over every manifest fixture in every repeat (its measurement item's
@@ -277,9 +278,11 @@ index present, never the union over repeats, equal the manifest's `fixtures` cou
 without them, or from a run over part of the manifest, e.g. with `bench-args --only`, never
 passes, even when scored with a full-manifest run at fewer repeats; each `perRepeat` entry
 carries its own counts, to show where coverage fell short), with no F0, F3 or F4 in its
-`failed_gates`, and its hash must equal the current block's; exit 0 only when all hold, else
-exit 1 listing every unmet condition (a store that does not replay, or a block that cannot be
-read, is one too). Any edit inside the block needs a re-bench before L3, and a record scored
+`failed_gates`, and both its hashes must equal the current blocks' (a record without the
+`<loop-denylist>` hash, scored before denylist pinning, needs a re-bench); and the effective
+settings must switch the sandbox on with `sandbox.allowUnsandboxedCommands: false` held at user
+scope and no `sandbox.excludedCommands` in any scope (kit/setup/sandbox.mjs); exit 0 only when all hold, else exit 1 listing every unmet
+condition (a store that does not replay, or a block that cannot be read, is one too). Any edit inside the block needs a re-bench before L3, and a record scored
 before this check carries no hash, so it never passes. Partial: the hash is read when you
 score, so it cannot see an edit made between the run and the score, or a `trace-bench.js` copy
 (the one the Workflow runs) that drifted from the production block — `pnpm test`'s parity check
@@ -354,6 +357,17 @@ debate stage (critic panel + skeptic already is one).
 - `git apply --numstat -z <patch>` names only the destination of a rename/copy; union it
   with `git apply --numstat -z -R <patch>` to see both sides (`loop-setup denylist-check`
   does).
+- Node runs a script from its realpath (`import.meta.url`), so an installed kit's `KIT_ROOT` drops any
+  symlink in the Claude home's path, while the installer writes every path with the home's spelling
+  as given (`$CLAUDE_CONFIG_DIR`, or `HOME/.claude`): `verify-kit` renders the expected install with
+  the caller's spelling when it resolves to the kit's own home.
+- `git apply` reads a mode leniently (`new file mode 0120000` or `new file mode  120000` is a
+  symlink), and a patch that retargets an existing symlink says so only on its `index … 120000`
+  line: the denylist's mode rule (`diffModeHits`) counts a mode as regular only when it is exactly
+  `100644` or `100755`, and treats any `old mode`/`new mode` line as a mode change. A rename, a copy
+  or a header-less retarget of an EXISTING symlink or gitlink carries no mode line at all (git takes
+  the mode from the preimage), so `loop-setup denylist-check` also reads HEAD's modes of every path
+  the patch touches (`treeModeHits`); the workflow gate has the text alone.
 - `git apply` strips any one leading path component and accepts traditional `---`/`+++`
   sections (tab timestamps included) after a `diff --git` section, so an `a/`/`b/` regex
   misses files git will write — check the paths git reports before applying.

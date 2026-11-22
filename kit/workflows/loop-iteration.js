@@ -206,6 +206,11 @@ const DENYLIST = [
   // scripts/** gate. So the root package.json, the test/lint/type/E2E runner configs and every path
   // under the root scripts/ directory escalate too. e2e/ and src/ stay open: the loop's real work.
   /^package\.json$/i, /^(vitest|playwright|eslint)\.config\.[^/]+$/i, /^tsconfig\.json$/i, /^scripts(\/|$)/i,
+  // ...and the repository's own configuration at the root: .gitignore and .gitattributes decide what
+  // git tracks, diffs and checks out (a hidden file, an export-ignore, a merge or eol attribute),
+  // .worktreeinclude what a fresh worktree copies, and .mcp.json the MCP servers every session in the
+  // project starts. A nested .gitignore, .gitattributes or .mcp.json under src/ or e2e/ stays open.
+  /^\.gitignore$/i, /^\.gitattributes$/i, /^\.worktreeinclude$/i, /^\.mcp\.json$/i,
 ]
 const hitsDenylist = (files) => (files || []).some((f) => DENYLIST.some((re) => re.test(f)))
 
@@ -218,6 +223,9 @@ const hitsDenylist = (files) => (files || []).some((f) => DENYLIST.some((re) => 
 // that does not match its own line counts, marks the whole diff `unparsable` — the
 // caller escalates instead of trusting a partial path list. (The Lead re-checks the
 // patch with git's own parser before applying it: `loop-setup denylist-check --patch`.)
+// A `diff --git a/<old> b/<new>` header; git C-quotes a side only when its path needs it, so either
+// side may be quoted alone.
+const DIFF_GIT = /^diff --git (?:a\/(.+?)|"a\/(.+?)") (?:b\/(.+)|"b\/(.+)")$/
 function diffPathScan(diff) {
   const paths = []
   let unparsable = false
@@ -249,8 +257,7 @@ function diffPathScan(diff) {
       }
       if (oldN > 0 || newN > 0) unparsable = true
     } else if (line.startsWith('diff --git ')) {
-      // git C-quotes a side only when its path needs it, so either side may be quoted alone.
-      if ((m = /^diff --git (?:a\/(.+?)|"a\/(.+?)") (?:b\/(.+)|"b\/(.+)")$/.exec(line))) paths.push(m[1] || m[2], m[3] || m[4])
+      if ((m = DIFF_GIT.exec(line))) paths.push(m[1] || m[2], m[3] || m[4])
       else unparsable = true
     } else if (line.startsWith('--- ') || line.startsWith('+++ ')) {
       side(line.slice(4))
@@ -263,6 +270,34 @@ function diffPathScan(diff) {
   return { paths, unparsable }
 }
 const parseDiffPaths = (diff) => diffPathScan(diff).paths
+
+// What a patch WRITES escalates too, wherever it lands (src/ and e2e/ included): a symlink can aim a
+// later read or write outside the tree or at a protected file, a gitlink pins code from outside the
+// repo, and a mode change makes a file executable. diffModeHits names the files whose section writes
+// a symlink (120000), a gitlink (160000) or any other non-regular mode, or changes a mode. It reads
+// every line, hunks included: a header line never passes as hunk content (each hunk line starts with
+// ' ', '+', '-' or '\'), so it sees every mode line git reads. Fail closed: a mode is regular only as
+// git writes it, exactly 100644 or 100755 (git also reads '0120000' or ' 120000' as a symlink), and
+// any `old mode`/`new mode` line is a mode change. Deleting a file, a symlink included, is not a hit.
+const REGULAR_MODE = /^100(644|755)$/
+function diffModeHits(diff) {
+  const hits = []
+  let file = '(no diff --git header)'
+  for (const raw of String(diff || '').split('\n')) {
+    const line = raw.replace(/\r$/, '')
+    let m
+    if (line.startsWith('diff --git ')) file = (m = DIFF_GIT.exec(line)) ? m[3] || m[4] : line.slice(11)
+    else if (/^(old|new) mode\b/.test(line)) hits.push(file)
+    else if ((m = /^new file mode\b(.*)$/.exec(line) || /^index [^ ]*\.\.[^ ]* (.*)$/.exec(line)) && !REGULAR_MODE.test(m[1].trim())) hits.push(file)
+  }
+  return [...new Set(hits)]
+}
+// The text cannot show a rename, a copy or a retarget of a symlink or gitlink that already exists: such
+// a section carries no mode line (git takes the mode from the preimage). The tree can: treeModeHits
+// names the paths whose existing mode ({ mode, path }, as `git ls-tree` lists them) is not regular.
+// Only `loop-setup denylist-check` has a tree (HEAD's modes for every path git finds in the patch);
+// this workflow gate sees the text alone.
+const treeModeHits = (entries) => [...new Set((entries || []).filter((e) => !REGULAR_MODE.test(e.mode)).map((e) => e.path))]
 // </loop-denylist>
 
 // F7: an implementer may report changedFiles as absolute paths inside its worktree
@@ -308,7 +343,7 @@ const outcomes = await pipeline(
   items,
   (item, _item, i) =>
     Promise.resolve().then(() => agent(
-      `Implement the SMALLEST safe fix for this loop work item in your isolated worktree. Stay in scope; NEVER touch denylist paths (auth, payments, secrets/.env, infra, CI config, migrations, .claude/, CLAUDE.md, the root scripts/ directory, the root package.json, and the vitest, playwright, eslint and tsconfig configs).\n- Your worktree is a fresh checkout without dependencies. First record \`git rev-parse HEAD\` as \`baseSha\`. Then install with the lockfile: \`pnpm install --frozen-lockfile --prefer-offline\`; in the web env, use the pnpm invocation from .claude/loop-workspace/topics/remote-env.md (pnpm 10 vs 11).\n- Edit only inside your worktree, and run typecheck, lint and unit tests there.\n- Never run pnpm dev, pnpm build, pnpm test:e2e or pnpm verify: build rewrites tracked files into your diff, and port 3000 belongs to the user. The Lead runs those after applying.\n- Never commit, push, switch branches, stash or reset, and never stop or kill a process you did not start.\n- Before capturing the diff, run \`git add -N .\` so new files appear in it. Then capture the ACTUAL change with \`git diff --src-prefix=a/ --dst-prefix=b/\` (explicit prefixes: the gate parses only a/ and b/, whatever the git config says) and return it as \`diff\` (the real patch, not a summary). Report changedFiles repo-relative, as the a/ and b/ paths in the diff. In notes, give each check command with its exit code (no | tail) and your worktree root. Set checksPassed to whether those checks passed.\n\n${JSON.stringify(item)}`,
+      `Implement the SMALLEST safe fix for this loop work item in your isolated worktree. Stay in scope; NEVER touch denylist paths (auth, payments, secrets/.env, infra, CI config, migrations, .claude/, CLAUDE.md, the root scripts/ directory, the root package.json, the vitest, playwright, eslint and tsconfig configs, and the root .gitignore, .gitattributes, .worktreeinclude and .mcp.json), and never add a symlink or a submodule or change a file's mode: the gate escalates those on any path.\n- Your worktree is a fresh checkout without dependencies. First record \`git rev-parse HEAD\` as \`baseSha\`. Then install with the lockfile: \`pnpm install --frozen-lockfile --prefer-offline\`; in the web env, use the pnpm invocation from .claude/loop-workspace/topics/remote-env.md (pnpm 10 vs 11).\n- Edit only inside your worktree, and run typecheck, lint and unit tests there.\n- Never run pnpm dev, pnpm build, pnpm test:e2e or pnpm verify: build rewrites tracked files into your diff, and port 3000 belongs to the user. The Lead runs those after applying.\n- Never commit, push, switch branches, stash or reset, and never stop or kill a process you did not start.\n- Before capturing the diff, run \`git add -N .\` so new files appear in it. Then capture the ACTUAL change with \`git diff --src-prefix=a/ --dst-prefix=b/\` (explicit prefixes: the gate parses only a/ and b/, whatever the git config says) and return it as \`diff\` (the real patch, not a summary). Report changedFiles repo-relative, as the a/ and b/ paths in the diff. In notes, give each check command with its exit code (no | tail) and your worktree root. Set checksPassed to whether those checks passed.\n\n${JSON.stringify(item)}`,
       { label: `impl:${item.id || 'item'}-${i}`, phase: 'Implement', schema: IMPL_SCHEMA, isolation: 'worktree' },
     )).catch(agentFailed(`impl:${item.id || 'item'}-${i}`)).then((impl) => ({ impl })),
   ({ impl }, item, i) => {
@@ -327,14 +362,26 @@ const outcomes = await pipeline(
     const gatedFiles = [...(im.changedFiles || []).map(repoRelative), ...scan.paths]
     // Fail closed: a non-empty diff whose paths cannot all be parsed cannot be cleared by the gate.
     const unparsable = String(im.diff || '').trim() && scan.unparsable
-    if (unparsable || hitsDenylist(gatedFiles)) {
+    const pathHit = unparsable || hitsDenylist(gatedFiles)
+    // A symlink, a gitlink or a mode change escalates on any path (diffModeHits, the same rule
+    // `loop-setup denylist-check --patch` applies before the Lead applies the diff).
+    const modeHits = diffModeHits(im.diff)
+    if (pathHit || modeHits.length) {
       return {
         ...base, applied: false, status: 'escalated-denylist',
         verdict: 'defer', preGateVerdict: null,
-        failedGates: [unparsable ? 'denylist:unparsable-diff-paths' : `denylist:${gatedFiles.filter((f) => DENYLIST.some((re) => re.test(f))).join(',')}`],
-        missing: ['explicit human approval — the change touches a denylisted path'],
+        failedGates: [
+          ...(pathHit ? [unparsable ? 'denylist:unparsable-diff-paths' : `denylist:${gatedFiles.filter((f) => DENYLIST.some((re) => re.test(f))).join(',')}`] : []),
+          ...(modeHits.length ? [`denylist:mode:${modeHits.join(',')}`] : []),
+        ],
+        missing: [
+          ...(pathHit ? ['explicit human approval — the change touches a denylisted path'] : []),
+          ...(modeHits.length ? ['explicit human approval — the change writes a symlink, a gitlink or a file-mode change'] : []),
+        ],
         repair: '', qualifier: '', evidenceChecked: [{ kind: 'diff', ref: gatedFiles.join(', ') || '(no paths)' }], counterReasons: [],
-        reason: 'changed files or diff paths match the denylist — forced escalation regardless of verdict',
+        reason: pathHit
+          ? 'changed files or diff paths match the denylist — forced escalation regardless of verdict'
+          : 'the diff writes a symlink, a gitlink or a file-mode change — forced escalation regardless of verdict',
       }
     }
     // Deterministic base check: a live implementer's diff must be based on the Lead's HEAD

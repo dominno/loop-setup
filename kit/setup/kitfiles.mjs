@@ -1,11 +1,11 @@
 // The installed kit's file manifest: the installer records the sha256 of every kit file in
 // <loop home>/installed.json, so a trust anchor read from an installed kit (outside any git
 // repository) is verified against what was installed, never taken as-is.
-import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { sha256 } from "./kittree.mjs";
 
-export const sha256 = (buf) => createHash("sha256").update(buf).digest("hex");
+export { sha256 };
 
 /** <loop home>/installed.json for a kit installed at <loop home>/kit. */
 export const manifestPathFor = (kitRoot) => join(dirname(kitRoot), "installed.json");

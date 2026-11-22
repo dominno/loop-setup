@@ -8,9 +8,13 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { layoutError } from "../setup/facts.mjs";
+import { claudeHomeOf, layoutError } from "../setup/facts.mjs";
+import { postureSummary, sandboxPosture, withSandbox } from "../setup/sandbox.mjs";
+import { settingsSources } from "../setup/settings.mjs";
 import { legacyTarget } from "../setup/layout.mjs";
 import { verifiedKitFile } from "../setup/kitfiles.mjs";
+import { kitGate, parseLevel } from "../setup/integrity.mjs";
+import { verifyKit } from "../setup/verifykit.mjs";
 import {
   appendActions,
   BENCH_BUNDLE,
@@ -25,6 +29,7 @@ import {
   markUnscanned,
   unmatchedLeaks,
   insideRepo,
+  lsTreeModes,
   numstatPaths,
   CODE_PATHS,
   readBench,
@@ -49,6 +54,7 @@ import {
   scoreBench,
   storeMetrics,
   verifierBlockHash,
+  denylistBlockHash,
   wikiViolations,
   writeRecords,
 } from "./lib.mjs";
@@ -69,10 +75,11 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
                                        --severity: exact match on a record's severity (blocker|important|nice-to-have; a
                                        missing or other value exits 2), combinable with the other filters
                                        --brief: compact JSON (newest 40, only the fields critic-panel reads) for args.priorRecords
-  loop-setup denylist-check --patch <file>
+  loop-setup denylist-check --patch <file> --level L1|L2|L3
                                        BEFORE applying a patch: run the loop's production denylist (read from HEAD) over
                                        every path git's own parser finds in it (git apply --numstat) — exit 1 on a hit,
-                                       exit 2 when it cannot be verified (git error, no paths)
+                                       exit 2 when it cannot be verified (git error, no paths, or an installed kit that
+                                       fails verify-kit at L2/L3 or with no --level; at L1 that only warns)
   loop-setup lint                      replay the whole store and check every contract invariant (exit 1 on error)
   loop-setup plan-ready [--max N | --batch N] [--json] [--plan p]
                                        the loop plan's ready node ids as a JSON array (loop-plan.md's ready-node rule),
@@ -98,11 +105,12 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
                                        advisory, exit 0: done nodes whose CLEARed diff touched paths outside their scope,
                                        and the nodes added, removed or moved since the base plan (default: the plan at
                                        the last commit of the run log) — consistency, not truth; never evidence
-  loop-setup plan-items <ids…> [--plan p]
+  loop-setup plan-items <ids…> --level L1|L2|L3 [--plan p]
                                        loop-iteration args.items for ready nodes: [{id, description, priorRecordId?,
                                        missing?}]; priorRecordId only for the node's own loop:<id> record, never a
                                        critic one — exit 1 and no items when any id is not ready, 2 when the store
-                                       does not replay
+                                       does not replay or an installed kit fails verify-kit at L2/L3 or with no
+                                       --level (at L1 that only warns)
   loop-setup story-lint [--root dir]   the story map (${STORY_MAP}/: story files, index, dashboard, verification log, E2E
                                        coverage map) against itself and the store (consistency, not truth): one status
                                        per story everywhere, plus the log row, coverage and licensing Record: line its
@@ -111,11 +119,14 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
   loop-setup wiki-check                the memory wiki (.claude/loop-workspace) against the store (consistency, not truth): rec:
                                        comments, committed facts, quarantine rows, page sizes — JSON {ok, errors,
                                        warnings}; exit 1 on an error, 2 when the store does not replay
-  loop-setup l3-check [--json]         the L3 measured-checker item of kit/loop-checklist.md, computed: the latest
+  loop-setup l3-check [--json]         the L3 items of kit/loop-checklist.md, computed: the latest
                                        bench:trace-bench-lite record is accept, from a verifier arm run at repeat ≥ 2
                                        over every manifest fixture in every repeat (no --only subset), with no F0, F3
-                                       or F4 in its failed_gates, and names the current <loop-verifier> block by its
-                                       sha256 — exit 0 when all hold, else exit 1 listing every unmet condition
+                                       or F4 in its failed_gates, and names the current <loop-verifier> and
+                                       <loop-denylist> blocks by their sha256; and the effective settings switch the
+                                       sandbox on with sandbox.allowUnsandboxedCommands held false at user scope
+                                       and no sandbox.excludedCommands in any scope —
+                                       exit 0 when all hold, else exit 1 listing every unmet condition
   loop-setup reaudit [--claim-prefix P] [--unreachable] [--act | --annotate]
                                        licensing records whose file evidence changed since their commit; one whose
                                        commit the repo no longer has (squashed away) is listed apart, as unreachable;
@@ -130,8 +141,8 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
                                        score trace-bench run(s) (runs concatenated); agent transcripts are scanned for
                                        leaked ground truth (contaminated runs excluded, F0); --record writes the record:
                                        the fixtures each arm measured next to the manifest's counts, and — for a run
-                                       with a verifier arm — the <loop-verifier> block it measured by its sha256 (read
-                                       when you score)
+                                       with a verifier arm — the <loop-verifier> and <loop-denylist> blocks it ran
+                                       with by their sha256 (read when you score)
   loop-setup bench-unpack <dir>        decode the fixture bundle into <dir> (outside the repo!) for editing
   loop-setup bench-pack <dir>          re-encode <dir>/fixtures.json (patches inline) into the bundle
   loop-setup bench-judge [--only ids] [--skip-e2e] [--recover]   verify each fixture's judge.catches by running its
@@ -161,6 +172,23 @@ function parseArgs(argv) {
     } else pos.push(a);
   }
   return { pos, flags };
+}
+
+/** True when the running kit is the project's own kit/ source tree (anchored by the project's git HEAD). */
+function kitInProject() {
+  const rel = relative(PROJECT_ROOT, KIT_ROOT).split(sep).join("/");
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+}
+
+/**
+ * The kit integrity gate of the L2/L3 dispatch commands (denylist-check, plan-items): an installed kit
+ * must pass verify-kit (a protected commit on its remote; offline counts as a failure). L2, L3 and an
+ * undeclared level refuse, L1 warns (kitGate). The project's own kit/ source tree, run directly, is
+ * anchored by the project's git instead.
+ */
+function kitIntegrity(level) {
+  if (kitInProject()) return { allow: true, message: null };
+  return kitGate(level, verifyKit({ kitRoot: KIT_ROOT, projectRoot: PROJECT_ROOT }));
 }
 
 function readJsonInput(src) {
@@ -199,14 +227,15 @@ function codeText() {
     .join("\n");
 }
 
-// The sha256 of the production <loop-verifier> block as it is in the working tree (the bench
-// Workflow runs trace-bench.js's byte-identical copy, parity-tested), or null when it cannot be
-// read: bench-score records it, l3-check compares the latest bench record against it.
-function currentVerifierHash() {
+// The sha256 of the production <loop-verifier> and <loop-denylist> blocks as they are in the working
+// tree (the bench Workflow runs trace-bench.js's byte-identical copies, parity-tested), each null when
+// it cannot be read: bench-score records them, l3-check compares the latest bench record against them.
+function currentBlockHashes() {
   try {
-    return verifierBlockHash(readFileSync(join(KIT_ROOT, "workflows/loop-iteration.js"), "utf8"));
+    const source = readFileSync(join(KIT_ROOT, "workflows/loop-iteration.js"), "utf8");
+    return { verifier: verifierBlockHash(source), denylist: denylistBlockHash(source) };
   } catch {
-    return null; // no such file: nothing to name or compare
+    return { verifier: null, denylist: null }; // no such file: nothing to name or compare
   }
 }
 
@@ -319,13 +348,21 @@ export async function main(argv = process.argv.slice(2)) {
     // Lead's own bookkeeping and unrelated uncommitted edits, and which a patch could
     // rewrite to weaken the very check that inspects it). Paths come from git's own
     // parser, the denylist from HEAD; anything that cannot be verified exits 2 (fail closed).
+    let level;
+    try {
+      level = parseLevel(flags.level);
+    } catch (e) {
+      out(`usage: loop-setup denylist-check --patch <file> --level L1|L2|L3   (${e.message})`);
+      return 2;
+    }
     if (typeof flags.patch !== "string") {
-      out("usage: loop-setup denylist-check --patch <file>   (run it BEFORE git apply <file>)");
+      out("usage: loop-setup denylist-check --patch <file> --level L1|L2|L3   (run it BEFORE git apply <file>)");
       return 2;
     }
     const sh = (args) => execFileSync("git", args, { cwd: PROJECT_ROOT, encoding: "utf8", maxBuffer: 1 << 28, stdio: ["ignore", "pipe", "pipe"] });
     let paths;
     let hitsDenylist;
+    let modeHits;
     try {
       // `git apply --numstat` names only the DESTINATION of a rename/copy; the reversed
       // patch names its source — the union covers both sides (renaming a protected file
@@ -335,9 +372,17 @@ export async function main(argv = process.argv.slice(2)) {
       // The trusted copy: in the kit source repo, the committed file (HEAD); for an installed kit,
       // the installed file verified against the sha256 the installer recorded. Never the working tree.
       const kitRel = relative(PROJECT_ROOT, KIT_ROOT).split(sep).join("/");
-      const kitInProject = kitRel !== "" && !kitRel.startsWith("..") && !isAbsolute(kitRel);
-      const source = kitInProject ? sh(["show", `HEAD:${kitRel}/workflows/loop-iteration.js`]) : verifiedKitFile(KIT_ROOT, "workflows/loop-iteration.js");
-      ({ hitsDenylist } = loadWorkflowBlock("loop-iteration.js", "loop-denylist", ["hitsDenylist"], { source }));
+      const source = kitInProject() ? sh(["show", `HEAD:${kitRel}/workflows/loop-iteration.js`]) : verifiedKitFile(KIT_ROOT, "workflows/loop-iteration.js");
+      // A trusted copy without the mode rule (older than it) cannot vouch for the patch: it throws here.
+      let diffModeHits;
+      let treeModeHits;
+      ({ hitsDenylist, diffModeHits, treeModeHits } = loadWorkflowBlock("loop-iteration.js", "loop-denylist", ["hitsDenylist", "diffModeHits", "treeModeHits"], { source }));
+      // What the patch writes — a symlink, a gitlink, a mode change — escalates on any path: the same
+      // trusted rule the workflow gate runs, over the patch text (it reads every mode line git reads),
+      // and over HEAD's modes of the paths it touches: a rename, a copy or a retarget of an existing
+      // symlink or gitlink shows no mode line (deleting one escalates too: numstat cannot tell).
+      const tree = paths.length ? lsTreeModes(sh(["--literal-pathspecs", "ls-tree", "-z", "HEAD", "--", ...paths])) : [];
+      modeHits = [...new Set([...diffModeHits(readFileSync(patch, "utf8")), ...treeModeHits(tree)])];
     } catch (e) {
       out({ ok: false, error: `could not verify the patch: ${String(e.stderr || e.message || e).trim().split("\n")[0]}` }, true);
       return 2;
@@ -346,8 +391,15 @@ export async function main(argv = process.argv.slice(2)) {
       out({ ok: false, error: "git found no paths in the patch — nothing can be verified" }, true);
       return 2;
     }
-    const hits = paths.filter((p) => hitsDenylist([p]));
-    out({ ok: hits.length === 0, checked: paths.length, paths, hits }, true);
+    // The installed kit the denylist came from must itself verify against its remote (L1 only warns).
+    const gate = kitIntegrity(level);
+    if (!gate.allow) {
+      out({ ok: false, error: gate.message.replace(/^error: /, "") }, true);
+      return 2;
+    }
+    if (gate.message) process.stderr.write(`${gate.message}\n`);
+    const hits = [...new Set([...paths.filter((p) => hitsDenylist([p])), ...modeHits])];
+    out({ ok: hits.length === 0, checked: paths.length, paths, hits, modeHits }, true);
     return hits.length ? 1 : 0;
   }
 
@@ -560,10 +612,21 @@ export async function main(argv = process.argv.slice(2)) {
   }
 
   if (cmd === "plan-items") {
-    if (flags.plan === true || !pos.length) {
-      out("usage: loop-setup plan-items <id> [<id>…] [--plan p] [--store s]");
+    let level;
+    try {
+      level = parseLevel(flags.level);
+    } catch (e) {
+      out(`usage: loop-setup plan-items <id> [<id>…] --level L1|L2|L3 [--plan p] [--store s]   (${e.message})`);
       return 2;
     }
+    if (flags.plan === true || !pos.length) {
+      out("usage: loop-setup plan-items <id> [<id>…] --level L1|L2|L3 [--plan p] [--store s]");
+      return 2;
+    }
+    // Dispatch only from a kit that verifies against its remote (L1 only warns; stdout stays the items file).
+    const gate = kitIntegrity(level);
+    if (gate.message) process.stderr.write(`${gate.message}\n`);
+    if (!gate.allow) return 2;
     // Whose record a node cites (its own loop:<id> record becomes priorRecordId) only the replayed
     // store tells, so one that does not replay yields no items. Errors go to stderr: stdout is the items file.
     if (state.errors.length) {
@@ -633,12 +696,14 @@ export async function main(argv = process.argv.slice(2)) {
   }
 
   if (cmd === "l3-check") {
-    // The L3 measured-checker item, computed (l3Check): a store that does not replay, or a block that
-    // cannot be read, is an unmet condition too — exit 1 unless every condition holds.
-    const res = l3Check(state, currentVerifierHash());
+    // The L3 items, computed: the measured checker (l3Check — a store that does not replay, or a block
+    // that cannot be read, is an unmet condition too) AND the sandbox posture of the effective settings
+    // (sandboxPosture over the settings adapter) — exit 1 unless every condition holds.
+    const posture = sandboxPosture(settingsSources({ claudeHome: claudeHomeOf(process.env), projectRoot: PROJECT_ROOT }));
+    const res = withSandbox(l3Check(state, currentBlockHashes()), posture);
     if (flags.json) out({ ...res, store: storePath }, true);
     else if (res.ok) {
-      out(`l3-check: met — ${res.record_id} is accept from ${res.repeats} repeat(s) over the full manifest, with no F0, F3 or F4, and measured the current <loop-verifier> block (sha256 ${res.currentHash.slice(0, 12)}…)`);
+      out(`l3-check: met — ${res.record_id} is accept from ${res.repeats} repeat(s) over the full manifest, with no F0, F3 or F4, and measured the current <loop-verifier> block (sha256 ${res.currentHash.slice(0, 12)}…) under the current <loop-denylist> block (sha256 ${res.denylistCurrentHash.slice(0, 12)}…); sandbox ${postureSummary(posture).replace("; ", ", ")}`);
     } else {
       out(`l3-check: NOT met — ${res.unmet.length} unmet condition(s); latest bench:trace-bench-lite record: ${res.record_id || "none"}\n${res.unmet.map((u) => `  - ${u}`).join("\n")}`);
     }
@@ -867,7 +932,8 @@ export async function main(argv = process.argv.slice(2)) {
       const prior = latestByClaim(state.records, state.superseded).get("bench:trace-bench-lite");
       const commit = git(["rev-parse", "--short=12", "HEAD"]) || undefined;
       const branch = git(["rev-parse", "--abbrev-ref", "HEAD"]) || undefined;
-      const res = writeRecords([benchRecordDraft(score, { resultsRef, priorRecordId: prior && prior.record_id, runIds, verifierHash: currentVerifierHash() })], { storePath, now, policyVersion, commit, branch, schema, forbidden: benchForbidden() });
+      const hashes = currentBlockHashes();
+      const res = writeRecords([benchRecordDraft(score, { resultsRef, priorRecordId: prior && prior.record_id, runIds, verifierHash: hashes.verifier, denylistHash: hashes.denylist })], { storePath, now, policyVersion, commit, branch, schema, forbidden: benchForbidden() });
       out(res, true);
       return res.every((r) => r.stored) ? 0 : 1;
     }

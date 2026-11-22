@@ -79,7 +79,7 @@ The full table of allowed transitions is in `loop-plan.md`, *Transitions*.
 | `loop-setup plan-lint` | Whether the plan is consistent with its rules and with the record store |
 | `loop-setup plan-lint --pre-dispatch` | The dispatch-time gates. Errors: `[check]`, `[oversize]`, `[origin]`, a stale `in-progress`. Warnings: `[scope]`, `[done-when]`. Use `--max-scope 1` at L3 |
 | `loop-setup plan-ready [--max N \| --batch N] [--json]` | The ready ids in priority order. `--batch N` keeps only nodes whose scopes don't overlap |
-| `loop-setup plan-items <ids…>` | The work items for loop-iteration. The item shape is unchanged |
+| `loop-setup plan-items <ids…> --level <L2\|L3>` | The work items for loop-iteration. The item shape is unchanged. An installed kit must pass `loop-setup verify-kit` first (L1 only warns) |
 | `loop-setup plan-id "<description>"` | A fresh, collision-free node id |
 | `loop-setup claim-token` | The claim the loop writes when it dispatches a node |
 | `loop-setup status` | A read-only rollup: nodes per status and per story, claims and their age, oversize nodes, attempts |

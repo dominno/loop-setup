@@ -1483,6 +1483,15 @@ export function loadWorkflowBlock(file, tag, names, { source } = {}) {
   return new Function(`${block}\nreturn { ${names.join(", ")} };`)();
 }
 
+/** Entries ({ mode, path }) from `git ls-tree -z <tree> -- <paths>`: rows are `mode type oid\tpath\0`. */
+export function lsTreeModes(z) {
+  return String(z || "")
+    .split("\0")
+    .map((row) => /^(\d+) \S+ \S+\t([\s\S]+)$/.exec(row))
+    .filter(Boolean)
+    .map((m) => ({ mode: m[1], path: m[2] }));
+}
+
 /**
  * Paths from `git apply --numstat -z <patch>` — git's OWN parse of a patch, so every
  * format git apply accepts (mixed prefixes, traditional diffs, timestamps, binary) is
@@ -1573,12 +1582,13 @@ export function benchArgs(manifest, { arms, repeat, critics, only, runId }) {
  * claim states the fixtures each scored arm measured next to the manifest's counts — for the
  * verifier arm, the fixtures it measured in every repeat (each `perRepeat` entry carries its own) —
  * and the measurement item carries both (`fixtures`, `arms.<arm>.measured`), so a run over part of
- * the manifest never reads as a full bench (l3Check reads them). `verifierHash` (verifierBlockHash of
- * the production verifier, read by the caller) names the <loop-verifier> block the run measured —
- * only when the score has a verifier arm: a run without one measured no verifier. Without a named
- * block the record never passes l3Check.
+ * the manifest never reads as a full bench (l3Check reads them). `verifierHash` and `denylistHash`
+ * (verifierBlockHash / denylistBlockHash of the production loop-iteration.js, read by the caller)
+ * name the <loop-verifier> block the run measured and the <loop-denylist> block that guarded it —
+ * only when the score has a verifier arm: a run without one measured no verifier. Without both named
+ * blocks the record never passes l3Check.
  */
-export function benchRecordDraft(score, { resultsRef, priorRecordId, runIds = [], verifierHash }) {
+export function benchRecordDraft(score, { resultsRef, priorRecordId, runIds = [], verifierHash, denylistHash }) {
   const v = score.arms.verifier || {};
   const s = score.arms.singlePass || {};
   const p = score.arms.panel || {};
@@ -1604,6 +1614,8 @@ export function benchRecordDraft(score, { resultsRef, priorRecordId, runIds = []
       // L3 freshness: the verifier this run measured, so a later edit to it shows (l3Check) — only
       // when it had a verifier arm, else the record would name a verifier it never measured.
       ...(verifierHash && score.arms.verifier ? [{ kind: "file_line", ref: VERIFIER_FILE, result: `<loop-verifier> sha256=${verifierHash}` }] : []),
+      // ...and the denylist that held its bad diffs (F4 reads it), so a later edit to it shows too.
+      ...(denylistHash && score.arms.verifier ? [{ kind: "file_line", ref: VERIFIER_FILE, result: `<loop-denylist> sha256=${denylistHash}` }] : []),
     ],
     failed_gates: score.flags.map((x) => x.split(":")[0]),
     missing: [],
@@ -1620,9 +1632,10 @@ export function benchRecordDraft(score, { resultsRef, priorRecordId, runIds = []
 
 // ---------------------------------------------------------------------------
 // L3 freshness (`loop-setup l3-check`): the measured-checker item of kit/loop-checklist.md,
-// computed. A bench record names the verifier it measured by the sha256 of the production
-// <loop-verifier> block (trace-bench.js runs a byte-identical copy, parity-tested), so a verifier
-// edited after the bench no longer passes as measured.
+// computed. A bench record names the verifier it measured and the denylist that guarded it by the
+// sha256 of the production <loop-verifier> and <loop-denylist> blocks (trace-bench.js runs
+// byte-identical copies, parity-tested), so either one edited after the bench no longer passes as
+// measured. (L3 also needs the sandbox: kit/setup/sandbox.mjs, joined by the CLI.)
 
 /** The production verifier: the file whose <loop-verifier> block a bench record names. */
 export const VERIFIER_FILE = "kit/workflows/loop-iteration.js";
@@ -1630,12 +1643,17 @@ export const VERIFIER_FILE = "kit/workflows/loop-iteration.js";
 export const LEGACY_VERIFIER_FILES = ["kit/workflows/loop-iteration.js"];
 const VERIFIER_REFS = [VERIFIER_FILE, ...LEGACY_VERIFIER_FILES];
 const VERIFIER_HASH = /^<loop-verifier> sha256=([0-9a-f]{64})$/;
+const DENYLIST_HASH = /^<loop-denylist> sha256=([0-9a-f]{64})$/;
 
-/** The sha256 (hex) of the <loop-verifier> block in a workflow source, marker lines included; null when it has none. */
-export function verifierBlockHash(source) {
-  const block = workflowBlock(source, "loop-verifier");
+/** The sha256 (hex) of a <tag> block in a workflow source, marker lines included; null when it has none. */
+function blockHash(source, tag) {
+  const block = workflowBlock(source, tag);
   return block === null ? null : createHash("sha256").update(block).digest("hex");
 }
+/** The sha256 (hex) of the <loop-verifier> block in a workflow source, marker lines included; null when it has none. */
+export const verifierBlockHash = (source) => blockHash(source, "loop-verifier");
+/** The sha256 (hex) of the <loop-denylist> block in a workflow source, marker lines included; null when it has none. */
+export const denylistBlockHash = (source) => blockHash(source, "loop-denylist");
 
 /**
  * The L3 gate over a replayed store: the LATEST bench:trace-bench-lite record, licensing or not
@@ -1643,19 +1661,21 @@ export function verifierBlockHash(source) {
  * repeat ≥ 2 over every manifest fixture in every repeat (the arm's measured bad/good counts, which
  * scoreBench takes over the fixtures measured in every repeat index present, equal the manifest's,
  * both read from the record's measurement item), with no F0, F3 or F4 in its failed_gates, and names
- * the <loop-verifier> block it measured by a hash equal to `currentHash` (the current block's; null
- * when it cannot be read).
+ * the <loop-verifier> and <loop-denylist> blocks it ran with by hashes equal to `current.verifier`
+ * and `current.denylist` (the current blocks'; null when one cannot be read).
  * Returns every unmet condition; ok only when there is none. Fail closed: a store that does not
  * replay, a missing record and an unreadable field are each an unmet condition, never a pass.
  */
-export function l3Check(state, currentHash) {
+export function l3Check(state, { verifier: currentHash = null, denylist: currentDenylist = null } = {}) {
   const unmet = [];
   if (state.errors.length) unmet.push(`the record store does not replay (${state.errors.length} error(s)) — run loop-setup lint`);
-  if (!currentHash) unmet.push(`the current <loop-verifier> block in ${VERIFIER_FILE} cannot be read — there is no verifier to compare the bench against`);
+  if (!currentHash && !currentDenylist) unmet.push(`the current <loop-verifier> and <loop-denylist> blocks in ${VERIFIER_FILE} cannot be read — there is no verifier or denylist to compare the bench against`);
+  else if (!currentHash) unmet.push(`the current <loop-verifier> block in ${VERIFIER_FILE} cannot be read — there is no verifier to compare the bench against`);
+  else if (!currentDenylist) unmet.push(`the current <loop-denylist> block in ${VERIFIER_FILE} cannot be read — there is no denylist to compare the bench against`);
   const rec = latestByClaim(state.records, state.superseded).get("bench:trace-bench-lite");
   if (!rec) {
     unmet.push("no bench:trace-bench-lite record — run /bench-checkers (repeat ≥ 2) and record it with loop-setup bench-score --record");
-    return { ok: false, unmet, record_id: null, verdict: null, repeats: null, failed_gates: [], recordHash: null, currentHash: currentHash || null };
+    return { ok: false, unmet, record_id: null, verdict: null, repeats: null, failed_gates: [], recordHash: null, currentHash: currentHash || null, denylistRecordHash: null, denylistCurrentHash: currentDenylist || null };
   }
   if (rec.final_status !== "accept") unmet.push(`the record is ${rec.final_status}, not accept${rec.qualifier ? ` (${rec.qualifier})` : ""}`);
   // The verifier arm's repeat count, from the scored metrics in the record's measurement item.
@@ -1693,5 +1713,12 @@ export function l3Check(state, currentHash) {
   } else if (currentHash && recordHash !== currentHash) {
     unmet.push(`the record measured another <loop-verifier> block (sha256 ${recordHash.slice(0, 12)}…; the current block's is ${currentHash.slice(0, 12)}…) — the verifier changed after the bench: re-bench with /bench-checkers`);
   }
-  return { ok: unmet.length === 0, unmet, record_id: rec.record_id, verdict: rec.final_status, repeats: Number.isInteger(repeats) ? repeats : null, failed_gates: rec.failed_gates, recordHash, currentHash: currentHash || null };
+  const deny = rec.evidence.find((e) => e.kind === "file_line" && VERIFIER_REFS.includes(e.ref) && DENYLIST_HASH.test(String(e.result || "")));
+  const denylistRecordHash = deny ? DENYLIST_HASH.exec(deny.result)[1] : null;
+  if (!denylistRecordHash) {
+    unmet.push(`the record carries no <loop-denylist> hash (a file_line item on ${VERIFIER_FILE}), so it cannot show which denylist guarded the bench — records scored before denylist pinning carry none: re-bench with /bench-checkers`);
+  } else if (currentDenylist && denylistRecordHash !== currentDenylist) {
+    unmet.push(`the record measured another <loop-denylist> block (sha256 ${denylistRecordHash.slice(0, 12)}…; the current block's is ${currentDenylist.slice(0, 12)}…) — the denylist changed after the bench: re-bench with /bench-checkers`);
+  }
+  return { ok: unmet.length === 0, unmet, record_id: rec.record_id, verdict: rec.final_status, repeats: Number.isInteger(repeats) ? repeats : null, failed_gates: rec.failed_gates, recordHash, currentHash: currentHash || null, denylistRecordHash, denylistCurrentHash: currentDenylist || null };
 }

@@ -6,6 +6,7 @@ import { describe, it, expect } from "vitest";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { benchArgs, briefRecords, finalizeRecord, loadSchema, loadWorkflowBlock, markUnscanned, opaqueFixtureId, readPolicyVersion, ROOT, scoreBench, semanticViolations, validate } from "./lib.mjs";
+import { MODE_PATCHES } from "../test/denylist-modes.mjs";
 
 const schema = loadSchema();
 const POLICY = readPolicyVersion();
@@ -1854,14 +1855,18 @@ describe("loop dispatch hygiene: base-checked worktree implementers, maxItems, r
 // patch to vitest.config.ts's include (or to package.json's "test" script) used to pass denylist-check
 // and turn `pnpm test` into a green run that skips every scripts/** gate. So the root package.json, the
 // test/lint/type/E2E runner configs and every path under the root scripts/ directory are protected.
-// e2e/ and src/ stay open (the loop's real work), and so does a scripts/ directory that is not the
-// root one.
-describe("loop denylist: the gate runner (root package.json, runner configs, root scripts/) is protected too", () => {
+// So is the repository's own configuration: the root .gitignore and .gitattributes (what git tracks,
+// diffs and checks out), .worktreeinclude (what a fresh worktree copies) and .mcp.json (the MCP
+// servers every session in the project starts). e2e/ and src/ stay open (the loop's real work), a
+// nested .gitignore, .gitattributes or .mcp.json under them included, and so does a scripts/
+// directory that is not the root one.
+describe("loop denylist: the gate runner (root package.json, runner configs, root scripts/) and the repo config files are protected too", () => {
   const HIT = [
     "vitest.config.ts", "package.json", "eslint.config.mjs", "tsconfig.json", "playwright.config.ts",
     "kit/hooks/stop-gate.test.mjs", "scripts/template-docs.test.mjs", "scripts/check-bundle-size.mjs", "kit/trace/lib.mjs",
+    ".gitignore", ".gitattributes", ".worktreeinclude", ".mcp.json",
   ];
-  const CLEAR = ["src/app/page.tsx", "e2e/smoke.spec.ts", "src/scripts/x.ts"];
+  const CLEAR = ["src/app/page.tsx", "e2e/smoke.spec.ts", "src/scripts/x.ts", "src/.gitignore", "e2e/.gitattributes", "src/app/.mcp.json", "e2e/.worktreeinclude"];
 
   it.each(["loop-iteration.js", "trace-bench.js"])("%s: the production hitsDenylist hits every gate-runner path and leaves src/ and e2e/ open", (file) => {
     const { hitsDenylist } = loadWorkflowBlock(file, "loop-denylist", ["hitsDenylist"]);
@@ -1888,6 +1893,61 @@ describe("loop denylist: the gate runner (root package.json, runner configs, roo
       expect(calls.filter(VERIFY).map((c) => c.label), p).toEqual(["verify:LP-080-0"]);
       expect(result.applied.map((o) => o.id), p).toEqual(["LP-080"]);
     }
+  });
+});
+
+// Symlinks, gitlinks and mode changes escalate wherever they land, src/ and e2e/ included: a symlink
+// can aim a later read or write outside the tree or at a protected file, a gitlink pins code from
+// outside the repo, and a mode change makes a file executable — none of them shows up as a protected
+// path. The corpus (kit/test/denylist-modes.mjs) is shared with the denylist-check CLI tests
+// (kit/trace/cli.test.mjs), so the workflow gate, trace-bench's mirror and the CLI give one answer.
+describe("loop denylist: symlinks, gitlinks and mode changes escalate wherever they land (one corpus for every gate)", () => {
+  it.each(["loop-iteration.js", "trace-bench.js"])("%s: the production diffModeHits names exactly the corpus's mode hits", (file) => {
+    const { diffModeHits } = loadWorkflowBlock(file, "loop-denylist", ["diffModeHits"]);
+    expect(MODE_PATCHES.map((c) => [c.name, diffModeHits(c.patch)])).toEqual(MODE_PATCHES.map((c) => [c.name, c.hits]));
+  });
+
+  it.each(["loop-iteration.js", "trace-bench.js"])("%s: treeModeHits names the existing paths whose mode is not exactly 100644 or 100755 (denylist-check's tree check)", (file) => {
+    const { treeModeHits } = loadWorkflowBlock(file, "loop-denylist", ["treeModeHits"]);
+    const tree = [["120000", "src/link"], ["100644", "src/a.ts"], ["160000", "src/vendor"], ["100755", "src/run.sh"], ["040000", "src/dir"], ["120000", "src/link"]];
+    expect(treeModeHits(tree.map(([mode, path]) => ({ mode, path })))).toEqual(["src/link", "src/vendor", "src/dir"]);
+    expect(treeModeHits([])).toEqual([]);
+  });
+
+  const run = (patch) =>
+    runWorkflow("loop-iteration.js", { items: [{ id: "LP-090", description: "x" }], level: "L2", headSha: HEAD_SHA }, (label) =>
+      label.startsWith("impl:") ? { baseSha: HEAD_SHA, changedFiles: [], diff: patch, checksPassed: true, notes: "" } : verdict({ evidenceChecked: [{ kind: "diff", ref: "src/a.ts" }] }),
+    );
+
+  it("the loop gate escalates every corpus patch with a mode hit before any verifier runs, naming its paths; the rest go on to the verifier", async () => {
+    for (const c of MODE_PATCHES) {
+      const { result, calls } = await run(c.patch);
+      if (c.hits.length) {
+        expect(calls.filter(VERIFY), c.name).toEqual([]);
+        expect(result.rejected.map((o) => o.status), c.name).toEqual(["escalated-denylist"]);
+        expect(result.rejected[0].failedGates, c.name).toEqual([`denylist:mode:${c.hits.join(",")}`]);
+        expect(result.rejected[0].missing, c.name).toEqual(["explicit human approval — the change writes a symlink, a gitlink or a file-mode change"]);
+        expect(result.escalate, c.name).toEqual(["LP-090"]);
+        expectWritable(result.traceRecords);
+      } else {
+        expect(calls.filter(VERIFY).map((c) => c.label), c.name).toEqual(["verify:LP-090-0"]);
+        expect(result.applied.map((o) => o.id), c.name).toEqual(["LP-090"]);
+      }
+    }
+  });
+
+  it("a symlink at a protected path fails both gates, the path gate first", async () => {
+    const patch = MODE_PATCHES[0].patch.replace(/src\/link/g, ".mcp.json");
+    const { result } = await run(patch);
+    expect(result.rejected[0].failedGates).toEqual([expect.stringMatching(/^denylist:\.mcp\.json(,|$)/), "denylist:mode:.mcp.json"]);
+    expect(result.rejected[0].missing).toEqual(["explicit human approval — the change touches a denylisted path", "explicit human approval — the change writes a symlink, a gitlink or a file-mode change"]);
+  });
+
+  it("trace-bench mirrors the gate: a verifier run over a corpus patch carries denylistHit exactly when the patch has a mode hit", async () => {
+    const manifest = { fixtures: MODE_PATCHES.map((c, i) => ({ id: `B${80 + i}-m`, kind: "bad", item: "x", patch: c.patch })) };
+    const { result } = await runWorkflow("trace-bench.js", benchArgs(manifest, { arms: ["verifier"], repeat: 1, runId: "0a1b2c3d" }), () => verdict({ evidenceChecked: [{ kind: "diff", ref: "src/a.ts" }] }));
+    const hitBy = new Map(result.runs.map((r) => [r.fixtureId, r.denylistHit]));
+    expect(MODE_PATCHES.map((c, i) => [c.name, hitBy.get(opaqueFixtureId(`B${80 + i}-m`))])).toEqual(MODE_PATCHES.map((c) => [c.name, c.hits.length > 0]));
   });
 });
 

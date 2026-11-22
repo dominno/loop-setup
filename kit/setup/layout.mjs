@@ -35,6 +35,13 @@ export const workspaceDir = (claudeHome, id) => join(workspacesRoot(claudeHome),
 /** A workspace id: a lowercase slug, so it can never climb out of the workspaces root. */
 export const isValidId = (id) => typeof id === "string" && /^[a-z0-9][a-z0-9-]{0,62}$/.test(id);
 
+/** True when path (after lexical normalization) is a workspace directly under this home's workspaces root, with a valid id. */
+export function isWorkspacePath(path, claudeHome) {
+  if (typeof path !== "string" || !path) return false;
+  const p = posix.normalize(path).replace(/\/+$/, "");
+  return posix.dirname(p) === workspacesRoot(claudeHome) && isValidId(posix.basename(p));
+}
+
 /** The absolute state paths under a workspace. */
 export function statePaths(workspace) {
   return Object.fromEntries(Object.entries(STATE_PATHS).map(([k, rel]) => [k, join(workspace, rel)]));
@@ -68,7 +75,6 @@ export function resolveLayout(facts) {
   }
   if (!projectRoot) return fail("NO_REPO", "not inside a git repository", "run this from a project checkout");
 
-  const root = workspacesRoot(claudeHome);
   if (marker) {
     if (!isValidId(marker.id)) return fail("BAD_MARKER", `the clone marker ${MARKER_KEY}=${JSON.stringify(marker.id)} is not a workspace id`, `fix it with \`git config --local ${MARKER_KEY} <id>\``);
     const ws = workspaceDir(claudeHome, marker.id);
@@ -84,8 +90,7 @@ export function resolveLayout(facts) {
 
   const warnings = [];
   if (link.kind === "symlink") {
-    const id = link.realpath ? basename(link.realpath) : null;
-    if (link.realpath && isValidId(id) && link.realpath === join(root, id)) return ok("link", link.realpath, id);
+    if (isWorkspacePath(link.realpath, claudeHome)) return ok("link", link.realpath, basename(link.realpath));
     warnings.push("link-foreign");
   } else if (link.kind === "other") {
     warnings.push("link-not-symlink");
