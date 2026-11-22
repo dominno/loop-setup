@@ -209,6 +209,7 @@ strong rule) and concurrent migration by two processes (under Remaining risks).
 | S03 | Adapter: `stateRepo`, `stateGit` (explicit dirs + guard), `migrate`, init/restore/pull/sync/syncStatus, `lintGate` ceiling | kit/setup/workspace.mjs | same | S02 | done | — |
 | S04 | Driving adapters: exit 2 on refusal, hook lines, the doctor check | kit/setup/commands.mjs, kit/setup/hooks.mjs | same | S03 | done | — |
 | S05 | Docs: where the state repo lives, the refusals and the migration (adoption guide; KIT.md needed no change) | kit/docs/adoption-guide.md | `pnpm exec vitest run scripts/template-docs.test.mjs` | S04 | done | — |
+| S03.1 | Pre-round qualifier TR-09d6d62c3dc9: a global `core.autocrlf=true` turned the template `.gitattributes` into CRLF at restore's checkout, so the guard refused a clean workspace (RED in the restore test); `HARDEN` pins `core.autocrlf=false` | kit/setup/workspace.mjs, kit/setup/staterepo.test.mjs | `pnpm exec vitest run kit/setup/staterepo.test.mjs -t "init puts it"` | S03 | done | — |
 | S06 | Self-verify chain and the post-implementation critic round | — | `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | S05 | planned | — |
 
 RED → GREEN:

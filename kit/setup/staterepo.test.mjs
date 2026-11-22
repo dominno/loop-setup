@@ -95,10 +95,14 @@ describe("the state git dir lives outside the workspace (init, sync, restore)", 
 
     const homeB = mkHome("b1");
     const projB = p.clone("p1-b");
+    // A user's global core.autocrlf=true must not turn the template's LF into CRLF at checkout
+    // (the guard would then refuse a clean workspace).
+    git(T, "config", "--file", join(homeB, "..", ".gitconfig"), "core.autocrlf", "true");
     const r = run(homeB, projB, ["restore"]);
     ok(r);
     expect(JSON.parse(r.stdout)).toMatchObject({ id, restored: true, workspace: workspaceDir(homeB, id) });
     expect(existsSync(join(workspaceDir(homeB, id), ".git"))).toBe(false);
+    expect(readFileSync(join(workspaceDir(homeB, id), ".gitattributes"), "utf8")).toBe(TEMPLATE);
     expect(sgit(homeB, id, "rev-parse", "HEAD")).toBe(sgit(homeA, id, "rev-parse", "HEAD"));
     expect(sgit(homeB, id, "status", "--porcelain")).toBe("");
     expect(readdirSync(stateRoot(homeB))).toEqual([`${id}.git`]); // no temporary git dir left behind

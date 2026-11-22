@@ -19,7 +19,8 @@ import { LEGACY_DIR, LINK_NAME, MARKER_KEY, STATE_BRANCH, isValidId, isWorkspace
 import { GITDIR_ENTRIES, incomingTreeRefusal, stateRepoRefusal } from "./stateguard.mjs";
 
 /** Git for the STATE repository: hardened against the user's global config (hooks, signing, identity). */
-const HARDEN = ["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", "-c", "core.fsmonitor=", "-c", "user.name=loop-setup", "-c", "user.email=loop-setup@localhost"];
+// core.autocrlf=false: a user's global autocrlf must not rewrite the template .gitattributes at checkout.
+const HARDEN = ["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", "-c", "core.fsmonitor=", "-c", "core.autocrlf=false", "-c", "user.name=loop-setup", "-c", "user.email=loop-setup@localhost"];
 /** The caller's environment minus what would point git at another repository, index or object store. */
 const gitEnv = () => {
   const e = { ...process.env };
