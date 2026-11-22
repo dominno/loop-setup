@@ -1,0 +1,184 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1368 768" width="1368" height="768" font-family="DejaVu Sans, Arial, Helvetica, sans-serif">
+  <title>A session and the state across machines</title>
+  <desc>What happens to the loop state in a session and across machines. SessionStart restores an opted-in project's workspace when it is missing (cloned into a temporary git dir and checked by the guard first), heals the link, puts loop-setup on PATH, verifies the record chains and this machine's anchors and anchors what advanced, and injects the rules digest and the wiki catalog with any warning. Each loop-setup write or act takes the store lock, validates, chains and appends the record, and anchors its writer's checkpoint. loop-setup sync locks only its local steps (a one-time migration of an old in-workspace .git; lint, commit, merge of the fetched branch with a union for append-only files, lint) and fetches and pushes outside the lock. The Stop hook anchors what the turn appended and blocks once when the state is unsynced or the state repo is refused. The workspace's files travel on the claude/loop-state branch of the project's remote; each machine keeps its own git dir (state/) and anchors (anchors/). Sharing a workspace needs a policy v4 kit on every machine, one machine for rotation, a sync before a cloud machine ends, and a human for anchors reset.</desc>
+  <defs>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <path d="M24 0H0V24" fill="none" stroke="#e3eaf3" stroke-width="1"/>
+    </pattern>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#1b2f52"/>
+    </marker>
+    <style>
+      .t{fill:#0f2347;font-weight:800}
+      .h{fill:#0f2347;font-weight:800;font-size:18px}
+      .b{fill:#1b2f52;font-size:13px}
+      .s{fill:#3c4f6e;font-size:11.5px}
+      .m{font-family:"DejaVu Sans Mono",Menlo,Consolas,monospace}
+      .box{fill:#fff;stroke:#1b2f52;stroke-width:2}
+      .teal{fill:#fff;stroke:#11807a;stroke-width:2.5}
+      .purp{fill:#fff;stroke:#5b3fb5;stroke-width:2.5}
+      .gold{fill:#fff;stroke:#c48a0e;stroke-width:2.5}
+      .red{fill:#fff6f6;stroke:#d23b3b;stroke-width:2.5}
+      .grn{fill:#f3fbf5;stroke:#2f8a4b;stroke-width:2.5}
+      .ln{stroke:#1b2f52;stroke-width:2;fill:none}
+      .lk{fill:#fff3d6;stroke:#c48a0e;stroke-width:1.2}
+    </style>
+  </defs>
+
+  <rect width="1368" height="768" fill="#f7fafd"/>
+  <rect width="1368" height="768" fill="url(#grid)"/>
+
+  <text x="28" y="56" class="t" font-size="38">ONE SESSION, MANY MACHINES</text>
+  <text x="30" y="80" class="s" font-size="13">where the loop state goes · the workspace travels on claude/loop-state · its git dir and anchors stay on each machine · in a cloud session unsynced state is lost with the machine</text>
+
+  <!-- ============ 1 SESSION START ============ -->
+  <rect x="28" y="100" width="310" height="346" rx="14" class="teal"/>
+  <circle cx="54" cy="128" r="14" fill="#11807a"/><text x="54" y="134" text-anchor="middle" fill="#fff" font-weight="800" font-size="15">1</text>
+  <text x="76" y="134" class="h" style="fill:#11807a">SESSION START</text>
+  <text x="76" y="152" class="s m" font-size="11">SessionStart hook</text>
+  <g class="s">
+    <text x="44" y="180">• no workspace here and the project</text>
+    <text x="56" y="196">opted in? restore it: clone into a temp</text>
+    <text x="56" y="212">git dir, the guard checks the tree first</text>
+    <text x="44" y="238">• heal the .claude/loop-workspace link</text>
+    <text x="44" y="264">• put loop-setup on PATH</text>
+    <text x="44" y="290">• verify the record chains and this</text>
+    <text x="56" y="306">machine's anchors; anchor what advanced,</text>
+    <text x="56" y="322">never over a failure</text>
+    <text x="44" y="348">• inject the rules digest + wiki catalog</text>
+    <text x="44" y="374">• warn when the state is unsynced, the</text>
+    <text x="56" y="390">state repo is refused, or the integrity</text>
+    <text x="56" y="406">check failed</text>
+  </g>
+
+  <path class="ln" d="M340 270H358" marker-end="url(#a)"/>
+
+  <!-- ============ 2 WRITE ============ -->
+  <rect x="362" y="100" width="310" height="346" rx="14" class="purp"/>
+  <circle cx="388" cy="128" r="14" fill="#5b3fb5"/><text x="388" y="134" text-anchor="middle" fill="#fff" font-weight="800" font-size="15">2</text>
+  <text x="410" y="134" class="h" style="fill:#5b3fb5">EVERY WRITE</text>
+  <text x="410" y="152" class="s m" font-size="11">loop-setup write · act</text>
+  <g class="s">
+    <rect x="378" y="166" width="278" height="40" rx="8" class="lk"/>
+    <text x="390" y="183">1 take the store lock (anchors/&lt;id&gt;.lock)</text>
+    <text x="402" y="199">busy: wait 10 s, then refuse</text>
+    <text x="378" y="228">2 validate the draft (schema, evidence gate)</text>
+    <text x="378" y="252">3 chain it: w = this machine's writer,</text>
+    <text x="390" y="268">prev = sha256 of that writer's last line</text>
+    <text x="378" y="292">4 append to trace/records.jsonl</text>
+    <text x="378" y="316">5 anchor this writer's checkpoint, unlock</text>
+  </g>
+  <line x1="378" y1="334" x2="656" y2="334" stroke="#d9d0f0" stroke-width="1.5"/>
+  <g class="s">
+    <text x="378" y="356">in the L3 sandbox a writer cannot write</text>
+    <text x="378" y="372">anchors/: it runs unlocked, the hooks</text>
+    <text x="378" y="388">anchor for it (a fork is a lint error)</text>
+    <text x="378" y="414">wiki, plan and run log are plain files:</text>
+    <text x="378" y="430">edit them, then sync</text>
+  </g>
+
+  <path class="ln" d="M674 270H692" marker-end="url(#a)"/>
+
+  <!-- ============ 3 SYNC ============ -->
+  <rect x="696" y="100" width="310" height="346" rx="14" class="gold"/>
+  <circle cx="722" cy="128" r="14" fill="#c48a0e"/><text x="722" y="134" text-anchor="middle" fill="#fff" font-weight="800" font-size="15">3</text>
+  <text x="744" y="134" class="h" style="fill:#8a5f00">SYNC</text>
+  <text x="744" y="152" class="s m" font-size="11">loop-setup sync</text>
+  <g class="s">
+    <rect x="712" y="166" width="278" height="40" rx="8" class="lk"/>
+    <text x="724" y="183">1 lock: move an old &lt;ws&gt;/.git to</text>
+    <text x="736" y="199">state/&lt;id&gt;.git (once), then unlock</text>
+    <text x="712" y="226">2 fetch claude/loop-state — no lock</text>
+    <rect x="712" y="238" width="278" height="86" rx="8" class="lk"/>
+    <text x="724" y="256">3 lock: lint + wiki-check → commit</text>
+    <text x="736" y="272">→ check the fetched tree → merge</text>
+    <text x="736" y="288">(union for append-only files)</text>
+    <text x="736" y="304">→ lint + wiki-check again, unlock</text>
+    <text x="712" y="344">4 push — no lock</text>
+  </g>
+  <line x1="712" y1="358" x2="990" y2="358" stroke="#ecdcb0" stroke-width="1.5"/>
+  <g class="s">
+    <text x="712" y="378">stops before the push on a red lint, a</text>
+    <text x="712" y="394">refused tree or a merge conflict</text>
+    <text x="712" y="416" font-weight="700" fill="#8a5f00">the lock covers local steps only:</text>
+    <text x="712" y="432" font-weight="700" fill="#8a5f00">a writer never waits on the network</text>
+  </g>
+
+  <path class="ln" d="M1008 270H1026" marker-end="url(#a)"/>
+
+  <!-- ============ 4 STOP ============ -->
+  <rect x="1030" y="100" width="310" height="346" rx="14" class="box"/>
+  <circle cx="1056" cy="128" r="14" fill="#0f2347"/><text x="1056" y="134" text-anchor="middle" fill="#fff" font-weight="800" font-size="15">4</text>
+  <text x="1078" y="134" class="h">STOP</text>
+  <text x="1078" y="152" class="s m" font-size="11">Stop hook</text>
+  <g class="s">
+    <text x="1046" y="180">• anchor what this turn appended</text>
+    <text x="1058" y="196">(verified first, never over a failure)</text>
+    <text x="1046" y="222">• a refused state repo: block, with</text>
+    <text x="1058" y="238">its cause</text>
+    <text x="1046" y="264">• changed files or unpushed commits:</text>
+    <text x="1058" y="280">block once with</text>
+    <text x="1058" y="298" class="m" font-size="11.5" style="fill:#0f2347" font-weight="700">"Run loop-setup sync"</text>
+    <text x="1046" y="324">• at most once per stop</text>
+    <text x="1058" y="340">(stop_hook_active)</text>
+  </g>
+  <rect x="1046" y="364" width="278" height="58" rx="10" fill="#fff6f6" stroke="#d23b3b" stroke-width="1.5"/>
+  <text x="1058" y="388" class="s" style="fill:#b42525" font-weight="700">cloud session: what is not synced</text>
+  <text x="1058" y="406" class="s" style="fill:#b42525" font-weight="700">ends with the container</text>
+
+  <!-- ============ THE STATE ACROSS MACHINES ============ -->
+  <rect x="28" y="462" width="878" height="286" rx="14" class="box"/>
+  <text x="46" y="492" class="t" font-size="16">THE STATE ACROSS MACHINES</text>
+  <text x="340" y="491" class="s">each under <tspan class="m" font-size="11">~/.claude/loop-setup/</tspan> on its own machine</text>
+
+  <rect x="46" y="508" width="282" height="154" rx="12" class="teal"/>
+  <text x="62" y="530" class="b" font-weight="800" style="fill:#11807a">machine A</text>
+  <g>
+    <text x="62" y="554" class="b m" font-size="11.5">workspaces/&lt;id&gt;/</text><text x="62" y="569" class="s">the work tree: wiki, records, plan, log</text>
+    <text x="62" y="593" class="b m" font-size="11.5">state/&lt;id&gt;.git</text><text x="62" y="608" class="s">its git dir, outside the work tree</text>
+    <text x="62" y="632" class="b m" font-size="11.5">anchors/&lt;id&gt;.*</text><text x="62" y="647" class="s">writer id · checkpoints · lock</text>
+  </g>
+
+  <rect x="384" y="530" width="176" height="96" rx="14" class="gold"/>
+  <text x="472" y="556" text-anchor="middle" class="b" font-weight="800" style="fill:#8a5f00">origin</text>
+  <text x="472" y="574" text-anchor="middle" class="s">the project's remote</text>
+  <text x="472" y="598" text-anchor="middle" class="b m" font-size="11.5">claude/loop-state</text>
+  <text x="472" y="614" text-anchor="middle" class="s">files only</text>
+
+  <rect x="606" y="508" width="282" height="154" rx="12" class="purp"/>
+  <text x="622" y="530" class="b" font-weight="800" style="fill:#5b3fb5">machine B</text>
+  <g>
+    <text x="622" y="554" class="b m" font-size="11.5">workspaces/&lt;id&gt;/</text><text x="622" y="569" class="s">the same files, merged</text>
+    <text x="622" y="593" class="b m" font-size="11.5">state/&lt;id&gt;.git</text><text x="622" y="608" class="s">its own git dir</text>
+    <text x="622" y="632" class="b m" font-size="11.5">anchors/&lt;id&gt;.*</text><text x="622" y="647" class="s">its own writer id and checkpoints</text>
+  </g>
+
+  <path class="ln" d="M330 560H380" marker-end="url(#a)"/><text x="355" y="553" text-anchor="middle" class="s">push</text>
+  <path class="ln" d="M380 596H330" marker-end="url(#a)"/><text x="355" y="612" text-anchor="middle" class="s">fetch</text>
+  <path class="ln" d="M602 560H562" marker-end="url(#a)"/><text x="582" y="553" text-anchor="middle" class="s">push</text>
+  <path class="ln" d="M562 596H602" marker-end="url(#a)"/><text x="582" y="612" text-anchor="middle" class="s">fetch</text>
+
+  <g class="s">
+    <text x="46" y="686">• records.jsonl, log.md and loop-run-log.md merge as a union: both sides kept, every writer's chain intact</text>
+    <text x="46" y="708">• anchors never leave their machine, so the tamper evidence is local to the machine that kept them</text>
+    <text x="46" y="730">• a new machine: <tspan class="m" font-size="11">loop-setup install</tspan>, then <tspan class="m" font-size="11">loop-setup restore</tspan> (SessionStart does it for an opted-in project)</text>
+  </g>
+
+  <!-- ============ SHARING RULES ============ -->
+  <rect x="926" y="462" width="414" height="286" rx="14" class="red"/>
+  <text x="944" y="492" class="t" font-size="16" style="fill:#b42525">SHARING ONE WORKSPACE</text>
+  <g class="s">
+    <text x="944" y="520">• every machine needs a kit with policy v4+</text>
+    <text x="956" y="536">before the first 1.1 line is written: an</text>
+    <text x="956" y="552">older kit's lint fails on 1.1 lines, and so</text>
+    <text x="956" y="568">does its sync</text>
+    <text x="944" y="594">• rotate on one machine only: a union of</text>
+    <text x="956" y="610">two rotations duplicates lines</text>
+    <text x="944" y="636">• a real drop of anchored lines (restored</text>
+    <text x="956" y="652">from a remote that is behind) is a human's</text>
+    <text x="956" y="668">step, outside Claude Code:</text>
+    <text x="956" y="686" class="m" font-size="11" style="fill:#0f2347">loop-setup anchors reset --reason …</text>
+    <text x="944" y="712">• check a machine with</text>
+    <text x="956" y="730" class="m" font-size="11" style="fill:#0f2347">loop-setup doctor</text>
+  </g>
+</svg>

@@ -1,0 +1,160 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1368 768" width="1368" height="768" font-family="DejaVu Sans, Arial, Helvetica, sans-serif">
+  <title>TRACE records from claim to durable change</title>
+  <desc>How a claim becomes a durable change. A maker types a claim (factual, measured, causal, predictive, normative, practical); a separate checker gives it a verdict (accept, qualify, revise, defer, reject, each with its required field; no readable verdict is a defer); the evidence gate caps an accept whose evidence is weaker than its claim type demands (reading never counts); loop-setup write appends the record to the append-only store, hash-chained per writer; a consumer action on the latest record (CLEAR, COMMIT, COMMIT_QUALIFIED, QUARANTINE, HOLD, REJECT, REUSE, REAUDIT, and the human-only LAND) makes the durable change. Fail-closed rules: actions are refused on a non-licensing verdict or a record that is not the newest for its claim; a defer is settled only by a separate checker; unattended only accept is applied; LAND and anchors reset are human steps refused inside Claude Code.</desc>
+  <defs>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <path d="M24 0H0V24" fill="none" stroke="#e3eaf3" stroke-width="1"/>
+    </pattern>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#1b2f52"/>
+    </marker>
+    <style>
+      .t{fill:#0f2347;font-weight:800}
+      .h{fill:#0f2347;font-weight:800;font-size:19px}
+      .b{fill:#1b2f52;font-size:13px}
+      .s{fill:#3c4f6e;font-size:11.5px}
+      .m{font-family:"DejaVu Sans Mono",Menlo,Consolas,monospace}
+      .box{fill:#fff;stroke:#1b2f52;stroke-width:2}
+      .teal{fill:#fff;stroke:#11807a;stroke-width:2.5}
+      .purp{fill:#fff;stroke:#5b3fb5;stroke-width:2.5}
+      .gold{fill:#fff;stroke:#c48a0e;stroke-width:2.5}
+      .red{fill:#fff6f6;stroke:#d23b3b;stroke-width:2.5}
+      .grn{fill:#f3fbf5;stroke:#2f8a4b;stroke-width:2.5}
+      .ln{stroke:#1b2f52;stroke-width:2;fill:none}
+    </style>
+  </defs>
+
+  <rect width="1368" height="768" fill="#f7fafd"/>
+  <rect width="1368" height="768" fill="url(#grid)"/>
+
+  <text x="28" y="56" class="t" font-size="38">TRACE RECORDS — FROM CLAIM TO DURABLE CHANGE</text>
+  <text x="30" y="80" class="s" font-size="13">the unit of value is the record · written only via loop-setup · append-only, hash-chained per writer · no durable change without a licensing record and a consumer action</text>
+
+  <!-- ============ 1 CLAIM ============ -->
+  <rect x="28" y="100" width="300" height="324" rx="14" class="teal"/>
+  <circle cx="54" cy="128" r="14" fill="#11807a"/><text x="54" y="134" text-anchor="middle" fill="#fff" font-weight="800" font-size="15">1</text>
+  <text x="76" y="135" class="h" style="fill:#11807a">CLAIM</text>
+  <text x="44" y="164" class="s">a finding, a fix, a fact or a story status,</text>
+  <text x="44" y="179" class="s">typed by its maker:</text>
+  <g font-size="12" class="m">
+    <rect x="44" y="192" width="126" height="26" rx="13" fill="#e8f5f3" stroke="#11807a"/><text x="107" y="210" text-anchor="middle" fill="#0b5f5a">factual</text>
+    <rect x="186" y="192" width="126" height="26" rx="13" fill="#e8f5f3" stroke="#11807a"/><text x="249" y="210" text-anchor="middle" fill="#0b5f5a">measured</text>
+    <rect x="44" y="226" width="126" height="26" rx="13" fill="#e8f5f3" stroke="#11807a"/><text x="107" y="244" text-anchor="middle" fill="#0b5f5a">causal</text>
+    <rect x="186" y="226" width="126" height="26" rx="13" fill="#e8f5f3" stroke="#11807a"/><text x="249" y="244" text-anchor="middle" fill="#0b5f5a">predictive</text>
+    <rect x="44" y="260" width="126" height="26" rx="13" fill="#e8f5f3" stroke="#11807a"/><text x="107" y="278" text-anchor="middle" fill="#0b5f5a">normative</text>
+    <rect x="186" y="260" width="126" height="26" rx="13" fill="#e8f5f3" stroke="#11807a"/><text x="249" y="278" text-anchor="middle" fill="#0b5f5a">practical</text>
+  </g>
+  <text x="44" y="314" class="s">its claim_id names what it is about:</text>
+  <text x="44" y="334" class="s m" font-size="11">critic:&lt;lens&gt;:&lt;slug&gt;</text>
+  <text x="44" y="352" class="s m" font-size="11">loop:&lt;node&gt;</text>
+  <text x="44" y="370" class="s m" font-size="11">wiki:&lt;topic&gt;:&lt;slug&gt;</text>
+  <text x="44" y="400" class="s">the same claim_id again = a newer verdict</text>
+
+  <path class="ln" d="M330 262H352" marker-end="url(#a)"/>
+
+  <!-- ============ 2 VERDICT ============ -->
+  <rect x="356" y="100" width="420" height="324" rx="14" class="purp"/>
+  <circle cx="382" cy="128" r="14" fill="#5b3fb5"/><text x="382" y="134" text-anchor="middle" fill="#fff" font-weight="800" font-size="15">2</text>
+  <text x="404" y="135" class="h" style="fill:#5b3fb5">VERDICT</text>
+  <text x="510" y="134" class="s">from a separate checker, never the maker</text>
+  <g>
+    <text x="374" y="168" class="s" font-weight="700">verdict</text><text x="478" y="168" class="s" font-weight="700">meaning</text><text x="646" y="168" class="s" font-weight="700">must carry</text>
+    <rect x="372" y="178" width="96" height="28" rx="14" fill="#2f8a4b"/><text x="420" y="197" text-anchor="middle" fill="#fff" font-weight="700" font-size="13">accept</text>
+    <text x="478" y="197" class="b" font-size="12">holds as stated</text><text x="646" y="197" class="s m">evidence</text>
+    <rect x="372" y="214" width="96" height="28" rx="14" fill="#5f9e3a"/><text x="420" y="233" text-anchor="middle" fill="#fff" font-weight="700" font-size="13">qualify</text>
+    <text x="478" y="233" class="b" font-size="12">holds, but weaker</text><text x="646" y="233" class="s m">qualifier</text>
+    <rect x="372" y="250" width="96" height="28" rx="14" fill="#c48a0e"/><text x="420" y="269" text-anchor="middle" fill="#fff" font-weight="700" font-size="13">revise</text>
+    <text x="478" y="269" class="b" font-size="12">not as stated</text><text x="646" y="269" class="s m">repair</text>
+    <rect x="372" y="286" width="96" height="28" rx="14" fill="#7a8aa3"/><text x="420" y="305" text-anchor="middle" fill="#fff" font-weight="700" font-size="13">defer</text>
+    <text x="478" y="305" class="b" font-size="12">cannot settle it</text><text x="646" y="305" class="s m">missing</text>
+    <rect x="372" y="322" width="96" height="28" rx="14" fill="#d23b3b"/><text x="420" y="341" text-anchor="middle" fill="#fff" font-weight="700" font-size="13">reject</text>
+    <text x="478" y="341" class="b" font-size="12">refuted</text><text x="646" y="341" class="s m">reason</text>
+  </g>
+  <text x="374" y="378" class="s">only accept and qualify license CLEAR or COMMIT</text>
+  <text x="374" y="396" class="s">no readable verdict, or a checker that died, is a defer —</text>
+  <text x="374" y="411" class="s">never accept, never reject</text>
+
+  <path class="ln" d="M778 262H800" marker-end="url(#a)"/>
+
+  <!-- ============ 3 EVIDENCE GATE ============ -->
+  <rect x="804" y="100" width="536" height="324" rx="14" class="gold"/>
+  <circle cx="830" cy="128" r="14" fill="#c48a0e"/><text x="830" y="134" text-anchor="middle" fill="#fff" font-weight="800" font-size="15">3</text>
+  <text x="852" y="135" class="h" style="fill:#8a5f00">EVIDENCE GATE</text>
+  <text x="1322" y="134" class="s" text-anchor="end">no claim stronger than its evidence</text>
+  <text x="822" y="160" class="s">an accept is capped when its evidence is weaker than its type demands</text>
+  <g>
+    <text x="822" y="186" class="s" font-weight="700">claim type</text><text x="928" y="186" class="s" font-weight="700">accept needs one of</text><text x="1272" y="186" class="s" font-weight="700">else</text>
+    <line x1="822" y1="194" x2="1322" y2="194" stroke="#e5d3a6" stroke-width="1.5"/>
+    <text x="822" y="214" class="b" font-size="12" font-weight="700">factual</text><text x="928" y="214" class="s m" font-size="11">file_line, command, browser, measurement, diff</text><text x="1272" y="214" class="s">defer</text>
+    <text x="822" y="240" class="b" font-size="12" font-weight="700">measured</text><text x="928" y="240" class="s m" font-size="11">measurement</text><text x="1272" y="240" class="s">defer</text>
+    <text x="822" y="266" class="b" font-size="12" font-weight="700">causal</text><text x="928" y="266" class="s m" font-size="11">command, browser, measurement</text><text x="1272" y="266" class="s" font-weight="700" style="fill:#5f7a1e">qualify</text>
+    <text x="822" y="292" class="b" font-size="12" font-weight="700">predictive</text><text x="928" y="292" class="s m" font-size="11">browser, human</text><text x="1272" y="292" class="s" font-weight="700" style="fill:#5f7a1e">qualify</text>
+    <text x="822" y="318" class="b" font-size="12" font-weight="700">normative</text><text x="928" y="318" class="s m" font-size="11">rule, human</text><text x="1272" y="318" class="s">defer</text>
+    <text x="822" y="344" class="b" font-size="12" font-weight="700">practical</text><text x="928" y="344" class="s m" font-size="11">diff</text><text x="1272" y="344" class="s">defer</text>
+  </g>
+  <text x="822" y="378" class="s"><tspan class="m" font-size="11">reading</tspan> (code read, no reproducible pointer) never satisfies the floor</text>
+  <text x="822" y="396" class="s">re-typing the claim never lowers the bar: the stricter outcome is kept</text>
+  <text x="822" y="414" class="s">deterministic code, the same in the writer and every workflow</text>
+
+  <path class="ln" d="M1072 426V438H238V446" marker-end="url(#a)"/>
+
+  <!-- ============ 4 RECORD ============ -->
+  <rect x="28" y="450" width="420" height="298" rx="14" class="box"/>
+  <circle cx="54" cy="478" r="14" fill="#0f2347"/><text x="54" y="484" text-anchor="middle" fill="#fff" font-weight="800" font-size="15">4</text>
+  <text x="76" y="485" class="h">RECORD</text>
+  <text x="186" y="484" class="s m" font-size="11.5">loop-setup write &lt;result.json&gt;</text>
+  <rect x="44" y="500" width="388" height="152" rx="10" fill="#0f2347"/>
+  <g class="m" font-size="11.5" style="fill:#dfe8f5">
+    <text x="58" y="522"><tspan fill="#9fc3ff">record_id</tspan>     TR-&lt;12 hex&gt; (a content hash)</text>
+    <text x="58" y="540"><tspan fill="#9fc3ff">claim_id</tspan>      · <tspan fill="#9fc3ff">claim_type</tspan></text>
+    <text x="58" y="558"><tspan fill="#9fc3ff">final_status</tspan>  · reason · qualifier</text>
+    <text x="58" y="576"><tspan fill="#9fc3ff">evidence[]</tspan>    kind · ref · result</text>
+    <text x="58" y="594"><tspan fill="#9fc3ff">missing</tspan> · <tspan fill="#9fc3ff">repair</tspan> · <tspan fill="#9fc3ff">failed_gates</tspan></text>
+    <text x="58" y="612"><tspan fill="#9fc3ff">provenance</tspan>    commit · tree · workflow</text>
+    <text x="58" y="630"><tspan fill="#ffd27a">chain</tspan>         { w, prev }   policy v4</text>
+  </g>
+  <text x="44" y="676" class="s">trace/records.jsonl: append-only, never hand-edited</text>
+  <text x="44" y="694" class="s">a correction is a new record that <tspan class="m" font-size="11">revises</tspan> the old one</text>
+  <text x="44" y="712" class="s">each writer's lines chain; anchors outside the workspace catch</text>
+  <text x="44" y="730" class="s">an edit or a deletion on the machine that kept them</text>
+
+  <path class="ln" d="M450 600H472" marker-end="url(#a)"/>
+
+  <!-- ============ 5 CONSUMER ACTION ============ -->
+  <rect x="476" y="450" width="500" height="298" rx="14" class="grn"/>
+  <circle cx="502" cy="478" r="14" fill="#2f8a4b"/><text x="502" y="484" text-anchor="middle" fill="#fff" font-weight="800" font-size="15">5</text>
+  <text x="524" y="485" class="h" style="fill:#2f8a4b">ACTION → DURABLE CHANGE</text>
+  <text x="494" y="508" class="s m" font-size="11.5">loop-setup act &lt;record&gt; &lt;consumer&gt; &lt;ACTION&gt; --ref …</text>
+  <g>
+    <text x="494" y="534" class="s" font-weight="700">action</text><text x="650" y="534" class="s" font-weight="700">on</text><text x="780" y="534" class="s" font-weight="700">what it changes</text>
+    <line x1="494" y1="541" x2="958" y2="541" stroke="#b9dcc4" stroke-width="1.5"/>
+    <text x="494" y="558" class="b m" font-size="12" font-weight="700">CLEAR</text><text x="650" y="558" class="s">accept, qualify</text><text x="780" y="558" class="s">node done · finding fixed</text>
+    <text x="494" y="578" class="b m" font-size="12" font-weight="700">COMMIT</text><text x="650" y="578" class="s">accept</text><text x="780" y="578" class="s">a wiki fact is filed</text>
+    <text x="494" y="598" class="b m" font-size="12" font-weight="700">COMMIT_QUALIFIED</text><text x="650" y="598" class="s">accept, qualify</text><text x="780" y="598" class="s">filed with its qualifier</text>
+    <text x="494" y="618" class="b m" font-size="12" font-weight="700">QUARANTINE</text><text x="650" y="618" class="s">qualify, revise, defer</text><text x="780" y="618" class="s">held in quarantine.md</text>
+    <text x="494" y="638" class="b m" font-size="12" font-weight="700">HOLD · REJECT</text><text x="650" y="638" class="s">any</text><text x="780" y="638" class="s">withheld · not filed</text>
+    <text x="494" y="658" class="b m" font-size="12" font-weight="700">REUSE · REAUDIT</text><text x="650" y="658" class="s">any</text><text x="780" y="658" class="s">same tree · evidence changed</text>
+    <text x="494" y="678" class="b m" font-size="12" font-weight="700" style="fill:#5b3fb5">LAND</text><text x="650" y="678" class="s">accept, qualify</text><text x="780" y="678" class="s" style="fill:#5b3fb5" font-weight="700">human only: change landed</text>
+  </g>
+  <text x="494" y="704" class="s">a verdict is advice about warrant, not authority: a consumer</text>
+  <text x="494" y="720" class="s">may HOLD an accepted claim (a denylisted path still needs you)</text>
+  <text x="494" y="736" class="s">make the change first, then record the action for it</text>
+
+  <!-- ============ FAIL CLOSED ============ -->
+  <rect x="1000" y="450" width="340" height="298" rx="14" class="red"/>
+  <text x="1018" y="482" class="t" font-size="17" style="fill:#b42525">FAIL CLOSED</text>
+  <g class="s" font-size="11.5">
+    <text x="1018" y="510">• CLEAR and COMMIT are refused on a</text>
+    <text x="1030" y="526">non-licensing verdict, a superseded record,</text>
+    <text x="1030" y="542">or one that is not the newest for its claim</text>
+    <text x="1018" y="566">• a defer is settled only by a separate</text>
+    <text x="1030" y="582">checker given the missing evidence</text>
+    <text x="1018" y="606">• unattended (L3) only accept is applied;</text>
+    <text x="1030" y="622">a qualify is held</text>
+    <text x="1018" y="646">• a rejected draft blocks the whole batch:</text>
+    <text x="1030" y="662">act on none of its findings</text>
+    <text x="1018" y="686">• human steps: LAND and anchors reset</text>
+    <text x="1030" y="702">are refused inside Claude Code; a release</text>
+    <text x="1030" y="718">of an escalated node is a human HOLD</text>
+  </g>
+</svg>
