@@ -47,6 +47,19 @@ describe("stateRepoRefusal (pure)", () => {
     expect(r?.cause).toMatch(/^topics\/\.gitattributes: /);
   });
 
+  it("matches the names case-insensitively (git opens them case-insensitively on macOS and Windows)", () => {
+    const variant = (path) => stateRepoRefusal({ ...clean, attributes: [...clean.attributes, { path, content: "* filter=evil\n" }] })?.cause;
+    expect(variant("topics/.GitAttributes")).toMatch(/^topics\/\.GitAttributes: /);
+    expect(variant(".GITATTRIBUTES")).toMatch(/^\.GITATTRIBUTES: /); // beside the template, a root variant is refused too
+    expect(stateRepoRefusal({ ...clean, gitmodules: [".GITMODULES"] })?.cause).toMatch(/^\.GITMODULES: /);
+    expect(stateRepoRefusal({ ...clean, gitmodules: ["topics/.GitModules"] })?.cause).toMatch(/^topics\/\.GitModules: /);
+    expect(incomingTreeRefusal({ paths: [".gitattributes", "topics/.GITATTRIBUTES"], rootAttributes: template })?.cause).toMatch(/^topics\/\.GITATTRIBUTES: /);
+    expect(incomingTreeRefusal({ paths: [".gitattributes", ".GITATTRIBUTES"], rootAttributes: template })?.cause).toMatch(/^\.GITATTRIBUTES: /);
+    expect(incomingTreeRefusal({ paths: [".gitattributes", "x/.GitModules"], rootAttributes: template })?.cause).toMatch(/^x\/\.GitModules: /);
+    // a variant alone, without the exact root file, is a missing template
+    expect(incomingTreeRefusal({ paths: [".GITATTRIBUTES"], rootAttributes: null })?.cause).toMatch(/^\.gitattributes is missing/);
+  });
+
   it("refuses any .gitmodules", () => {
     expect(stateRepoRefusal({ ...clean, gitmodules: [".gitmodules"] })?.cause).toMatch(/^\.gitmodules: /);
     expect(stateRepoRefusal({ ...clean, gitmodules: ["trace/.gitmodules"] })?.cause).toMatch(/^trace\/\.gitmodules: /);

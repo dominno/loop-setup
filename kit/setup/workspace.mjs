@@ -60,9 +60,10 @@ function treeFiles(workTree) {
       if (e.name === ".git") continue;
       const p = join(dir, e.name);
       const rel = relative(workTree, p).split(sep).join("/");
+      const name = e.name.toLowerCase(); // git opens these case-insensitively on macOS and Windows
       if (e.isDirectory()) walk(p);
-      else if (e.name === ".gitattributes") attributes.push({ path: rel, content: e.isFile() ? readFileSync(p, "utf8") : "" }); // a symlink never matches the template
-      else if (e.name === ".gitmodules") gitmodules.push(rel);
+      else if (name === ".gitattributes") attributes.push({ path: rel, content: e.isFile() ? readFileSync(p, "utf8") : "" }); // a symlink never matches the template
+      else if (name === ".gitmodules") gitmodules.push(rel);
     }
   };
   walk(workTree);
@@ -162,11 +163,11 @@ function legacyHead(gitDir) {
  * HEAD (plain files) and its remote URL, checked (same HEAD, connected), renamed into place, and only
  * then is the old one removed. Any failure before the rename leaves the old layout as it was.
  */
-export function migrate(loc) {
+export function migrate(loc, { remote = null } = {}) {
   if (loc.kind !== "inside") return loc;
   const legacy = loc.gitDir;
   const head = legacyHead(legacy);
-  const url = rawGit(["config", "--file", join(legacy, "config"), "--get", "remote.origin.url"], { cwd: loc.workTree, allowFail: true }).stdout.trim();
+  const url = remote; // the project's origin, as init sets it — never the old config's URL, which is as untrusted as the rest
   const tmp = tmpGitDir(loc.claudeHome);
   const stage = mkdtempSync(join(tmpdir(), "loop-mig-"));
   try {
@@ -177,7 +178,7 @@ export function migrate(loc) {
     if (lkind(join(legacy, "packed-refs")) === "file") copyFileSync(join(legacy, "packed-refs"), join(tmp, "packed-refs"));
     writeFileSync(join(tmp, "HEAD"), head.raw);
     const repo = { gitDir: tmp, workTree: loc.workTree };
-    if (url) stateGit(repo, ["remote", "add", "origin", url]);
+    if (url) stateGit(repo, ["remote", "add", "--", "origin", url]);
     stateGit(repo, ["read-tree", "HEAD"]);
     stateGit(repo, ["fsck", "--connectivity-only", "--no-dangling", "--no-progress"]);
     const now = stateGit(repo, ["rev-parse", "HEAD"]).stdout.trim();
@@ -306,7 +307,7 @@ function initStateRepo(stage, tmp, remote, message) {
   rawGit(["init", "-q", "--template=", "-b", STATE_BRANCH, `--separate-git-dir=${tmp}`, stage]);
   rmSync(join(stage, ".git")); // the gitfile: the git dir is always named explicitly
   const repo = { gitDir: tmp, workTree: stage };
-  if (remote) stateGit(repo, ["remote", "add", "origin", remote]);
+  if (remote) stateGit(repo, ["remote", "add", "--", "origin", remote]);
   stateGit(repo, ["add", "-A"]);
   stateGit(repo, ["commit", "-q", "--no-verify", "-m", message]);
 }
@@ -372,7 +373,7 @@ export function remoteHasState(remote, branch = STATE_BRANCH) {
 }
 
 /** The state repo of a workspace already on this machine, migrated out of the workspace when it still has <ws>/.git. */
-const localRepo = (claudeHome, ws, workspaceId) => migrate(stateRepo({ claudeHome, workspace: ws, workspaceId }));
+const localRepo = (claudeHome, ws, workspaceId, projectRoot) => migrate(stateRepo({ claudeHome, workspace: ws, workspaceId }), { remote: projectRoot ? originUrl(projectRoot) : null });
 
 /**
  * Bring the workspace onto this machine from the project's remote and bind it. A workspace that
@@ -386,7 +387,7 @@ export function restore({ cwd = process.cwd(), env = process.env } = {}) {
   const { projectRoot, claudeHome } = facts;
   if (facts.marker?.exists) {
     const ws = workspaceDir(claudeHome, facts.marker.id);
-    const loc = localRepo(claudeHome, ws, facts.marker.id);
+    const loc = localRepo(claudeHome, ws, facts.marker.id, projectRoot);
     const pulled = pull(openRepo(loc));
     return { id: facts.marker.id, workspace: ws, restored: false, pulled, ...(loc.migrated ? { migrated: loc.gitDir } : {}), ...bind(projectRoot, facts.marker.id, ws, claudeHome) };
   }
@@ -421,7 +422,7 @@ export function restore({ cwd = process.cwd(), env = process.env } = {}) {
     const ws = workspaceDir(claudeHome, meta.id);
     if (existsSync(ws)) {
       cleanup();
-      const loc = localRepo(claudeHome, ws, meta.id);
+      const loc = localRepo(claudeHome, ws, meta.id, projectRoot);
       const pulled = pull(openRepo(loc));
       return { id: meta.id, workspace: ws, restored: false, pulled, ...(loc.migrated ? { migrated: loc.gitDir } : {}), ...bind(projectRoot, meta.id, ws, claudeHome) };
     }
@@ -510,7 +511,7 @@ export function boundWorkspace({ cwd = process.cwd(), env = process.env } = {}) 
 export function sync({ cwd = process.cwd(), env = process.env, message, force = false, push = true, now = new Date().toISOString() } = {}) {
   const layout = boundWorkspace({ cwd, env });
   const ws = layout.workspace;
-  const loc = localRepo(layout.claudeHome, ws, layout.workspaceId);
+  const loc = localRepo(layout.claudeHome, ws, layout.workspaceId, layout.projectRoot);
   const repo = openRepo(loc);
   const migrated = loc.migrated ? { migrated: loc.gitDir } : {};
   const before = lintGate(ws);

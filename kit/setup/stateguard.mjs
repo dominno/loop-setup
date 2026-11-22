@@ -40,7 +40,8 @@ export const ALLOWED_CONFIG = new Set([
 export const allowedConfigKey = (key) => ALLOWED_CONFIG.has(String(key));
 
 const sha256 = (text) => createHash("sha256").update(text).digest("hex");
-const isNamed = (name) => (path) => path === name || path.endsWith(`/${name}`);
+/** Whether a path's last segment is `name`, ignoring case: git opens these files case-insensitively on macOS and Windows. */
+const isNamed = (name) => (path) => path.split("/").pop().toLowerCase() === name;
 
 function rootAttributesRefusal(content) {
   if (content === null || content === undefined) return { cause: `.gitattributes is missing — put the kit template back (${TEMPLATE_PATH})` };
@@ -52,8 +53,8 @@ function rootAttributesRefusal(content) {
 function treeRefusal(paths, rootAttributes) {
   const root = rootAttributesRefusal(paths.includes(".gitattributes") ? rootAttributes : null);
   if (root) return root;
-  const nested = paths.find((p) => p !== ".gitattributes" && isNamed(".gitattributes")(p));
-  if (nested) return { cause: `${nested}: only the root .gitattributes (the kit template) is allowed in a workspace — remove it` };
+  const nested = paths.find((p) => p !== ".gitattributes" && isNamed(".gitattributes")(p)); // a case variant at the root too
+  if (nested) return { cause: `${nested}: only the root .gitattributes (the kit template, that exact name) is allowed in a workspace — remove it` };
   const modules = paths.find(isNamed(".gitmodules"));
   if (modules) return { cause: `${modules}: a workspace has no submodules — remove it` };
   return null;

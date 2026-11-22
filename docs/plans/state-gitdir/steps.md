@@ -210,7 +210,9 @@ strong rule) and concurrent migration by two processes (under Remaining risks).
 | S04 | Driving adapters: exit 2 on refusal, hook lines, the doctor check | kit/setup/commands.mjs, kit/setup/hooks.mjs | same | S03 | done | — |
 | S05 | Docs: where the state repo lives, the refusals and the migration (adoption guide; KIT.md needed no change) | kit/docs/adoption-guide.md | `pnpm exec vitest run scripts/template-docs.test.mjs` | S04 | done | — |
 | S03.1 | Pre-round qualifier TR-09d6d62c3dc9: a global `core.autocrlf=true` turned the template `.gitattributes` into CRLF at restore's checkout, so the guard refused a clean workspace (RED in the restore test); `HARDEN` pins `core.autocrlf=false` | kit/setup/workspace.mjs, kit/setup/staterepo.test.mjs | `pnpm exec vitest run kit/setup/staterepo.test.mjs -t "init puts it"` | S03 | done | — |
-| S06 | Self-verify chain and the post-implementation critic round | — | `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | S05 | planned | — |
+| S06 | Self-verify chain and the post-implementation critic round | — | `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | S05 | done | — |
+| S06.1 | Post-round TR-972c44ec1b85 (qualify): the guard matched `.gitattributes`/`.gitmodules` case-sensitively, so a nested or `.gitmodules` case variant passed on a case-insensitive file system; names now compare lowercased (work-tree walk and both pure rules), only the exact root `.gitattributes` is the template | kit/setup/stateguard.mjs, kit/setup/workspace.mjs, kit/setup/stateguard.test.mjs | `pnpm exec vitest run kit/setup/stateguard.test.mjs -t case-insensitively` | S06 | done | — |
+| S06.2 | Post-round TR-18b8caf62785 (qualify): migration carried `remote.origin.url` from the untrusted old config into the new git dir; it now takes the project's origin (as init does), and `remote add` passes `--` | kit/setup/workspace.mjs, kit/setup/staterepo.test.mjs | `pnpm exec vitest run kit/setup/staterepo.test.mjs -t poisoned` | S06 | done | — |
 
 RED → GREEN:
 - Before S02, `pnpm exec vitest run kit/setup/stateguard.test.mjs kit/setup/layout.test.mjs
@@ -231,3 +233,19 @@ Live evidence (this machine, read-only): the new `doctor` on the real workspace 
 …/workspaces/loop-setup-e3ed255a/.git — it moves to …/state/loop-setup-e3ed255a.git at the next
 sync or restore`, and moves nothing (the live kit is still the old one; the move happens at the first
 sync with a kit that has this change).
+
+Post-implementation critic round (tree 8072ee5bd85748a2, HEAD 81b72fc; single-pass reviewer, code-only):
+- `completion` accept: nothing confirmed at blocker, none deferred or revised, no reviewer failed;
+  `notRechecked` = TR-67a4bf436ad6, TR-ba38c0ce4290 (completeness-lens records from 2026-10-31,
+  unrelated to C3; the completeness critic was off).
+- The five pre-round findings were re-checked against the code and not re-raised.
+- Two confirmed important findings, both fixed (S06.1, S06.2), RED first:
+  - TR-972c44ec1b85 (qualify): case variants of a nested `.gitattributes` or any `.gitmodules` passed
+    the guard; on APFS/NTFS git opens them case-insensitively (the skeptic showed it with a
+    case-folding LD_PRELOAD shim, not a real volume). RED: the new pure-function test failed.
+  - TR-18b8caf62785 (qualify): the migration laundered the old config's `remote.origin.url` into
+    the trusted git dir; pull/sync then followed it (reproduced). RED: the poisoned-migration test
+    with a foreign URL failed (`remote.origin.url` was the foreign repo).
+- Refuted: TR-c2e1780acd08 (SessionStart swallowing non-refusal errors) — not actioned.
+- Nice-to-have, left as a risk: before migration, the hooks and doctor run `git status` in the old
+  `<ws>/.git` behind a check-then-use guard (a write between the guard and git is a race).

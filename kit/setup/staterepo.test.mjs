@@ -219,6 +219,10 @@ describe("a workspace in the old layout (<ws>/.git) migrates at its next sync or
     writeFileSync(join(legacy, "objects/info/alternates"), `${join(T, "nowhere")}\n`);
     mkdirSync(join(legacy, "hooks"), { recursive: true });
     writeFileSync(join(legacy, "hooks/post-commit"), `#!/bin/sh\ntouch ${M}/legacy-hook\n`, { mode: 0o755 });
+    // A foreign remote URL in the old config must not be carried into the trusted git dir.
+    const foreign = join(T, "foreign.git");
+    git(T, "init", "-q", "--bare", foreign);
+    git(T, "config", "--file", join(legacy, "config"), "remote.origin.url", foreign);
     ok(run(home, proj, ["write", "-"], draft("demo:m-poisoned")));
     const s = run(home, proj, ["sync"]);
     ok(s);
@@ -228,6 +232,8 @@ describe("a workspace in the old layout (<ws>/.git) migrates at its next sync or
     expect(sh(T, "git", ["config", "--file", join(stateGitDir(home, id), "config"), "--get", "extensions.worktreeconfig"]).status).not.toBe(0);
     expect(sgit(home, id, "log", "--format=%H %s", "--skip=1")).toBe(before.log); // the history, then the new commit on top
     expect(sgit(home, id, "rev-parse", "HEAD~1")).toBe(before.head);
+    expect(sgit(home, id, "config", "--get", "remote.origin.url")).toBe(p.remote); // the project's origin, never the old config's
+    expect(git(T, "--git-dir", foreign, "for-each-ref")).toBe(""); // nothing was pushed to the planted URL
     expect(markers()).toEqual([]);
   });
 
