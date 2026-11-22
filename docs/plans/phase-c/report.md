@@ -304,3 +304,79 @@ Remaining risks: listed in `docs/plans/docs-refresh/steps.md`.
 
 **C6 status: done** (green checkpoint: tests and chain pass, the round accepts with no open blocker,
 no records to write, sync done, commits pushed).
+
+## C7 — phase C closed: its status recorded, the closing rounds, the PR
+
+Pre-flight: `loop-setup doctor` exit 0 (no fail).
+
+Commits: ffbe2ac ("Status fazy C"), 74a9b73 (the closing round's fix), and this report section.
+
+Success criteria and evidence:
+1. **Status fazy C.** `docs/plans/home-workspace/implementation-plan.md` has a Polish "Status fazy C"
+   section like phase B's: the goals that landed with their commits, the evidence, and what stays open.
+   The C7 row and the closing rounds were added after the fix.
+2. **Closing critic rounds** (code-only, completeness critic on, `git diff main...HEAD`). Three rounds
+   ran, each reviewed by agents separate from the Lead:
+   - Round 1 (tree 85e6004a93ea3ee7, HEAD ffbe2ac): `completion` accept, no findings, `notRechecked`
+     empty. The journal showed the all-lens reviewer ran 4 shell commands and the completeness critic 3,
+     over 50 files and about 4,400 lines. The Lead's `priorEvidence` had said the per-goal rounds already
+     accepted, which invites confirmation. So the Lead did not rely on this round. No records.
+   - Round 2 (same tree; neutral evidence, the seams between goals named): `completion` accept, with
+     one confirmed important finding, TR-d3aba003bc20 (accept, regression):
+     - `sync` held the store lock across the fetch (capped at 120 s), the push (300 s) and the fetch
+       after it, while a writer waits 10 s for the lock.
+     - The skeptic reproduced it with a slow pre-receive hook: a concurrent `loop-setup write` exited 1
+       after 10.09 s, and the record was not stored.
+     - It came in with C4 (180a3d5).
+     - Also one nice-to-have: a repeated CLEAR (A, B, A) is deduped against the older A, so the latest
+       CLEAR read for landing is B. Left, under risks.
+   - Fix 74a9b73 (test first):
+     - `pull` is split into `fetchState` (network) and `mergeFetched` (local).
+     - `sync` holds the lock for the migration, and for lint, commit, merge and lint; it fetches before
+       those steps and pushes after them.
+     - `restore` of a workspace that is already here fetches outside the lock and merges inside it.
+     - RED: probes in the remote's pre-receive hook and in `uploadpack.packObjectsHook` saw
+       `fetch held` and `push held` for sync, and `fetch held` for restore. GREEN: `free`.
+   - Round 3, the re-check (tree 958b9a15cc97c30b, HEAD 74a9b73; a separate checker): `completion`
+     accept, nothing confirmed, deferred or revised, `notRechecked` empty, TR-d3aba003bc20 not
+     re-raised. Two nice-to-haves, both left (scope control) and listed under risks:
+     - the tests do not cover the post-push fetch, a write between the two lock sections, or a refusal
+       inside a lock section;
+     - the post-push `update-ref` now runs outside the lock and re-reads `HEAD`. A second sync on the
+       same machine that commits in that window can have its unpushed commit recorded as pushed.
+   - TR-d3aba003bc20 CLEARed (TA-f457e11003fe, ref 74a9b73). No critic-panel blocker is open. The latest
+     blocker records are TR-73f53598baa2 (CLEARed), and TR-e8de2cbc87d7 and TR-6d5893f4387f (revise,
+     re-adjudicated and HELD).
+3. **Full chain, sync, PR.** The chain is green at 74a9b73 (table below), `loop-setup sync` is done,
+   and the PR to `main` is open (link in the final report); not merged.
+
+Commands (HEAD 74a9b73):
+
+| command | exit | summary |
+|---|---|---|
+| `pnpm exec vitest run kit/setup/chainrepo.test.mjs` | 0 | 14 passed (2 new; both failed before 74a9b73) |
+| `pnpm exec vitest run kit/setup/staterepo.test.mjs kit/setup/lifecycle.test.mjs kit/setup/anchors.test.mjs` | 0 | 44 passed |
+| `pnpm typecheck` | 0 | `tsc --noEmit` |
+| `pnpm lint` | 0 | `eslint .` |
+| `pnpm test` | 0 | 26 files, 1017 passed |
+| `pnpm build` | 0 | first-load client JS 143.2 KB gzip (budget 155 KB) |
+| `pnpm test:e2e` | 0 | 16 passed |
+| `loop-setup lint` / `wiki-check` / `doctor` | 0 / 0 / 0 fail | 196 records, 0 errors, 0 warnings |
+| `loop-setup verify-kit` | 2 | waived (see Pre-flight) |
+
+| Critic | Severity | Verdict | Finding | Evidence | Recommended action |
+|---|---|---|---|---|---|
+| regression (round 2) | important | accept (TR-d3aba003bc20) | `sync` held the store lock across fetch and push; a writer gives up after 10 s | workspace.mjs:520, anchors.mjs:94; skeptic repro: write exit 1 after 10.09 s, record not stored | fixed in 74a9b73; re-checked by round 3; CLEARed |
+| regression (round 2) | nice-to-have | — | a repeated CLEAR (A, B, A) is deduped, so landing reads B | lib.mjs dedupe, landed.mjs `.pop()` | left (risk) |
+| qa-e2e (round 3) | nice-to-have | — | lock tests skip the post-push fetch, interleaving and refusals | chainrepo.test.mjs | left (risk) |
+| regression (round 3) | nice-to-have | — | post-push `update-ref` re-reads HEAD outside the lock | workspace.mjs:546-548 | left (risk); fix: push and update-ref an explicit SHA |
+
+Remaining risks (in addition to C3–C6's):
+- After 74a9b73, two concurrent syncs on one machine can record an unpushed HEAD as pushed (the
+  post-push `update-ref` reads HEAD outside the lock). Then `syncStatus` says synced if the second
+  push fails. Follow-up: read the SHA before the push and push and update-ref that SHA.
+- The lock tests do not cover a write between sync's two lock sections or a refusal inside one.
+- A CLEAR repeated with an earlier note (A, B, A) is deduped, so landing reads B's tokens.
+
+**C7 status: done** (green checkpoint: tests and chain pass, the closing rounds accept with no open
+blocker and `notRechecked` empty, the fix CLEARed, records written, sync done, commits pushed, PR open).

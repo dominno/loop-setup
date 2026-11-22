@@ -210,12 +210,23 @@ był `loop-setup doctor` bez faili (w każdym celu: 0 faili).
 | C4 — magazyn rekordów odporny na manipulację | 00587ca, 180a3d5, 6269bf0, c03a9da, 70eb16c | Schemat `trace-lite/1.1`: `chain {w, prev}` per pisarz i `provenance.workspace`; replay sprawdza każdy łańcuch; punkty kontrolne per pisarz (i zbiór id linii 1.0) kotwiczone w `~/.claude/loop-setup/anchors/<id>.jsonl` przez pisarza, SessionStart i Stop; lint, doctor i SessionStart zgłaszają spadek liczby lub przepisanie, nigdy nie kotwiczą ponad błędem; `loop-setup anchors reset --reason` (krok człowieka); polityka v4. |
 | C5 — „done” liczy się dopiero po wylądowaniu | 90414f4, be096e0 | CLEAR zapisuje `patch-id` łatki (i `commit`, gdy pętla commitowała); `plan-ready`, `plan-items`, `plan-lint` biorą port „landed” (przodek HEAD, ten sam patch-id w historii — merge, squash tej zmiany, cherry-pick — albo trailer `Plan: <węzeł>`); inaczej „unknown” i `[done-unlanded]`; stare węzły jako landed z `[done-legacy]`; ludzka akcja `LAND` (polityka v5). |
 | C6 — dokumentacja w modelu zainstalowanego kitu | da592aa, 4ac72c6 | Pięć infografik bez `pnpm trace` i „copy” (PNG z SVG, Playwright, DSF 2); ścieżka A z szablonu na dwa sposoby z dokładnymi komendami (sprawdzona w świeżym klonie); test, że każda podkomenda `loop-setup` jest w przewodnikach. |
+| C7 — zamknięcie fazy | ffbe2ac, 74a9b73 | Ta sekcja, rundy zamykające nad `git diff main...HEAD` i poprawka, którą znalazły: `sync` i `restore` pobierają i wypychają poza blokadą magazynu, więc pisarz nigdy nie czeka na wolny remote; PR do `main`. |
 
 **Rundy krytyków:** każdy z celów C3–C6 przeszedł rundę przed implementacją (C3, C4 i C5 po
 akceptacji projektu przez użytkownika), rundę po implementacji i rundy sprawdzające poprawki (osobny
 sprawdzający), wszystkie zakończone `completion` accept; potwierdzone ustalenia naprawione test-first i
 CLEARowane; rekordy `revise` (CLEAR na nich jest niedozwolony) rozstrzygnięte jawnie przez osobną
 rundę i HOLDowane z notatką. Szczegóły i macierze: `docs/plans/phase-c/report.md`.
+
+**Rundy zamykające (C7, code-only, z krytykiem kompletności):**
+
+- Pierwsza zakończyła się `accept` bez ustaleń, ale recenzent wykonał tylko 4 komendy na ~4400
+  linii. Lead się na niej nie oparł.
+- Druga, z neutralnymi dowodami i wskazanymi stykami między celami, potwierdziła jedno ważne ustalenie
+  (TR-d3aba003bc20, regresja z C4): `sync` trzymał blokadę magazynu przez fetch i push, a pisarz czeka
+  na nią 10 s, więc zapis podczas wolnego pusha kończył się błędem i rekord przepadał.
+- Poprawka 74a9b73 powstała test-first. Trzecia runda (osobny sprawdzający) zakończyła się `accept`
+  bez potwierdzonych ustaleń i z pustym `notRechecked`, a rekord został CLEARowany.
 
 **Otwarte po fazie C:**
 
@@ -227,7 +238,11 @@ rundę i HOLDowane z notatką. Szczegóły i macierze: `docs/plans/phase-c/repor
 - Dowód z C4 jest lokalny dla maszyny (kotwice); wstawienie linii, autorstwo i manipulacja samymi
   kotwicami nie są wykrywane; `anchors/**` bez własnych reguł Edit-deny instalatora; pisarz w
   sandboksie L3 działa bez blokady (fork łańcucha = błąd lint); okno przy przejmowaniu przeterminowanej
-  blokady; `sync` trzyma blokadę magazynu przez push.
+  blokady.
+- Po 74a9b73: `update-ref` po pushu czyta HEAD poza blokadą, więc dwa równoległe `sync` na jednej
+  maszynie mogą oznaczyć niewypchnięty commit jako wypchnięty (poprawka: push i `update-ref` jawnego
+  SHA). Testy blokady nie obejmują zapisu między dwiema sekcjami blokady ani odmowy wewnątrz sekcji.
+  CLEAR powtórzony ze starszą notatką (A, B, A) jest deduplikowany, więc „landed” czyta notatkę B.
 - C3: przed migracją hooki i doctor uruchamiają `git status` w starym `<ws>/.git` za strażnikiem
   sprawdzającym przed użyciem; równoległe migracje nie są serializowane; brak testu na prawdziwym
   APFS/NTFS (nazwy porównywane małymi literami).
