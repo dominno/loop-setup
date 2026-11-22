@@ -53,6 +53,23 @@ export function shimText(nodePath, kitDir) {
 /** The read-only subcommands the kit allows without a prompt (exact forms, never a blanket grant). */
 const READ_ONLY = ["where", "doctor", "verify-kit", "lint", "query", "show", "tree-id", "metrics", "status", "plan-ready", "plan-lint", "plan-items", "plan-drift", "story-lint", "wiki-check", "l3-check", "claim-token"];
 
+const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+
+/**
+ * Why a user's settings cannot take the owned entries, or null when they can: `hooks` and
+ * `permissions` must be absent, null or plain objects, every `hooks` event and `permissions.allow` /
+ * `permissions.deny` an array. Anything else (an array where an object belongs — JSON drops the
+ * entries merged onto it) would lose or corrupt the kit's hooks and rules.
+ */
+export function settingsShapeProblem(settings) {
+  const { hooks, permissions } = settings || {};
+  if (hooks != null && !isPlainObject(hooks)) return `hooks is ${Array.isArray(hooks) ? "an array" : typeof hooks}, not an object`;
+  for (const [event, groups] of Object.entries(hooks || {})) if (!Array.isArray(groups)) return `hooks.${event} is not an array`;
+  if (permissions != null && !isPlainObject(permissions)) return `permissions is ${Array.isArray(permissions) ? "an array" : typeof permissions}, not an object`;
+  for (const k of ["allow", "deny"]) if (permissions?.[k] != null && !Array.isArray(permissions[k])) return `permissions.${k} is not an array`;
+  return null;
+}
+
 /** The lifecycle subcommands that write the Claude home (kit, commands, hooks, settings): a human's step, denied to the agent. */
 const LIFECYCLE_WRITES = ["install", "uninstall"];
 

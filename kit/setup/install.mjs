@@ -17,7 +17,7 @@ import { lifecycleRefusal } from "./guard.mjs";
 import { NOT_OBJECT, readSettingsFile } from "./settings.mjs";
 import { manifestPathFor } from "./kitfiles.mjs";
 import { redactRemote } from "./integrity.mjs";
-import { DEV_ONLY, ownedSettings as ownedSettingsFor, readKitTree, renderInstall, sha256, shimText } from "./kittree.mjs";
+import { DEV_ONLY, ownedSettings as ownedSettingsFor, readKitTree, renderInstall, settingsShapeProblem, sha256, shimText } from "./kittree.mjs";
 
 // The install contract (renderKit, loopTickCommand, the owned settings) lives in the pure kittree.mjs,
 // shared with verify-kit; it is re-exported here for existing callers.
@@ -141,10 +141,13 @@ export function readSettings(path) {
 
 /** settings merged with the owned entries; a settings.json whose hooks or permissions have the wrong shape throws a clear error. */
 function mergedSettings(path, settings, owned, previous) {
+  const wrong = (why) => new Error(`${path}: its hooks or permissions have the wrong shape (${why}) — fix it first; loop-setup changed nothing`);
+  const problem = settingsShapeProblem(settings);
+  if (problem) throw wrong(problem);
   try {
     return mergeSettings(settings, owned, previous);
   } catch (e) {
-    throw new Error(`${path}: its hooks or permissions have the wrong shape (${e.message}) — fix it first; loop-setup changed nothing`);
+    throw wrong(e.message);
   }
 }
 

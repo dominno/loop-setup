@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import { KIT_ROOT } from "./facts.mjs";
 import { install, uninstall } from "./install.mjs";
 import { lifecycleRefusal } from "./guard.mjs";
-import { ownedSettings, shellArg, shimText } from "./kittree.mjs";
+import { ownedSettings, settingsShapeProblem, shellArg, shimText } from "./kittree.mjs";
 import { isWorkspacePath, workspaceDir, workspacesRoot } from "./layout.mjs";
 import { ensureLink } from "./workspace.mjs";
 import { sessionStart } from "./hooks.mjs";
@@ -131,7 +131,7 @@ describe("2. a settings.json that parses but is not a plain object is refused be
     expect(existsSync(join(home, "commands"))).toBe(false);
   }, SLOW);
 
-  it.each([['{"hooks":"x"}'], ['{"permissions":{"allow":"x"}}'], ['{"hooks":{"SessionStart":"x"}}']])("an object whose hooks or permissions have the wrong shape (%s): install refuses before any write", (text) => {
+  it.each([['{"hooks":"x"}'], ['{"permissions":{"allow":"x"}}'], ['{"hooks":{"SessionStart":"x"}}'], ['{"hooks":[]}'], ['{"permissions":[]}'], ['{"permissions":{"deny":{}}}']])("an object whose hooks or permissions have the wrong shape (%s): install refuses before any write", (text) => {
     const home = mkHome();
     writeFileSync(join(home, "settings.json"), text);
     expect(() => install({ from: kitSrc, claudeHome: home, env: humanEnv(home) })).toThrow(/settings\.json: its hooks or permissions have the wrong shape .*loop-setup changed nothing/);
@@ -142,11 +142,22 @@ describe("2. a settings.json that parses but is not a plain object is refused be
   it("uninstall over a wrongly shaped settings.json keeps the commands and the manifest", () => {
     const home = mkHome();
     install({ from: kitSrc, claudeHome: home, env: humanEnv(home) });
-    writeFileSync(join(home, "settings.json"), '{"permissions":{"deny":{}}}');
-    expect(() => uninstall({ claudeHome: home, env: humanEnv(home) })).toThrow(/wrong shape/);
-    expect(existsSync(join(home, "commands/dream.md"))).toBe(true);
-    expect(existsSync(join(home, "loop-setup/installed.json"))).toBe(true);
+    for (const text of ['{"permissions":{"deny":{}}}', '{"hooks":[]}', '{"permissions":[]}']) {
+      writeFileSync(join(home, "settings.json"), text);
+      expect(() => uninstall({ claudeHome: home, env: humanEnv(home) }), text).toThrow(/wrong shape/);
+      expect(existsSync(join(home, "commands/dream.md"))).toBe(true);
+      expect(existsSync(join(home, "loop-setup/installed.json"))).toBe(true);
+    }
   }, SLOW);
+
+  it("settingsShapeProblem (pure): hooks/permissions absent, null or plain objects; every event, allow and deny an array", () => {
+    for (const ok of [{}, { hooks: null, permissions: null }, { hooks: { Stop: [] }, permissions: { allow: [], deny: [] } }, { permissions: { additionalDirectories: ["/x"] } }]) expect(settingsShapeProblem(ok), JSON.stringify(ok)).toBe(null);
+    expect(settingsShapeProblem({ hooks: [] })).toBe("hooks is an array, not an object");
+    expect(settingsShapeProblem({ hooks: "x" })).toBe("hooks is string, not an object");
+    expect(settingsShapeProblem({ hooks: { Stop: {} } })).toBe("hooks.Stop is not an array");
+    expect(settingsShapeProblem({ permissions: [] })).toBe("permissions is an array, not an object");
+    expect(settingsShapeProblem({ permissions: { deny: "x" } })).toBe("permissions.deny is not an array");
+  });
 
   it("uninstall refuses too, before removing anything", () => {
     const home = mkHome();

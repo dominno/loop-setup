@@ -25,11 +25,12 @@ owned deny rules), `kit/setup/layout.mjs` (`isWorkspacePath`, also used by `reso
 
 | id | description | scope | check | after | status | commit |
 |---|---|---|---|---|---|---|
-| S01 | CLAUDECODE refusal for the session's own home (realpath, alias-proof) in `install()`/`uninstall()`; owned deny rules for install/uninstall (bare and `*/loop-setup` spellings) and `Bash(node *loop-setup.mjs*)` | kit/setup/guard.mjs, kit/setup/install.mjs, kit/setup/kittree.mjs, kit/setup/commands.mjs, kit/setup/hardening.test.mjs, kit/setup/integrity.test.mjs | `pnpm exec vitest run kit/setup/hardening.test.mjs` | — | done | |
-| S02 | A settings.json that is not a plain object, or whose hooks/permissions have the wrong shape, is refused before any change | kit/setup/install.mjs, kit/setup/settings.mjs, kit/setup/hardening.test.mjs | same | — | done | |
-| S03 | Shell-safe paths: `shellArg` quotes (double, or single when the path holds `"`) and rejects metacharacters; used by the hook commands, the shim and the CLAUDE_ENV_FILE PATH line; validated before any write | kit/setup/kittree.mjs, kit/setup/install.mjs, kit/setup/hooks.mjs, kit/setup/hardening.test.mjs | same | — | done | |
-| S04 | `ensureLink(projectRoot, ws, claudeHome)` repairs only a link whose target is directly under `workspacesRoot(claudeHome)` (`isWorkspacePath`) | kit/setup/layout.mjs, kit/setup/workspace.mjs, kit/setup/hooks.mjs, kit/setup/hardening.test.mjs | same | — | done | |
+| S01 | CLAUDECODE refusal for the session's own home (realpath, alias-proof) in `install()`/`uninstall()`; owned deny rules for install/uninstall (bare and `*/loop-setup` spellings) and `Bash(node *loop-setup.mjs*)` | kit/setup/guard.mjs, kit/setup/install.mjs, kit/setup/kittree.mjs, kit/setup/commands.mjs, kit/setup/hardening.test.mjs, kit/setup/integrity.test.mjs | `pnpm exec vitest run kit/setup/hardening.test.mjs` | — | done | b7e805e |
+| S02 | A settings.json that is not a plain object, or whose hooks/permissions have the wrong shape, is refused before any change | kit/setup/install.mjs, kit/setup/settings.mjs, kit/setup/hardening.test.mjs | same | — | done | b7e805e |
+| S03 | Shell-safe paths: `shellArg` quotes (double, or single when the path holds `"`) and rejects metacharacters; used by the hook commands, the shim and the CLAUDE_ENV_FILE PATH line; validated before any write | kit/setup/kittree.mjs, kit/setup/install.mjs, kit/setup/hooks.mjs, kit/setup/hardening.test.mjs | same | — | done | b7e805e |
+| S04 | `ensureLink(projectRoot, ws, claudeHome)` repairs only a link whose target is directly under `workspacesRoot(claudeHome)` (`isWorkspacePath`) | kit/setup/layout.mjs, kit/setup/workspace.mjs, kit/setup/hooks.mjs, kit/setup/hardening.test.mjs | same | — | done | b7e805e |
 | S05 | Self-verify chain and the post-implementation critic round | — | `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | S01–S04 | in-progress | |
+| S05.1 | Post-implementation round TR-6acaf502b2c6 (qualify): array-valued `hooks`/`permissions` passed the implicit shape check (an array is truthy; JSON drops the merged entries) — explicit pure `settingsShapeProblem` before the merge | kit/setup/kittree.mjs, kit/setup/install.mjs, kit/setup/hardening.test.mjs | `pnpm exec vitest run kit/setup/hardening.test.mjs` | S05 | done | |
 
 Tests first: every new test in `kit/setup/hardening.test.mjs` failed against the old behaviour
 (temporary stubs with today's semantics: 15 failed, 1 — "a different home still works" — passed, as
@@ -39,6 +40,10 @@ gains the lifecycle rules (root cause: criterion 1 adds owned rules; still an ex
 `cli.test.mjs`'s `tempRepo` copies `guard.mjs` (the CLI's module closure grew). No other change.
 
 ## Remaining risks
+
+- A wrapper that clears CLAUDECODE (`env -u CLAUDECODE loop-setup install …`) passes both the refusal
+  and the `*/loop-setup install` deny spellings (round-1 nice-to-have, not acted on): the guard is for
+  an agent following instructions; the sandbox is the boundary.
 
 - The refusal and the deny rules are policy guards for an agent that follows instructions, not a
   boundary against a same-user Bash that unsets CLAUDECODE or edits settings; the sandbox is that boundary.
