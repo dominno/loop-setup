@@ -193,3 +193,47 @@ push, rotation and clock order, the v4 upgrade rule, the live kit still 2dd64dd)
 
 **C4 status: done** (green checkpoint: tests and chain pass, the last round accepts with no open
 blocker, records written, sync done, commits pushed).
+
+## C5 — a done node counts for readiness only once its change has landed in HEAD
+
+Design and steps: `docs/plans/landed-nodes/steps.md` (approved by the user at the checkpoint with a
+new `LAND` action, policy v4 → v5; then revised with the pre-implementation round's findings).
+
+Pre-flight: `loop-setup doctor` exit 0 (no fail).
+
+Commits: 90414f4 (S01–S04), be096e0 (S05.1–S05.4: the pre-round findings).
+
+Success criteria and evidence:
+1. **What CLEAR records.** `kit/loop.md` step 10: the CLEAR note carries `patch-id <git patch-id
+   --stable < patch>` and, when the loop committed, `commit <sha>`; `loop-iteration.js` and its
+   `<loop-verifier>` block are untouched (the Lead composes the note).
+2. **The landed port.** `kit/trace/landed.mjs` (pure): landed when a human LAND names the node, its
+   commit is an ancestor of HEAD, a non-merge commit in HEAD's history has its patch-id (covers merge,
+   squash of exactly that change, cherry-pick), or a non-merge commit carries the trailer `Plan:
+   <node>`; otherwise unknown (git errors included). `readyIds`, `planItems`, `planViolations` take the
+   port; only landed satisfies `after`; `plan-lint` warns `[done-unlanded]`; a human `LAND` overrides
+   (refused under CLAUDECODE, for another consumer, without `--ref`, on a non-latest record). The git
+   adapter is in `kit/trace/cli.mjs`.
+3. **Real git** (`landedrepo.test.mjs`, 10 scenarios): merge, squash and cherry-pick count as landed;
+   an unmerged branch does not (dependent not ready, `plan-items` refuses, `plan-lint` warns); a later
+   change next to the hunk keeps it landed while `git apply --reverse --check` fails. Also: a
+   diverged-context cherry-pick is unknown (fail safe) until a trailer lands it; a body-quoted or merge
+   trailer does not land; no history scan when nothing waits.
+4. **Legacy.** A done node whose (unchained, pre-change) CLEAR has no patch-id or commit counts as
+   landed with `[done-legacy]`; a chained CLEAR that lost its tokens is unknown, never legacy.
+
+Commands (HEAD be096e0):
+
+| command | exit | summary |
+|---|---|---|
+| `pnpm exec vitest run kit/trace/landed.test.mjs kit/trace/landedrepo.test.mjs` | 0 | 2 files, 24 tests |
+| `pnpm typecheck` | 0 | `tsc --noEmit` |
+| `pnpm lint` | 0 | `eslint .`, 0 warnings |
+| `pnpm test` | 0 | 26 files, 1012 tests |
+| `pnpm build` | 0 | Compiled successfully |
+| `pnpm test:e2e` | 0 | 16 passed (no UI in scope: no evidence for this change) |
+| `loop-setup verify-kit` | 2 | waived (see Pre-flight) |
+
+Pre-implementation round (tree 761352ceda8dea66): `completion` accept; 2 confirmed important
+(qualify) and 5 revised findings, all taken (S05.1–S05.4; `steps.md`, *Revisions*); TR-8072f9693313
+refuted (note tokens are hex-validated before reaching git).
