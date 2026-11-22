@@ -50,8 +50,16 @@ tier by moving rows.
 
 ## 3. The status lifecycle
 
-- **`blocked` → `ready`**: when every `after:` dependency is `done`. This is computed, never set
-  by hand.
+- **`blocked` → `ready`**: when every `after:` dependency is `done` **and its change has landed in
+  HEAD**. This is computed, never set by hand. The loop applies a node's patch to your working tree
+  and CLEARs it with the patch's `patch-id`; it lands once a commit in HEAD's history has that
+  patch-id (a merge, a squash of exactly that change, a cherry-pick), its recorded commit is an
+  ancestor of HEAD, or a commit carries the trailer `Plan: <node>`. Until then `plan-lint` warns
+  `[done-unlanded]` and the dependents wait. When git cannot show it (a combined commit without the
+  trailer, a rebase or cherry-pick onto lines that changed next to the hunk, a rename or deletion),
+  you record it in a terminal outside Claude Code (permanent, on the node's latest record):
+  `loop-setup act <the node's record> human LAND --ref <node> --note "<commit or reason>"`. A node
+  done before this rule existed counts as landed (`plan-lint` notes `[done-legacy]`).
 - **`ready` → `in-progress`**: when the loop dispatches the node. Its notes get a claim,
   `claim:<owner>@<run-id>` (from `loop-setup claim-token`).
 - **`in-progress` → `done`**: only with the node's own verifier `accept`/`qualify` and a `CLEAR`.

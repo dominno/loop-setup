@@ -6,6 +6,17 @@
   "$defs": {
     "recordId": { "type": "string", "pattern": "^TR-[0-9a-f]{12}$" },
     "isoTime": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$" },
+    "schemaVersion": { "type": "string", "enum": ["trace-lite/1.0", "trace-lite/1.1"], "description": "1.1 (policy v4) adds chain and provenance.workspace; 1.0 lines replay unchanged and carry neither" },
+    "chain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["w", "prev"],
+      "description": "the per-writer hash chain (schema 1.1, filled by the writer only): w is this machine's writer id for the store (not the verdict's writer_id), prev the sha256 of that writer's previous line as stored, or null for its first",
+      "properties": {
+        "w": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+        "prev": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
     "evidenceItem": {
       "type": "object",
       "additionalProperties": false,
@@ -30,7 +41,7 @@
       ],
       "properties": {
         "kind": { "const": "record" },
-        "schema_version": { "const": "trace-lite/1.0" },
+        "schema_version": { "$ref": "#/$defs/schemaVersion" },
         "policy_version": { "type": "string", "pattern": "^\\d+$" },
         "record_id": { "$ref": "#/$defs/recordId" },
         "created_at": { "$ref": "#/$defs/isoTime" },
@@ -58,9 +69,11 @@
             "workflow": { "type": "string", "minLength": 1 },
             "branch": { "type": "string" },
             "run": { "type": "string" },
-            "tree": { "type": "string", "pattern": "^[0-9a-f]{16}$", "description": "working-tree fingerprint (loop-setup tree-id): HEAD + uncommitted changes; equal ids mean identical code" }
+            "tree": { "type": "string", "pattern": "^[0-9a-f]{16}$", "description": "working-tree fingerprint (loop-setup tree-id): HEAD + uncommitted changes; equal ids mean identical code" },
+            "workspace": { "type": ["string", "null"], "description": "the workspace id the writer wrote into, or null for a scratch store (schema 1.1, filled by the writer only)" }
           }
         },
+        "chain": { "$ref": "#/$defs/chain" },
         "revises": { "$ref": "#/$defs/recordId" },
         "reuses": { "$ref": "#/$defs/recordId" }
       }
@@ -71,14 +84,15 @@
       "required": ["kind", "schema_version", "action_id", "created_at", "record_id", "consumer", "action"],
       "properties": {
         "kind": { "const": "action" },
-        "schema_version": { "const": "trace-lite/1.0" },
+        "schema_version": { "$ref": "#/$defs/schemaVersion" },
         "action_id": { "type": "string", "pattern": "^TA-[0-9a-f]{12}$" },
         "created_at": { "$ref": "#/$defs/isoTime" },
         "record_id": { "$ref": "#/$defs/recordId" },
         "consumer": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
-        "action": { "type": "string", "enum": ["CLEAR", "HOLD", "COMMIT", "COMMIT_QUALIFIED", "QUARANTINE", "REJECT", "REUSE", "REAUDIT"] },
+        "action": { "type": "string", "enum": ["CLEAR", "HOLD", "COMMIT", "COMMIT_QUALIFIED", "QUARANTINE", "REJECT", "REUSE", "REAUDIT", "LAND"] },
         "ref": { "type": "string" },
-        "note": { "type": "string" }
+        "note": { "type": "string" },
+        "chain": { "$ref": "#/$defs/chain" }
       }
     }
   }

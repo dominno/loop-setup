@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1368 768" width="1368" height="768" font-family="DejaVu Sans, Arial, Helvetica, sans-serif">
   <title>/loop and adopting it in a new project</title>
-  <desc>The four trust levels (L0 draft to L3 unattended, which needs the whole checklist and a measured checker), the denylist the loop never touches on its own, one loop iteration in six steps, and the six adoption steps with the first-session commands.</desc>
+  <desc>The four trust levels (L0 draft to L3 unattended, which needs the whole checklist and a measured checker), the denylist the loop never touches on its own, one loop iteration in six steps, and the six adoption steps (install the kit once, init the project's workspace, wire verify, merge settings, check, first session) with the first-session commands.</desc>
   <defs>
     <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="#e3eaf3" stroke-width="1"/></pattern>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1b2f52"/></marker>
@@ -43,7 +43,7 @@
     <text x="28" y="470">L2 needs §1–7 of loop-checklist.md and one</text>
     <text x="28" y="486">logged L1 run first · never auto-merge</text>
     <text x="28" y="508">L3 needs every section, plus a measured checker:</text>
-    <text x="28" y="524"><tspan class="m">pnpm trace l3-check</tspan> after <tspan class="m">/bench-checkers</tspan></text>
+    <text x="28" y="524"><tspan class="m">loop-setup l3-check</tspan> after <tspan class="m">/bench-checkers</tspan></text>
   </g>
 
   <rect x="28" y="546" width="424" height="202" rx="14" fill="#fff6f6" stroke="#d23b3b" stroke-width="2.5"/>
@@ -59,7 +59,7 @@
     <rect x="144" y="664" width="104" height="28" rx="14" class="chip"/><text x="196" y="683" text-anchor="middle">migrations</text>
     <rect x="256" y="664" width="80" height="28" rx="14" class="chip"/><text x="296" y="683" text-anchor="middle" class="m" font-size="12">.claude/</text>
     <rect x="344" y="664" width="92" height="28" rx="14" class="chip"/><text x="390" y="683" text-anchor="middle" class="m" font-size="12">CLAUDE.md</text>
-    <rect x="44" y="700" width="84" height="28" rx="14" class="chip"/><text x="86" y="719" text-anchor="middle" class="m" font-size="12">scripts/</text>
+    <rect x="44" y="700" width="84" height="28" rx="14" class="chip"/><text x="86" y="719" text-anchor="middle" class="m" font-size="10">kit/ scripts/</text>
     <rect x="136" y="700" width="116" height="28" rx="14" class="chip"/><text x="194" y="719" text-anchor="middle" class="m" font-size="12">package.json</text>
     <rect x="260" y="700" width="176" height="28" rx="14" class="chip"/><text x="348" y="719" text-anchor="middle" font-size="12">test/lint/ts configs</text>
   </g>
@@ -109,27 +109,27 @@
     <g font-size="13.5" fill="#1b2f52">
       <rect x="962" y="130" width="382" height="56" rx="12" fill="#fff" stroke="#1b2f52" stroke-width="2"/>
       <circle cx="990" cy="158" r="16" fill="#0f2347"/><text x="990" y="164" text-anchor="middle" fill="#fff" font-weight="800" font-size="15">1</text>
-      <text x="1020" y="154" font-weight="700">Check command names, then copy</text><text x="1020" y="172" class="s">CLAUDE.md, .claude/, scripts/trace/, docs/</text>
+      <text x="1020" y="154" font-weight="700">Install the kit once per machine</text><text x="1020" y="172" class="s m">loop-setup install --from &lt;kit repo&gt;</text>
 
       <rect x="962" y="194" width="382" height="56" rx="12" fill="#fff" stroke="#1b2f52" stroke-width="2"/>
       <circle cx="990" cy="222" r="16" fill="#11807a"/><text x="990" y="228" text-anchor="middle" fill="#fff" font-weight="800" font-size="15">2</text>
-      <text x="1020" y="218" font-weight="700">Wire verify to your scripts</text><text x="1020" y="236" class="s">CLAUDE.md Main commands + package.json</text>
+      <text x="1020" y="218" font-weight="700">Bind the project to a workspace</text><text x="1020" y="236" class="s">loop-setup init → kept on claude/loop-state</text>
 
       <rect x="962" y="258" width="382" height="56" rx="12" fill="#fff" stroke="#1b2f52" stroke-width="2"/>
       <circle cx="990" cy="286" r="16" fill="#5b3fb5"/><text x="990" y="292" text-anchor="middle" fill="#fff" font-weight="800" font-size="15">3</text>
-      <text x="1020" y="282" font-weight="700">Start memory empty</text><text x="1020" y="300" class="s">clear seeded facts, empty TRACE store + quarantine</text>
+      <text x="1020" y="282" font-weight="700">Wire verify to your scripts</text><text x="1020" y="300" class="s">CLAUDE.md Main commands + package.json</text>
 
       <rect x="962" y="322" width="382" height="56" rx="12" fill="#fff" stroke="#1b2f52" stroke-width="2"/>
       <circle cx="990" cy="350" r="16" fill="#c48a0e"/><text x="990" y="356" text-anchor="middle" fill="#fff" font-weight="800" font-size="15">4</text>
-      <text x="1020" y="346" font-weight="700">Start an empty story map</text><text x="1020" y="364" class="s">formats kept, content cleared</text>
+      <text x="1020" y="346" font-weight="700">Merge settings.json</text><text x="1020" y="364" class="s">your real commands allowed, the denies kept</text>
 
       <rect x="962" y="386" width="382" height="56" rx="12" fill="#fff" stroke="#1b2f52" stroke-width="2"/>
       <circle cx="990" cy="414" r="16" fill="#2f8a4b"/><text x="990" y="420" text-anchor="middle" fill="#fff" font-weight="800" font-size="15">5</text>
-      <text x="1020" y="410" font-weight="700">Merge settings.json</text><text x="1020" y="428" class="s">your real commands allowed, the denies kept</text>
+      <text x="1020" y="410" font-weight="700">Check the install and the binding</text><text x="1020" y="428" class="s">loop-setup doctor · loop-setup verify-kit</text>
 
       <rect x="962" y="450" width="382" height="56" rx="12" fill="#fff" stroke="#1b2f52" stroke-width="2"/>
       <circle cx="990" cy="478" r="16" fill="#0f2347"/><text x="990" y="484" text-anchor="middle" fill="#fff" font-weight="800" font-size="15">6</text>
-      <text x="1020" y="474" font-weight="700">First session</text><text x="1020" y="492" class="s">the commands below, then pnpm test green</text>
+      <text x="1020" y="474" font-weight="700">First session</text><text x="1020" y="492" class="s">the commands below; restore elsewhere</text>
     </g>
   </g>
   <rect x="962" y="522" width="382" height="226" rx="14" fill="#14284a"/>
@@ -139,8 +139,8 @@
     <text x="984" y="600">/scan-project-docs</text>
     <text x="984" y="624">/write-goal &lt;task&gt;</text>
     <text x="984" y="648">/multi-agent-dev &lt;task&gt;</text>
-    <text x="984" y="672">/qa-pass</text>
-    <text x="984" y="696">/dream</text>
+    <text x="984" y="672">/dream</text>
+    <text x="984" y="696">loop-setup sync</text>
   </g>
-  <text x="984" y="730" class="m" font-size="11.5" fill="#9fb1cc">guide: docs/adoption-guide.md</text>
+  <text x="984" y="730" class="m" font-size="11.5" fill="#9fb1cc">guide: kit/docs/adoption-guide.md</text>
 </svg>

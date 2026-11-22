@@ -8,7 +8,10 @@ import { runHook } from "./hooks.mjs";
 import { verifyKit } from "./verifykit.mjs";
 import { postureSummary, sandboxPosture } from "./sandbox.mjs";
 import { settingsSources } from "./settings.mjs";
-import { init, linkIgnored, linkTracked, originUrl, remoteHasState, restore, sync, syncStatus } from "./workspace.mjs";
+import { StateRepoRefused, init, linkIgnored, linkTracked, originUrl, remoteHasState, restore, stateRepo, sync, syncStatus } from "./workspace.mjs";
+import { resetAnchors, storeIntegrity, storeKey } from "./anchors.mjs";
+import { lifecycleRefusal } from "./guard.mjs";
+import { realpathSync } from "node:fs";
 
 const USAGE = `loop-setup — the loop kit, installed in ~/.claude with one workspace per project
 
@@ -20,6 +23,10 @@ const USAGE = `loop-setup — the loop kit, installed in ~/.claude with one work
   loop-setup init [--from-legacy] [--id <id>]          create this project's workspace and bind it
   loop-setup restore                                   clone the workspace from ${STATE_BRANCH} and bind it
   loop-setup sync [--message <m>] [--no-push] [--force]  commit, merge ${STATE_BRANCH}, lint, push
+  loop-setup anchors reset --reason "<why>"            acknowledge a real drop in the record store (a restore from a
+                                                       remote that is behind): this machine's anchors move aside and a
+                                                       new file records the reason (a human's step: refused from inside
+                                                       Claude Code)
   loop-setup where [--json]                            show the kit, project and workspace paths
   loop-setup doctor [--json]                           check the install and this project's binding
   loop-setup verify-kit [--json]                       check the installed kit against a commit on its remote's main or a
@@ -113,8 +120,24 @@ export function doctor({ cwd = process.cwd(), env = process.env } = {}) {
     }
   })();
   add(`.gitignore carries /${LINK_NAME}`, committedIgnore, committedIgnore ? "" : "only the .git/info/exclude backup ignores it", committedIgnore ? "ok" : "warn");
-  if (existsSync(join(layout.workspace, ".git"))) {
-    const s = syncStatus(layout.workspace);
+  // Where the workspace's git dir is (phase C, goal C3). A refused or conflicting state repo stops
+  // here: the sync checks below would run git on it.
+  const STATE_CHECK = "state repo outside the workspace";
+  const loc = stateRepo({ claudeHome, workspace: layout.workspace, workspaceId: layout.workspaceId });
+  if (loc.kind === "none") add(STATE_CHECK, false, "no state repo — cannot sync, re-create it with init or restore");
+  else if (loc.kind === "conflict") add(STATE_CHECK, false, `refused — ${loc.cause}`);
+  else {
+    let s = null;
+    try {
+      s = syncStatus(loc);
+    } catch (e) {
+      if (!(e instanceof StateRepoRefused)) throw e;
+      add(STATE_CHECK, false, `refused — ${e.refusal}`);
+      return checks;
+    }
+    if (loc.kind === "outside") add(STATE_CHECK, true, loc.gitDir);
+    else if (loc.kind === "inside") add(STATE_CHECK, true, `${loc.gitDir} — it moves to ${loc.target} at the next sync or restore`, "warn");
+    else add(STATE_CHECK, true, `${loc.gitDir} — a workspace outside the workspaces root has no id, so its git dir stays in it`, "warn");
     add(`workspace synced to ${STATE_BRANCH}`, s.synced, s.hasRemote ? `${s.dirty} changed, ${s.ahead} unpushed` : "no remote configured", s.synced ? "ok" : "warn");
     const remote = originUrl(layout.projectRoot);
     if (remote) {
@@ -124,7 +147,19 @@ export function doctor({ cwd = process.cwd(), env = process.env } = {}) {
       const norm = normalizeRemote(remote);
       add("auto-restore on session start", auto.includes(norm), auto.includes(norm) ? norm : `install with --auto-restore ${norm} (cloud sessions start empty)`, auto.includes(norm) ? "ok" : "warn");
     }
-  } else add("workspace is a git repository", false, "cannot sync — re-create it with init or restore");
+  }
+  // Policy v4: the store's chains and this machine's anchors (read-only: doctor never anchors).
+  const CHAIN_CHECK = "record store chain and anchors";
+  try {
+    const r = storeIntegrity({ claudeHome, workspace: layout.workspace, workspaceId: layout.workspaceId });
+    const last = r.resets[r.resets.length - 1];
+    const resetNote = last ? `; reset ${last.at}: ${last.reason}` : "";
+    if (r.errors.length) add(CHAIN_CHECK, false, `${r.errors[0]}${r.errors.length > 1 ? ` (+${r.errors.length - 1} more)` : ""}`);
+    else if (r.warnings.length) add(CHAIN_CHECK, true, `${r.warnings[0]}${resetNote}`, "warn");
+    else add(CHAIN_CHECK, true, `${r.anchored} checkpoint(s) anchored${resetNote}`);
+  } catch (e) {
+    add(CHAIN_CHECK, false, `the check could not run: ${e.message || e}`);
+  }
   return checks;
 }
 
@@ -183,6 +218,33 @@ export async function runLifecycle(cmd, argv) {
       else if (r.ok) print(`verify-kit: ok — the installed kit (${KIT_ROOT}) matches ${r.commit.slice(0, 12)} (on ${r.protectedBy.join(", ")}) of ${r.remote}: ${r.checked.files} files, ${r.checked.commands} commands, ${r.checked.settings} owned settings entries`);
       else print(`verify-kit: ${r.code === "TAMPERED" ? "TAMPERED" : "cannot verify"} — ${r.problems.length} problem(s)\n${r.problems.map((p) => `  - ${p}`).join("\n")}`);
       return r.ok ? 0 : r.code === "TAMPERED" ? 1 : 2;
+    }
+    if (cmd === "anchors") {
+      if (pos[0] !== "reset" || typeof flags.reason !== "string" || !flags.reason.trim()) {
+        print('usage: loop-setup anchors reset --reason "<why the count dropped>"');
+        return 2;
+      }
+      const home = claudeHomeOf(env);
+      const resolved = (p) => {
+        try {
+          return realpathSync(p);
+        } catch {
+          return p;
+        }
+      };
+      const why = lifecycleRefusal({ cmd: "anchors reset", claudecode: env.CLAUDECODE, targetHome: resolved(home), sessionHome: resolved(claudeHomeOf(env)), step: "acknowledging a dropped record count is a human's step: run it in a terminal outside Claude Code" });
+      if (why) {
+        process.stderr.write(`${why}\n`);
+        return 2;
+      }
+      const layout = currentLayout({ env });
+      if (!layout.ok || layout.mode === "legacy") {
+        process.stderr.write("loop-setup anchors reset: this project has no bound workspace\n");
+        return 2;
+      }
+      const key = storeKey({ claudeHome: home, storePath: join(layout.workspace, "trace/records.jsonl"), workspace: layout.workspace, workspaceId: layout.workspaceId });
+      print(resetAnchors({ claudeHome: home, key, reason: flags.reason.trim() }), true);
+      return 0;
     }
     if (cmd === "doctor") {
       const checks = doctor({ env });

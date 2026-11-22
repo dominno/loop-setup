@@ -145,6 +145,28 @@ describe("policy page ↔ code", () => {
     expect(readPolicyVersion()).toBeGreaterThanOrEqual(1);
   });
 
+  // The policy moved to v5 (C5's LAND action); the v4 contents this test pins are unchanged.
+  it("policy v4: the page documents the per-writer chain the schema defines", () => {
+    expect(readPolicyVersion()).toBeGreaterThanOrEqual(4);
+    expect(schema.$defs.schemaVersion.enum).toEqual(["trace-lite/1.0", "trace-lite/1.1"]);
+    expect(Object.keys(schema.$defs.chain.properties).sort()).toEqual(["prev", "w"]);
+    for (const kind of ["record", "action"]) {
+      expect(schema.$defs[kind].properties.schema_version.$ref).toBe("#/$defs/schemaVersion");
+      expect(schema.$defs[kind].properties.chain.$ref).toBe("#/$defs/chain");
+    }
+    expect(schema.$defs.record.properties.provenance.properties.workspace).toBeDefined();
+    expect(page).toMatch(/\*\*Tamper evidence \(policy v4\)\*\*/);
+    expect(page).toMatch(/`chain: \{ w, prev \}`/);
+    expect(page).toMatch(/trace-lite\/1\.1/);
+  });
+
+  it("policy v5: the page declares 5 and documents the human LAND action the schema and the writer allow", () => {
+    expect(readPolicyVersion()).toBe(5);
+    expect(schema.$defs.action.properties.action.enum).toContain("LAND");
+    expect(ACTION_ALLOWED.LAND).toEqual(["accept", "qualify"]);
+    expect(page).toMatch(/\*\*Human landing\*\* \(policy v5/);
+  });
+
   it("the evidence-standard table matches EVIDENCE_POLICY", () => {
     const rows = [...page.matchAll(/^\| (factual|measured|causal|predictive|normative|practical) \| [^|]*\| ([^|]+) \| (defer|qualify) \|$/gm)];
     const parsed = Object.fromEntries(rows.map((r) => [r[1], { acceptNeeds: r[2].split(",").map((s) => s.trim()), onFail: r[3] }]));

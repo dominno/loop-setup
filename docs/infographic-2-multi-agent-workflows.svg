@@ -85,7 +85,7 @@
   </g>
   <line x1="580" y1="430" x2="642" y2="430" stroke="#d6dde8"/>
   <text x="611" y="450" text-anchor="middle" class="s" font-weight="700">records</text>
-  <text x="611" y="466" text-anchor="middle" class="s">pnpm trace</text>
+  <text x="611" y="466" text-anchor="middle" class="s">loop-setup</text>
   <text x="611" y="482" text-anchor="middle" class="s">write</text>
   <text x="611" y="508" text-anchor="middle" class="s" font-weight="700">completion</text>
   <text x="611" y="524" text-anchor="middle" class="s m" font-size="10">accept?</text>
@@ -169,7 +169,7 @@
   <path d="M1190 386L1228 422L1190 458L1152 422Z" fill="#fff" stroke="#1b2f52" stroke-width="2"/><text x="1190" y="419" text-anchor="middle" class="m" font-size="9" font-weight="700">denylist</text><text x="1190" y="431" text-anchor="middle" class="m" font-size="9" font-weight="700">+ base</text>
   <rect x="1246" y="394" width="92" height="56" rx="10" class="pc"/><text x="1292" y="418" text-anchor="middle" fill="#5b3fb5" font-size="12" font-weight="700">verifier</text><text x="1292" y="436" text-anchor="middle" class="s" font-size="10.5">real diff</text>
   <path class="ln" d="M1132 422H1148" marker-end="url(#a)"/><path class="ln" d="M1228 422H1242" marker-end="url(#a)"/>
-  <text x="1038" y="490" class="s">/loop at L2/L3 · items from pnpm trace plan-items</text>
+  <text x="1038" y="490" class="s">/loop at L2/L3 · items from loop-setup plan-items</text>
   <text x="1038" y="508" class="s">the Lead applies and CLEARs, never the maker</text>
 
   <!-- 5 improve-skills -->
@@ -202,5 +202,5 @@
   <path class="ln" d="M1158 613L1186 637"/><path class="ln" d="M1158 645H1180" marker-end="url(#a)"/><path class="ln" d="M1158 677L1186 653"/>
   <path class="ln" d="M1258 645H1270" marker-end="url(#a)"/><text x="1274" y="640" class="s" font-size="10.5">flags,</text><text x="1274" y="654" class="s" font-size="10.5">record</text>
   <text x="1038" y="716" class="s">/bench-checkers (manual-only) · blind to answers</text>
-  <text x="1038" y="734" class="s">pnpm trace l3-check gates L3</text>
+  <text x="1038" y="734" class="s">loop-setup l3-check gates L3</text>
 </svg>

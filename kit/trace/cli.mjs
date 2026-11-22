@@ -11,7 +11,8 @@ import { fileURLToPath } from "node:url";
 import { claudeHomeOf, layoutError } from "../setup/facts.mjs";
 import { postureSummary, sandboxPosture, withSandbox } from "../setup/sandbox.mjs";
 import { settingsSources } from "../setup/settings.mjs";
-import { evidenceHome } from "../setup/layout.mjs";
+import { anchorPaths, evidenceHome } from "../setup/layout.mjs";
+import { anchorAdvanced, anchorReport, ensureAnchors, storeKey, unwritable, withStoreLock, writerId } from "../setup/anchors.mjs";
 import { verifiedKitFile } from "../setup/kitfiles.mjs";
 import { kitGate, parseLevel } from "../setup/integrity.mjs";
 import { verifyKit } from "../setup/verifykit.mjs";
@@ -61,6 +62,7 @@ import {
 } from "./lib.mjs";
 import { DEFAULT_PLAN, MAX_SCOPE, conflictFreeBatch, newNodeId, parsePlan, parseRunLog, planDrift, planStatus, planItems, planViolations, readyIds } from "./plan.mjs";
 import { STORY_MAP, STORY_MAP_PATHS, parseStory, storyMapViolations } from "./story-map.mjs";
+import { landedMap } from "./landed.mjs";
 
 const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (policy: kit/rules/trace-policy.md)
 
@@ -301,6 +303,60 @@ function reachable(commit) {
   return git(["cat-file", "-e", `${commit}^{commit}`]) !== null;
 }
 
+/**
+ * The landed port's git adapter (phase C, C5): facts about one done node's change in the project's
+ * HEAD, each true | false | null (git cannot tell). History is read from the recorded base when it is
+ * an ancestor of HEAD, else HEAD's last 1000 commits; non-merge commits only; each scan is cached per
+ * range and done lazily: an ancestor commit answers alone, then the trailers, then the patch-ids.
+ */
+const scanCache = new Map();
+const scanned = (key, run) => {
+  if (!scanCache.has(key)) {
+    let v = null;
+    try {
+      v = run();
+    } catch {
+      v = null; // git cannot tell (no HEAD, a broken history)
+    }
+    scanCache.set(key, v);
+  }
+  return scanCache.get(key);
+};
+const rangeOf = (base) => {
+  const anc = base ? spawnSync("git", ["merge-base", "--is-ancestor", base, "HEAD"], { cwd: PROJECT_ROOT, stdio: "ignore" }).status : 1;
+  return anc === 0 ? [`${base}..HEAD`] : ["--max-count=1000", "HEAD"];
+};
+const planIdsIn = (range) =>
+  scanned(`trailers ${range.join(" ")}`, () => {
+    const out = execFileSync("git", ["log", "--no-merges", "--format=%(trailers:key=Plan,valueonly,separator=%x2C)", ...range], { cwd: PROJECT_ROOT, encoding: "utf8", maxBuffer: 1 << 28, stdio: ["ignore", "pipe", "ignore"] });
+    return new Set(out.split(/[\s,]+/).filter(Boolean));
+  });
+const patchIdsIn = (range) =>
+  scanned(`patch-ids ${range.join(" ")}`, () => {
+    const log = execFileSync("git", ["log", "-p", "--no-merges", "--no-color", "--no-ext-diff", ...range], { cwd: PROJECT_ROOT, maxBuffer: 1 << 30, stdio: ["ignore", "pipe", "ignore"] });
+    const ids = execFileSync("git", ["patch-id", "--stable"], { cwd: PROJECT_ROOT, input: log, encoding: "utf8", maxBuffer: 1 << 28, stdio: ["pipe", "pipe", "ignore"] });
+    return new Set(ids.split("\n").map((l) => l.split(" ")[0]).filter(Boolean));
+  });
+function landingFacts({ id, base, patchId, commit }) {
+  let ancestor = false;
+  if (commit) {
+    const st = spawnSync("git", ["merge-base", "--is-ancestor", commit, "HEAD"], { cwd: PROJECT_ROOT, stdio: "ignore" }).status;
+    if (st === 0) return { ancestor: true };
+    ancestor = st === 1 ? false : null;
+  }
+  const range = rangeOf(base);
+  const plans = planIdsIn(range);
+  if (plans && plans.has(id)) return { ancestor, trailer: true };
+  const ids = patchId ? patchIdsIn(range) : new Set();
+  return { ancestor, trailer: plans ? false : null, patchId: ids ? (patchId ? ids.has(patchId) : false) : null };
+}
+
+/** LAND is a human's step (policy v5): refused from inside Claude Code, like anchors reset. */
+function refuseLand() {
+  process.stderr.write("loop-setup act LAND refused: recording that a node's change landed is a human's step (CLAUDECODE is set) — run it in a terminal outside Claude Code\n");
+  return 2;
+}
+
 function out(obj, asJson) {
   if (asJson) process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
   else process.stdout.write((typeof obj === "string" ? obj : JSON.stringify(obj, null, 2)) + "\n");
@@ -314,6 +370,45 @@ export async function main(argv = process.argv.slice(2)) {
   const { pos, flags } = parseArgs(rest);
   const explicitStore = flags.store || process.env.TRACE_STORE;
   const storePath = explicitStore || DEFAULT_STORE;
+  // The store's machine-local anchors (policy v4): its key, and the composition every writer uses —
+  // under the store lock, with this machine's writer id, then the writer's own checkpoint.
+  const claudeHome = claudeHomeOf();
+  const anchorKeyOf = () => storeKey({ claudeHome, storePath, workspace: LAYOUT.ok ? LAYOUT.workspace : null, workspaceId: LAYOUT.workspaceId });
+  // The hooks (outside any sandbox) create the writer id and anchor every stream; a sandboxed writer,
+  // which cannot write <home>/loop-setup/anchors/, still chains with the id the hooks created, runs
+  // unlocked and leaves its own checkpoint to the next hook.
+  const chainedWrite = (fn) => {
+    const key = anchorKeyOf();
+    return withStoreLock(
+      claudeHome,
+      key,
+      () => {
+        const existed = writerId(claudeHome, key);
+        let w = existed;
+        if (!w) {
+          try {
+            w = writerId(claudeHome, key, { create: true });
+            ensureAnchors(claudeHome, key); // a writer id always comes with its anchors file, whatever the write does
+          } catch (e) {
+            if (!unwritable(e)) throw e;
+          }
+        }
+        if (!w) throw new Error(`this machine has no writer id for the store (anchors key ${key}) and cannot create one here — start a new session (the SessionStart hook creates it), then write again`);
+        const res = fn({ chain: w, workspace: key.startsWith("store-") ? null : key });
+        // The writer's own checkpoint — never over a deleted anchors file (that stays a lint error
+        // until a human resets): only into an existing file, or a first one with a new writer id.
+        if (!existed || existsSync(anchorPaths(claudeHome, key).anchors)) {
+          try {
+            anchorAdvanced({ claudeHome, key, entries: loadEntries(storePath), only: w });
+          } catch (e) {
+            if (!unwritable(e)) throw e;
+          }
+        }
+        return res;
+      },
+      { bestEffort: true },
+    );
+  };
   const now = new Date().toISOString();
 
   if (!cmd || cmd === "help" || cmd === "--help") return out(HELP);
@@ -452,22 +547,25 @@ export async function main(argv = process.argv.slice(2)) {
     // Leak guard: the store is in the tree bench agents grep, so a draft naming a bench
     // fixture or its defect is refused (fail closed) — redact it and write again.
     const forbidden = benchForbidden();
-    const results = writeRecords(drafts, { storePath, now, policyVersion, commit, branch, schema, forbidden });
-    out(results, true);
-    if (!results.every((r) => r.stored)) return 1;
-    if (flags["then-act"]) {
-      if (!flags.consumer) {
-        out("--then-act needs --consumer <name>");
-        return 2;
-      }
-      const acts = appendActions(
-        results.map((r) => ({ record_id: r.record_id, consumer: flags.consumer, action: String(flags["then-act"]).toUpperCase(), note: flags.note })),
-        { storePath, now: new Date().toISOString(), policyVersion, schema, forbidden },
-      );
-      out(acts, true);
-      return acts.every((a) => a.stored) ? 0 : 1;
+    if (String(flags["then-act"] || "").toUpperCase() === "LAND" && process.env.CLAUDECODE) return refuseLand();
+    if (flags["then-act"] && !flags.consumer) {
+      out("--then-act needs --consumer <name>");
+      return 2;
     }
-    return 0;
+    return chainedWrite((writer) => {
+      const results = writeRecords(drafts, { storePath, now, policyVersion, commit, branch, schema, forbidden, ...writer });
+      out(results, true);
+      if (!results.every((r) => r.stored)) return 1;
+      if (flags["then-act"]) {
+        const acts = appendActions(
+          results.map((r) => ({ record_id: r.record_id, consumer: flags.consumer, action: String(flags["then-act"]).toUpperCase(), note: flags.note })),
+          { storePath, now: new Date().toISOString(), policyVersion, schema, forbidden, chain: writer.chain },
+        );
+        out(acts, true);
+        return acts.every((a) => a.stored) ? 0 : 1;
+      }
+      return 0;
+    });
   }
 
   if (cmd === "act") {
@@ -493,19 +591,26 @@ export async function main(argv = process.argv.slice(2)) {
       }
       drafts = [{ record_id, consumer, action: String(action).toUpperCase(), ref: flags.ref, note: flags.note }];
     }
-    const results = appendActions(drafts, { storePath, now, policyVersion, schema, forbidden: benchForbidden() });
-    out(results, true);
-    return results.every((r) => r.stored) ? 0 : 1;
+    if (drafts.some((d) => String(d && d.action).toUpperCase() === "LAND") && process.env.CLAUDECODE) return refuseLand();
+    return chainedWrite((writer) => {
+      const results = appendActions(drafts, { storePath, now, policyVersion, schema, forbidden: benchForbidden(), chain: writer.chain });
+      out(results, true);
+      return results.every((r) => r.stored) ? 0 : 1;
+    });
   }
 
   const state = replay(loadEntries(storePath), schema, policyVersion);
 
   if (cmd === "lint") {
     const m = storeMetrics(state);
-    for (const w of state.warnings) process.stderr.write(`warn: ${w}\n`);
-    for (const e of state.errors) process.stderr.write(`error: ${e}\n`);
-    out({ ok: state.errors.length === 0, errors: state.errors.length, warnings: state.warnings.length, records: m.records, store: storePath });
-    return state.errors.length ? 1 : 0;
+    // Policy v4: every checkpoint this machine anchored must still be a prefix of its stream.
+    const anchors = anchorReport({ claudeHome, key: anchorKeyOf(), entries: loadEntries(storePath) });
+    const errors = [...state.errors, ...anchors.errors];
+    const warnings = [...state.warnings, ...anchors.warnings];
+    for (const w of warnings) process.stderr.write(`warn: ${w}\n`);
+    for (const e of errors) process.stderr.write(`error: ${e}\n`);
+    out({ ok: errors.length === 0, errors: errors.length, warnings: warnings.length, records: m.records, store: storePath });
+    return errors.length ? 1 : 0;
   }
 
   if (cmd === "plan-ready") {
@@ -523,7 +628,7 @@ export async function main(argv = process.argv.slice(2)) {
     }
     const plan = readPlan();
     if (unparsed(plan)) return 1;
-    let ids = readyIds(plan.nodes, { max, state });
+    let ids = readyIds(plan.nodes, { max, state, landed: landedMap(plan.nodes, state, landingFacts) });
     if (batchN !== undefined) {
       const { batch, skipped } = conflictFreeBatch(plan.nodes, ids, batchN);
       for (const k of skipped) process.stderr.write(`skip: ${k.id} conflicts with ${k.conflictsWith} (overlapping scope; it waits for a later call)\n`);
@@ -572,7 +677,7 @@ export async function main(argv = process.argv.slice(2)) {
     } catch {
       // no run log yet: an own claim is stale, another owner's is live
     }
-    const { errors, warnings } = planViolations(plan, state, { preDispatch, maxScope, stories, owner: currentOwner(), runs });
+    const { errors, warnings } = planViolations(plan, state, { preDispatch, maxScope, stories, owner: currentOwner(), runs, landed: landedMap(plan.nodes, state, landingFacts) });
     for (const w of warnings) process.stderr.write(`warn: ${w}\n`);
     for (const e of errors) process.stderr.write(`error: ${e}\n`);
     out({ ok: errors.length === 0, errors: errors.length, warnings: warnings.length, nodes: plan.nodes.length, preDispatch, plan: planPath, store: storePath }, true);
@@ -669,7 +774,7 @@ export async function main(argv = process.argv.slice(2)) {
     const plan = readPlan();
     if (unparsed(plan)) return 1;
     // All or nothing: a batch with any id that is not ready is never half-emitted.
-    const { items, refused } = planItems(plan.nodes, pos, state);
+    const { items, refused } = planItems(plan.nodes, pos, state, { landed: landedMap(plan.nodes, state, landingFacts) });
     for (const r of refused) process.stderr.write(`error: ${r.id}: ${r.reason}\n`);
     if (refused.length) return 1;
     out(items, true);
@@ -816,10 +921,7 @@ export async function main(argv = process.argv.slice(2)) {
           : []),
         ...(c.split || []).map((s) => ({ record_id: c.record_id, consumer: "dream", action: "REAUDIT", ref: splitAckRef(s.at, s.path), note: `${s.note}: ${s.path}` })),
       ]);
-      const res = appendActions(
-        acts,
-        { storePath, now, policyVersion, schema, forbidden: benchForbidden() },
-      );
+      const res = chainedWrite((writer) => appendActions(acts, { storePath, now, policyVersion, schema, forbidden: benchForbidden(), chain: writer.chain }));
       out(res, true);
       if (!res.every((r) => r.stored)) return 1;
     }
@@ -834,7 +936,7 @@ export async function main(argv = process.argv.slice(2)) {
   }
 
   if (cmd === "rotate") {
-    const res = rotateStore(storePath, { max: Number(flags.max || 500), keep: Number(flags.keep || 200) });
+    const res = withStoreLock(claudeHome, anchorKeyOf(), () => rotateStore(storePath, { max: Number(flags.max || 500), keep: Number(flags.keep || 200) }));
     out(res, true);
     return 0;
   }
@@ -975,7 +1077,7 @@ export async function main(argv = process.argv.slice(2)) {
       const commit = git(["rev-parse", "--short=12", "HEAD"]) || undefined;
       const branch = git(["rev-parse", "--abbrev-ref", "HEAD"]) || undefined;
       const hashes = currentBlockHashes();
-      const res = writeRecords([benchRecordDraft(score, { resultsRef, priorRecordId: prior && prior.record_id, runIds, verifierHash: hashes.verifier, denylistHash: hashes.denylist })], { storePath, now, policyVersion, commit, branch, schema, forbidden: benchForbidden() });
+      const res = chainedWrite((writer) => writeRecords([benchRecordDraft(score, { resultsRef, priorRecordId: prior && prior.record_id, runIds, verifierHash: hashes.verifier, denylistHash: hashes.denylist })], { storePath, now, policyVersion, commit, branch, schema, forbidden: benchForbidden(), ...writer }));
       out(res, true);
       return res.every((r) => r.stored) ? 0 : 1;
     }

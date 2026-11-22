@@ -33,10 +33,32 @@ There are three paths:
 ```txt
 ~/.claude/loop-setup/workspaces/<slug>-<hex8>/   the loop state: the wiki (index.md, topics/, log.md), the TRACE
                                                  store (trace/records.jsonl), loop-plan.md, loop-run-log.md and
-                                                 quarantine.md; a git repo on the branch claude/loop-state
+                                                 quarantine.md; the work tree of the branch claude/loop-state
+~/.claude/loop-setup/state/<slug>-<hex8>.git     that work tree's git dir, kept outside it (and outside the
+                                                 project's read/write grant)
+~/.claude/loop-setup/anchors/<slug>-<hex8>.*     this machine's record-store anchors: its writer id (.writer),
+                                                 the checkpoints (.jsonl) and the store lock (.lock)
 <project>/.claude/loop-workspace                 the git-ignored link to that directory
 <project>/.git/config  [loop-setup] workspace    the clone marker (shared by every worktree of the clone)
 ```
+
+The workspace holds no `.git`: a session that can write the workspace cannot plant git config or hooks
+there. Before every git call on the state, `loop-setup` also refuses (exit 2, naming the cause) a
+`.gitattributes` other than the kit template's, any `.gitmodules`, a git dir entry such as `commondir`
+or `config.worktree`, and any config key git does not write for the state repo, because each could
+make git run a command at sync time. `doctor` names the cause; fix it (put the template's
+`.gitattributes` back, remove the planted file or key) and sync again. A workspace made by an older
+kit, with its git dir still at `<workspace>/.git`, moves to `state/` at its next `loop-setup sync` or
+`restore` (a fresh git dir with the same HEAD, refs and history; `doctor` warns until then).
+
+The record store is tamper-evident (policy v4): every line `loop-setup` appends carries a per-writer
+hash chain, and this machine anchors checkpoints in `~/.claude/loop-setup/anchors/`. `loop-setup
+lint`, `doctor` and the SessionStart hook then catch an edited or deleted line that was anchored here.
+Every machine that shares a workspace should run a kit with policy v4 before its first v4 write (an
+older kit's lines are only warned about). If a count drops for a real reason (you restored the
+workspace from a remote that is behind lines this machine had anchored), acknowledge it in a terminal
+outside Claude Code: `loop-setup anchors reset --reason "restored from the remote after a disk loss"`.
+The old anchors file is kept beside the new one, and `doctor` shows the reason.
 
 **Portable — what your project carries (commit these):**
 
@@ -107,15 +129,40 @@ clone the public repo at a pinned tag or commit) and install from that checkout.
    git clone <this-repo> my-app && cd my-app
    rm -rf .git && git init
    ```
-   The new repo also holds `kit/`. Delete it if you install the kit from its upstream
-   repository instead.
-2. **Install and confirm the baseline is green:**
+2. **Decide what `kit/` is for.** The new repo also holds the kit's source, `kit/`. Pick one:
+   - **Option 1 — install the kit from upstream and remove `kit/`** (the usual choice: your repo
+     carries only your project). Remove the kit's source, the template's own doc test, the
+     `loop-setup` dev script and the kit's test include:
+     ```bash
+     git rm -r -q kit scripts/template-docs.test.mjs
+     npm pkg delete scripts.loop-setup
+     sed -i.bak 's/, "kit\/\*\*\/\*\.test\.mjs"//' vitest.config.ts && rm vitest.config.ts.bak
+     ```
+     In `.github/workflows/verify.yml`, delete the `provenance` job (it runs
+     `node kit/trace/cli.mjs`; add it back later with an installed kit if you want its
+     warnings), and drop the `with:`/`fetch-depth` lines and their comment from the `checks` job's
+     checkout (only the kit's history tests needed full history). Three leftovers are harmless but
+     belong to the kit too: the `env` block of `vitest.config.ts` (`LOOP_SETUP_WORKSPACE` points at a
+     kit test fixture), and the *Loop-setup kit* section and the `kit/trace/cli.test.mjs` example in
+     `CLAUDE.md`; delete or reword them. Then install the kit from upstream, once per machine:
+     ```bash
+     git clone https://github.com/dominno/loop-setup ~/src/loop-setup
+     node ~/src/loop-setup/kit/bin/loop-setup.mjs install --from ~/src/loop-setup --link-bin ~/.local/bin
+     ```
+   - **Option 2 — keep `kit/` as your kit source** (you maintain your own fork of the kit). Keep
+     everything and install from the repo itself:
+     ```bash
+     node kit/bin/loop-setup.mjs install --from . --link-bin ~/.local/bin
+     ```
+     `loop-setup verify-kit` then anchors the install to your repo's `main` (or a `kit-v*` tag),
+     and loops never edit `kit/` (it is on their denylist): kit changes are your own reviewed work.
+3. **Install and confirm the baseline is green:**
    ```bash
    pnpm install
    pnpm verify        # typecheck → lint → unit → build → E2E
    ```
-3. **Install the kit** (above), then run `loop-setup init` in the project. Run
-   `loop-setup sync` once a remote exists; it publishes `claude/loop-state`.
+   Then run `loop-setup init` in the project, and `loop-setup sync` once a remote exists; it
+   publishes `claude/loop-state`.
 4. **Make it yours.** Replace the greeting starter as you build: edit `src/`,
    replace `e2e/` specs, and rewrite `docs/prd.md` with your real requirements.
 5. **Reset the worked examples** when you no longer want them: clear the example
@@ -820,6 +867,19 @@ Scope control stays the same: fix **blockers** and directly-related **important*
 issues; record nice-to-haves; avoid unrelated refactors.
 
 ---
+
+## Command reference (`loop-setup`)
+
+Every subcommand, by what it is for (`loop-setup help` and `loop-setup <command> --help`-style usage
+lines give the flags; the planning commands are explained in the planning guide):
+
+| group | commands |
+|---|---|
+| Install and the workspace | `loop-setup install`, `loop-setup uninstall` (a human's step), `loop-setup init`, `loop-setup restore`, `loop-setup sync`, `loop-setup where` (the kit, project and workspace paths), `loop-setup doctor`, `loop-setup verify-kit`, `loop-setup anchors reset` (a human's step), `loop-setup hook` (run by Claude Code's SessionStart and Stop hooks, not by you) |
+| Records | `loop-setup write`, `loop-setup act`, `loop-setup show`, `loop-setup query`, `loop-setup lint`, `loop-setup tree-id` (the working-tree fingerprint a critic round reuses verdicts by), `loop-setup reaudit`, `loop-setup metrics` (store-level consumer-value numbers), `loop-setup rotate` (move old lines into yearly archives, on the default branch only) |
+| Plan and loop | `loop-setup plan-id`, `loop-setup plan-ready`, `loop-setup plan-items`, `loop-setup plan-lint`, `loop-setup plan-drift`, `loop-setup status`, `loop-setup claim-token`, `loop-setup denylist-check` (the loop's denylist over a patch, before it is applied) |
+| Consistency checks | `loop-setup story-lint`, `loop-setup wiki-check` (the memory wiki against the record store) |
+| Measuring the checkers (TRACE-Bench-lite, `/bench-checkers`) | `loop-setup bench-args`, `loop-setup bench-score`, `loop-setup bench-judge`, `loop-setup bench-unpack`, `loop-setup bench-pack`, `loop-setup l3-check` (whether L3's measured-checker condition holds) |
 
 ## Adoption checklist
 

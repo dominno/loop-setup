@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { LINK_NAME, STATE_BRANCH, isValidId, loopHome, resolveLayout, statePaths, workspaceDir } from "./layout.mjs";
+import { LINK_NAME, STATE_BRANCH, isValidId, loopHome, resolveLayout, stateGitDir, stateIdOf, stateRepoLocation, stateRoot, statePaths, workspaceDir } from "./layout.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -258,5 +258,43 @@ describe("legacy evidence refs against the repository's history", () => {
       const kitHalf = s.into.find((t) => t.root === "project" && t.path.startsWith("kit/"));
       expect(git("show", "--name-status", "--format=", s.at, "--", kitHalf.path).trim(), `${s.from} at ${s.at}`).toBe(`A\t${kitHalf.path}`);
     }
+  });
+});
+
+// Where a workspace's git directory lives (phase C, goal C3): outside the workspace, decided from facts.
+describe("state git dir (pure)", () => {
+  it("stateRoot and stateGitDir sit under the kit's home, beside (never inside) the workspaces root", () => {
+    expect(stateRoot(HOME)).toBe(`${LH}/state`);
+    expect(stateGitDir(HOME, "app-1a2b")).toBe(`${LH}/state/app-1a2b.git`);
+    expect(stateGitDir(HOME, "app-1a2b").startsWith(`${workspaceDir(HOME, "app-1a2b")}/`)).toBe(false);
+    expect(() => stateGitDir(HOME, "../x")).toThrow(/not a workspace id/);
+  });
+
+  const ws = workspaceDir(HOME, "app-1a2b");
+  const rows = [
+    // outside, inside, id → kind, gitDir
+    [true, "none", "app-1a2b", "outside", `${LH}/state/app-1a2b.git`],
+    [false, "dir", "app-1a2b", "inside", `${ws}/.git`],
+    [false, "dir", null, "inside-fixed", `${ws}/.git`],
+    [true, "dir", "app-1a2b", "conflict", null],
+    [true, "other", "app-1a2b", "conflict", null],
+    [false, "other", "app-1a2b", "conflict", null],
+    [false, "other", null, "conflict", null],
+    [false, "none", "app-1a2b", "none", null],
+    [false, "none", null, "none", null],
+  ];
+  it.each(rows)("outside=%s inside=%s id=%s → %s", (outside, inside, id, kind, gitDir) => {
+    const loc = stateRepoLocation({ claudeHome: HOME, workspace: ws, id, outside, inside });
+    expect(loc.kind).toBe(kind);
+    expect(loc.gitDir).toBe(gitDir);
+    if (kind === "conflict") expect(loc.cause).toMatch(/\.git/);
+    if (kind === "inside") expect(loc.target).toBe(`${LH}/state/app-1a2b.git`);
+  });
+
+  it("stateIdOf: the layout's id, else the id of a workspace directly under this home's workspaces root, else null", () => {
+    expect(stateIdOf({ claudeHome: HOME, workspace: ws, workspaceId: "app-1a2b" })).toBe("app-1a2b");
+    expect(stateIdOf({ claudeHome: HOME, workspace: ws, workspaceId: null })).toBe("app-1a2b");
+    expect(stateIdOf({ claudeHome: HOME, workspace: "/tmp/scratch-ws", workspaceId: null })).toBe(null);
+    expect(stateIdOf({ claudeHome: HOME, workspace: `${LH}/workspaces/BAD..id`, workspaceId: null })).toBe(null);
   });
 });

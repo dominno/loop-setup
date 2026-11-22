@@ -7,7 +7,7 @@
 // slip past. A policy guard, paired with owned deny rules; the sandbox is the boundary.
 
 /** → null when the write may go on, else the refusal message. Homes are passed resolved. */
-export function lifecycleRefusal({ cmd, claudecode, targetHome, sessionHome }) {
+export function lifecycleRefusal({ cmd, claudecode, targetHome, sessionHome, step = "installing or removing the kit is a human's step: run it in a terminal outside Claude Code, or let the environment's setup script do it at the next fresh container" }) {
   if (!claudecode || targetHome !== sessionHome) return null;
-  return `loop-setup ${cmd} refused: it would write this session's Claude home (${targetHome}) from inside Claude Code (CLAUDECODE is set) — installing or removing the kit is a human's step: run it in a terminal outside Claude Code, or let the environment's setup script do it at the next fresh container`;
+  return `loop-setup ${cmd} refused: it would write this session's Claude home (${targetHome}) from inside Claude Code (CLAUDECODE is set) — ${step}`;
 }

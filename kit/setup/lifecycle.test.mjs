@@ -6,7 +6,7 @@ import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rea
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { KIT_ROOT } from "./facts.mjs";
-import { STATE_BRANCH, workspaceDir } from "./layout.mjs";
+import { STATE_BRANCH, stateGitDir, workspaceDir } from "./layout.mjs";
 import { install, mergeSettings, normalizeRemote, renderKit, uninstall, verifyInstall } from "./install.mjs";
 import { sessionContext, sessionStart, stop } from "./hooks.mjs";
 
@@ -196,7 +196,7 @@ describe("init / sync / restore across two machines (bare remote, two clones, tw
     expect(JSON.parse(readFileSync(join(projA, ".claude/settings.local.json"), "utf8")).permissions.additionalDirectories).toEqual([ws]);
     expect(git(projA, "status", "--porcelain", "--ignored=no", "--", ".claude/loop-workspace")).toBe("");
     for (const f of ["index.md", "loop-plan.md", "trace/records.jsonl", "workspace.json", ".gitattributes"]) expect(existsSync(join(ws, f)), f).toBe(true);
-    expect(git(ws, "rev-parse", "--abbrev-ref", "HEAD")).toBe(STATE_BRANCH);
+    expect(git(ws, "--git-dir", stateGitDir(homeA, wsId), "rev-parse", "--abbrev-ref", "HEAD")).toBe(STATE_BRANCH); // the state repo lives outside the workspace (C3)
     const lint = run(homeA, projA, ["lint"]);
     expect(lint.status, lint.stderr).toBe(0);
     expect(JSON.parse(lint.stdout)).toMatchObject({ ok: true, records: 0, store: join(ws, "trace/records.jsonl") });

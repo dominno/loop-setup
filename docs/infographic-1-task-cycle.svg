@@ -127,7 +127,7 @@
     <path d="M160 660V720C160 742 440 742 440 720V660" fill="#fff" stroke="#5b3fb5" stroke-width="2.5"/>
     <ellipse cx="300" cy="660" rx="140" ry="16" fill="#fff" stroke="#5b3fb5" stroke-width="2.5"/>
     <text x="300" y="700" text-anchor="middle" fill="#5b3fb5" font-weight="700" font-size="15">Wiki memory</text>
-    <text x="300" y="720" text-anchor="middle" class="s m" fill="#5b3fb5">.claude/memory/ + TRACE store</text>
+    <text x="300" y="720" text-anchor="middle" class="s m" fill="#5b3fb5">workspace (claude/loop-state) + TRACE</text>
   </g>
   <path d="M90 586V690H156" fill="none" stroke="#5b3fb5" stroke-width="2.5" stroke-dasharray="7 5" marker-end="url(#ap)"/>
   <g>

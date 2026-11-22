@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { anchorViolations, checkpointsFor } from "./chain.mjs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -48,6 +49,7 @@ import {
   VERIFIER_FILE,
   verifierBlockHash,
   denylistBlockHash,
+  expectedId,
   writeRecords,
 } from "./lib.mjs";
 
@@ -1172,5 +1174,115 @@ describe("L3 needs a full verifier bench: measured fixture counts", () => {
       expect(res.unmet).toHaveLength(1);
       expect(res.unmet[0]).toMatch(/every fixture in every repeat: re-bench the full manifest/);
     });
+  });
+});
+
+// Policy v4 (phase C, goal C4): a writer fills chain {w, prev} and provenance.workspace on every
+// line it appends; the chain is assigned after dedupe, over only the lines actually appended.
+describe("the chained writer (schema trace-lite/1.1)", () => {
+  const W = "0123456789abcdef";
+  const chained = () => ({ ...ctx(), policyVersion: 4, chain: W, workspace: "app-1a2b3c4d" });
+  const lines = () => readFileSync(store, "utf8").trim().split("\n");
+  const sha = (s) => createHash("sha256").update(s).digest("hex");
+  const pass = () => replay(loadEntries(store), schema, 4);
+
+  it("writes 1.1 records that chain to each other, with the writer's workspace", () => {
+    const res = writeRecords([draft({ claim_id: "c:one" }), draft({ claim_id: "c:two" })], chained());
+    expect(res.every((r) => r.stored && r.schema_version === "trace-lite/1.1")).toBe(true);
+    const [a, b] = lines();
+    expect(JSON.parse(a)).toMatchObject({ schema_version: "trace-lite/1.1", policy_version: "4", chain: { w: W, prev: null }, provenance: { workspace: "app-1a2b3c4d" } });
+    expect(JSON.parse(b).chain).toEqual({ w: W, prev: sha(a) });
+    expect(res.map((r) => r.record_id)).toEqual([JSON.parse(a).record_id, JSON.parse(b).record_id]);
+    const st = pass();
+    expect(st.errors).toEqual([]);
+    expect(st.records.size).toBe(2);
+  });
+
+  it("re-running a write of the same draft is still a duplicate, though its prev would differ", () => {
+    writeRecords([draft()], chained());
+    const [res] = writeRecords([draft()], chained());
+    expect(res.stored).toBe(false);
+    expect(res.validation.fail.join()).toMatch(/duplicate content/);
+  });
+
+  it("refuses a draft that carries chain or provenance.workspace of its own", () => {
+    const [res] = writeRecords([draft({ chain: { w: "ffffffffffffffff", prev: null } })], chained());
+    expect(res.stored).toBe(false);
+    expect(res.validation.fail.join()).toMatch(/the writer fills chain/);
+    const [res2] = writeRecords([draft({ provenance: { workflow: "x", workspace: "other" } })], chained());
+    expect(res2.validation.fail.join()).toMatch(/the writer fills provenance\.workspace/);
+  });
+
+  it("actions chain after dedupe: a no-op in the middle of a batch is skipped, the rest chain cleanly", () => {
+    const [r] = writeRecords([draft()], chained());
+    appendActions([{ record_id: r.record_id, consumer: "dream", action: "HOLD", note: "first" }], chained());
+    const res = appendActions(
+      [
+        { record_id: r.record_id, consumer: "dream", action: "HOLD", note: "second" },
+        { record_id: r.record_id, consumer: "dream", action: "HOLD", note: "first" }, // already recorded: a no-op
+        { record_id: r.record_id, consumer: "dream", action: "HOLD", note: "third" },
+      ],
+      chained(),
+    );
+    expect(res.map((a) => !!a.noop)).toEqual([false, true, false]);
+    expect(lines()).toHaveLength(4);
+    expect(pass().errors).toEqual([]);
+    const stored = lines().map((l) => JSON.parse(l));
+    expect(stored.slice(1).every((a) => a.kind === "action" && a.schema_version === "trace-lite/1.1" && a.chain.w === W)).toBe(true);
+    expect(res.filter((a) => !a.noop).map((a) => a.action_id)).toEqual(stored.slice(2).map((a) => a.action_id));
+  });
+
+  it("two identical REUSE drafts in one batch store one line (event dedupe is chain-free)", () => {
+    const [r] = writeRecords([draft()], chained());
+    const reuse = { record_id: r.record_id, consumer: "critic-panel", action: "REUSE", note: "tree t" };
+    const res = appendActions([reuse, { ...reuse }], chained());
+    expect(res.filter((a) => a.noop)).toHaveLength(1);
+    expect(lines()).toHaveLength(2);
+    expect(pass().errors).toEqual([]);
+  });
+
+  it("replay: a 1.1 line needs chain (and a record policy >= 4); a 1.0 line may carry neither chain nor provenance.workspace", () => {
+    writeRecords([draft()], chained());
+    const rec = JSON.parse(lines()[0]);
+    const withId = (v) => ({ ...v, record_id: expectedId(v) }); // a well-formed id, so only the 1.0/1.1 rule can fail
+    const asStore = (...vals) => vals.map((value, i) => ({ source: "s", line: i + 1, raw: JSON.stringify(value), value }));
+    const { chain, ...noChain } = rec;
+    expect(chain).toEqual({ w: W, prev: null });
+    expect(replay(asStore(withId(rec)), schema, 4).errors).toEqual([]);
+    expect(replay(asStore(withId(noChain)), schema, 4).errors.join()).toMatch(/a trace-lite\/1\.1 line needs chain/);
+    expect(replay(asStore(withId({ ...rec, policy_version: "3" })), schema, 4).errors.join()).toMatch(/a trace-lite\/1\.1 record needs policy 4 or later/);
+    expect(replay(asStore(withId({ ...rec, schema_version: "trace-lite/1.0" })), schema, 4).errors.join()).toMatch(/a trace-lite\/1\.0 line carries no chain/);
+    const { workspace, ...prov } = rec.provenance;
+    expect(replay(asStore(withId({ ...noChain, schema_version: "trace-lite/1.0", provenance: rec.provenance })), schema, 4).errors.join()).toMatch(/a trace-lite\/1\.0 line carries no provenance\.workspace/);
+    expect(replay(asStore(withId({ ...noChain, schema_version: "trace-lite/1.0", provenance: prov })), schema, 4).errors).toEqual([]);
+  });
+
+  it("rotation across a year boundary keeps every chain and every anchored checkpoint", () => {
+    writeRecords([draft({ claim_id: "c:y1" })], { ...chained(), now: "2026-12-31T23:00:00.000Z" });
+    writeRecords([draft({ claim_id: "c:y2" })], { ...chained(), now: "2027-01-01T01:00:00.000Z" });
+    writeRecords([draft({ claim_id: "c:y3" })], { ...chained(), now: "2027-01-01T02:00:00.000Z" });
+    const anchored = checkpointsFor(loadEntries(store));
+    expect(rotateStore(store, { max: 1, keep: 1 })).toMatchObject({ moved: 2, archives: ["2026.jsonl", "2027.jsonl"] });
+    const after = loadEntries(store);
+    expect(after.map((e) => e.value.claim_id)).toEqual(["c:y1", "c:y2", "c:y3"]);
+    expect(replay(after, schema, 4).errors).toEqual([]);
+    expect(anchorViolations(after, anchored)).toEqual([]);
+  });
+
+  it("LAND (policy v5) is a human's, on the latest licensing record, with --ref: refused otherwise", () => {
+    const [r1] = writeRecords([draft({ claim_id: "loop:lp-aaaa", writer_id: "loop-iteration/verify:LP-aaaa-0" })], chained());
+    const ok = appendActions([{ record_id: r1.record_id, consumer: "human", action: "LAND", ref: "LP-aaaa", note: "rebased" }], chained());
+    expect(ok[0].stored).toBe(true);
+    expect(appendActions([{ record_id: r1.record_id, consumer: "loop", action: "LAND", ref: "LP-aaaa" }], chained())[0].validation.fail.join()).toMatch(/consumer human and --ref/);
+    expect(appendActions([{ record_id: r1.record_id, consumer: "human", action: "LAND" }], chained())[0].validation.fail.join()).toMatch(/consumer human and --ref/);
+    const [r2] = writeRecords([draft({ claim_id: "loop:lp-aaaa", writer_id: "loop-iteration/verify:LP-aaaa-1", reason: "re-verified", revises: r1.record_id })], chained());
+    expect(r2.stored).toBe(true);
+    expect(appendActions([{ record_id: r1.record_id, consumer: "human", action: "LAND", ref: "LP-aaaa", note: "late" }], chained())[0].validation.fail.join()).toMatch(/superseded|newer record/);
+  });
+
+  it("a library caller without a writer still writes 1.0 lines (the API and its tests unchanged)", () => {
+    const [res] = writeRecords([draft()], ctx());
+    expect(res.schema_version).toBe("trace-lite/1.0");
+    expect(JSON.parse(lines()[0]).chain).toBeUndefined();
   });
 });

@@ -13,11 +13,13 @@ repair; consumers act only on records. We adopt that **contract** for our own ma
 declared policy, **not** objective truth: gates verify field consistency, not field
 truth (paper §7.2).
 
-<!-- trace-policy-version: 3 -->
+<!-- trace-policy-version: 5 -->
 (machine-readable; `kit/trace/lib.mjs` stamps it on every record and refuses records
 written under a newer policy — bump it whenever a table below or a record rule changes.)
-v3 adds the memory write boundary for `wiki:` records (**Record guarantees**); records
-written under v1/v2 replay unchanged.
+v3 adds the memory write boundary for `wiki:` records; v4 adds the per-writer hash chain (schema
+`trace-lite/1.1`) and machine-local anchors (both under **Record guarantees**); v5 adds the human
+`LAND` action (a done plan node's change landed where git cannot show it); records written under
+v1–v4 replay unchanged.
 
 - Schema: `kit/schema/schema-v1.json` · Store: `.claude/loop-workspace/trace/records.jsonl`
   (append-only JSONL, archives `<YYYY>.jsonl`) · Writer/linter: `loop-setup …`
@@ -72,6 +74,7 @@ fails on drift — including drift between this table and the code.
 | REJECT | any | dream (not filed), improve-skills (edit declined) |
 | REUSE | any | critic-panel (prior verdict reused on an identical working tree — `loop-setup tree-id`) |
 | REAUDIT | any | dream lint (evidence file changed since the record's commit, or that commit is unreachable) |
+| LAND | accept, qualify | human only (`--ref <node>`): the node's change landed where git cannot show it — a combined commit with no `Plan:` trailer, a rewrite; refused from inside Claude Code |
 
 **Fail closed:** CLEAR/COMMIT/COMMIT_QUALIFIED are refused on a non-licensing verdict, on
 a superseded record, and on any record that is no longer the newest for its `claim_id`
@@ -112,6 +115,13 @@ denylist path still needs a human).
 - **Human release** (only a human writes it): `loop-setup act <record> human HOLD --ref <node>
   --note "release: <decision>"` lets an escalated node return to ready/blocked; the record
   still licenses nothing (no CLEAR). `plan-lint` `[unsupported-reset]` reads it.
+- **Human landing** (policy v5; only a human writes it, refused from inside Claude Code): `loop-setup
+  act <the node's record> human LAND --ref <node> --note "<commit or reason>"` counts a done node's
+  change as landed in HEAD when git cannot show it (`plan-ready`, `plan-items` and `plan-lint` read
+  it); otherwise a done node satisfies `after` only once its CLEAR's commit is an ancestor of HEAD, a
+  commit in HEAD's history has its `patch-id`, or one carries the trailer `Plan: <node>`. LAND
+  names the latest, unsuperseded record and is permanent; its human-only and CLAUDECODE checks guard
+  against accidents, they do not authenticate a human.
 - **"Fixed"** = a `CLEAR` on the finding's latest licensing record, written only after the
   separate checker (post-implementation round / loop verifier + the post-apply check)
   shows it resolved; `--note` says what showed it.
@@ -204,7 +214,22 @@ implementation, gaps into the synthesized order), and no durable state changes o
   unreachable commit and the paths to re-verify), so re-auditing an unchanged queue is a no-op
   rather than a line per stale record per pass. Action notes/refs are screened for secrets
   and bench ground truth exactly like records.
-- **Version legibility** — `schema_version` const + `policy_version` stamp; a reader refuses
+- **Tamper evidence (policy v4)** — every line the CLI appends is `trace-lite/1.1` and carries
+  `chain: { w, prev }` (`w`: this machine's writer id for the store, kept with the anchors; `prev`:
+  the sha256 of that writer's previous line as stored, one trailing `\r` ignored, or `null`) and
+  `provenance.workspace`; the writer fills both and refuses a draft that carries either.
+  `loop-setup lint` (every replay) checks each writer's chain. Checkpoints — per writer `{ w, n, sha }`
+  and the legacy 1.0 lines as an id set — are anchored outside the workspace in
+  `~/.claude/loop-setup/anchors/<id>.jsonl` by the writer (its own line) and the SessionStart hook
+  (every stream); lint, `doctor` and the hook fail when one is no longer a prefix or a count dropped,
+  and the hook never re-anchors over a failure. Union merges and rebases keep each writer's order,
+  so they stay green. The guarantee: **on a machine that kept its anchors, an edit or a deletion of an
+  anchored line is detected**. Not covered: new lines (insertion, a fresh writer id), authorship
+  (writer ids are not secrets) and tampering with the machine-local anchors. A 1.0 line after the
+  first chained one is a warning (a kit older than v4 wrote it): every machine sharing a workspace
+  upgrades before its first v4 write. A real count drop (a restore from a remote that is behind) is
+  acknowledged by a human: `loop-setup anchors reset --reason "…"` (refused from inside Claude Code).
+- **Version legibility** — `schema_version` (1.0 or 1.1) + `policy_version` stamp; a reader refuses
   records from a newer policy (`loop-setup lint`).
 - **Self-containment** — verdict, failed gates, missing, repair live in the record.
 - **Provenance** — `writer_id` + `provenance.commit/workflow` (+ `provenance.tree`, the

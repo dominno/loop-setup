@@ -109,7 +109,9 @@ grouped *"when to use which"* catalog (with a pick-by-intent guide) is
 ## Quickstart: add to an existing project
 
 The full walkthrough is in **[`kit/docs/adoption-guide.md`](kit/docs/adoption-guide.md)** (paths A, B
-and C, cloud setup, team use, and a checklist). The short version:
+and C, cloud setup, team use, and a checklist). Starting a **new** project from this template instead?
+Follow [Path A](kit/docs/adoption-guide.md#path-a--start-a-new-project-from-this-template): it keeps or
+removes `kit/`, with the exact commands. The short version for an existing project:
 
 1. **Install the kit once per machine.** It goes into `~/.claude`, not your repo:
    ```bash
