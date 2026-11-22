@@ -142,3 +142,47 @@ Faza A jest zrobiona na gałęzi `claude/blissful-galileo-akxz8w`.
   - `ensureLink` rozpoznaje „swój” link wyrażeniem regularnym zamiast przez `workspacesRoot`.
 - Infografiki SVG/PNG w `docs/` pokazują stary model kopiowania.
 - Pozycje fazy B z tabeli powyżej.
+
+## Status fazy B (2026-11-22)
+
+Część fazy B jest zrobiona na gałęzi `claude/stoic-keller-rq8sn7` (od `main` = `2dd64dd`). Każdy cel
+ma własny plan z rundami krytyków w `docs/plans/<cel>/steps.md`.
+
+**Zrobione (pozycje z listy „Poza zakresem fazy A” i z analizy §8):**
+
+| Cel | Commity | Co daje |
+|---|---|---|
+| verify-kit (kotwice sum kontrolnych) | 84f6395, 49aaf74, 4668f0c, d013a00, d9220f8 | `loop-setup verify-kit` odtwarza zainstalowane drzewo z `git show <commit>:kit/…` z chronionej referencji zdalnego repo kitu (`main` lub tag `kit-v*`) i sprawdza każdy plik, komendę i własny wpis `settings.json` — nigdy samo `installed.json`. `denylist-check` i `plan-items` odmawiają na L2/L3, gdy weryfikacja nie przechodzi; L1 tylko ostrzega; offline zamyka się na L2/L3. |
+| L3 wymaga sandboxa | d4832c1, 3e1f0ee, cdabdda, f541ae2 | Rekord benchmarku przypina hashe bloków `<loop-verifier>` i `<loop-denylist>`; `l3-check` nie jest spełnione po zmianie denylisty, bez sandboxa, bez `allowUnsandboxedCommands: false` trzymanego w zakresie użytkownika albo z niepustym `sandbox.excludedCommands`. `doctor` raportuje stan sandboxa. |
+| Utwardzenie instalatora (odmowa przy `CLAUDECODE`) | b7e805e, f77d59f, ceeabc6 | `install`/`uninstall` do katalogu Claude tej sesji odmawiają przy `CLAUDECODE`; reguły deny dla podkomend cyklu życia i `node *loop-setup.mjs*`; `settings.json`, który nie jest obiektem albo ma złe typy `hooks`/`permissions`, jest odrzucany przed jakąkolwiek zmianą; ścieżki w hookach są bezpieczne dla powłoki; `ensureLink` naprawia tylko linki pod `workspacesRoot`. Zamyka trzy drobne uwagi krytyków z fazy A. |
+| Dodatki do denylisty | 467c178, d044c0e, 539256f | Główne `.gitignore`, `.gitattributes`, `.worktreeinclude`, `.mcp.json`; patche zapisujące symlink (`120000`), gitlink (`160000`) albo zmianę trybu eskalują w bramce workflow i w `denylist-check` (wspólny korpus testów); `denylist-check` czyta też tryby z HEAD (rename/copy/retarget istniejącego symlinku). |
+
+**Dowód, że runtime uruchamia hook Stop kitu:** z celowo niezsynchronizowanym workspace'em (zaraz po
+zapisie rekordu krytyka) zakończona tura dostała „Stop hook feedback: The loop workspace
+loop-setup-e3ed255a has unsynced state (1 changed file(s), 0 unpushed commit(s)). Run `loop-setup
+sync` …” (transkrypt sesji, 2026-11-22T08:31:59Z, załącznik `hook_blocking_error`, hookEvent Stop).
+Fakt w wiki: `topics/remote-env.md`, TR-6eab59a1408c (qualify: sesja w chmurze z kitem z setup
+scriptu; najwyżej raz na turę przez `stop_hook_active`). Domyka lukę, którą zawęził TR-1a9be639eba8.
+
+**Runda zamykająca (code-only, `git diff main...HEAD`):** completion `accept`, bez blokerów, jedno
+ważne ustalenie — TR-191b1092a326 (verify-kit dawał fałszywe TAMPERED, gdy w ścieżce katalogu
+Claude jest symlink) — naprawione w d9220f8 i CLEAR po osobnej rundzie sprawdzającej. Ta runda
+(z krytykiem kompletności) znalazła TR-ad9963cddd6e (qualify: postawa sandboxa ignorowała
+`sandbox.excludedCommands`) — naprawione w f541ae2 i CLEAR po drugiej osobnej rundzie sprawdzającej
+(drzewo f571a624ff67fb54: completion `accept`, zero ustaleń, `notRechecked` puste). W całym magazynie
+nie ma otwartego blokera (`loop-setup query --latest --writer critic-panel --severity blocker` → `[]`).
+
+**Otwarte po fazie B:**
+
+- L3 wymaga ponownego benchmarku (`/bench-checkers`): hash bloku `<loop-denylist>` się zmienił.
+- Żywy kit w `~/.claude` (2dd64dd) zaktualizuje się przy świeżym kontenerze po merge'u (setup
+  script); ta sesja go nie reinstaluje (nowa odmowa przy `CLAUDECODE`).
+- Decyzja człowieka: zagnieżdżone `.gitignore`/`.gitattributes` pod `src/`, `e2e/` (TR-7ceffeec49a1,
+  HOLD); `next.config.*`, `pnpm-workspace.yaml` poza denylistą.
+- `sandbox.filesystem.allowWrite` nie jest sprawdzane przez `l3-check` (reguły deny Edit kitu i
+  chronione ścieżki Claude Code nadal działają).
+- `denylist-check` czyta tryby z HEAD, nie z indeksu ani drzewa roboczego.
+- Wrapper `env -u CLAUDECODE` omija strażnika instalatora (strażnik polityki; granicą jest sandbox).
+- Z listy fazy B nadal: łańcuch per autor i predykat „landed” po SHA lub patch-id, `bindings/<id>.json`
+  poza katalogiem zapisu, dziennik poza workspace'em, pełna mapa starych referencji, import historii
+  `.claude/memory`, ścieżka A0, Windows; infografiki w `docs/`.
