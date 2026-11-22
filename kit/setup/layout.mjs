@@ -47,6 +47,40 @@ export function statePaths(workspace) {
   return Object.fromEntries(Object.entries(STATE_PATHS).map(([k, rel]) => [k, join(workspace, rel)]));
 }
 
+/**
+ * Where a workspace's git directory lives (phase C, goal C3): beside the workspaces root, never inside
+ * a workspace, so it is outside the per-project additionalDirectories grant and a write into the
+ * workspace cannot plant git config, hooks or attributes git would read at sync time.
+ */
+export const stateRoot = (claudeHome) => join(loopHome(claudeHome), "state");
+export function stateGitDir(claudeHome, id) {
+  if (!isValidId(id)) throw new Error(`not a workspace id: ${id}`);
+  return join(stateRoot(claudeHome), `${id}.git`);
+}
+
+/** The workspace id a state git dir is named by: the layout's, else that of a workspace directly under this home's workspaces root, else null. */
+export function stateIdOf({ claudeHome, workspace, workspaceId = null }) {
+  if (isValidId(workspaceId)) return workspaceId;
+  return isWorkspacePath(workspace, claudeHome) ? basename(posix.normalize(workspace).replace(/\/+$/, "")) : null;
+}
+
+/**
+ * Which git dir serves a workspace, from facts: outside = state/<id>.git exists, inside = what
+ * <ws>/.git is ("none" | "dir" | "other"), id = stateIdOf(…) or null.
+ * → { kind: "outside" | "inside" | "inside-fixed" | "conflict" | "none", gitDir, target?, cause? }
+ *   inside        the old layout: migrates to `target` at the next sync or restore
+ *   inside-fixed  the old layout with no id (a scratch copy): used in place, never migrated
+ *   conflict      refused: two git dirs, or a <ws>/.git that is not a directory
+ */
+export function stateRepoLocation({ claudeHome, workspace, id = null, outside = false, inside = "none" }) {
+  const legacy = join(workspace, ".git");
+  if (inside === "other") return { kind: "conflict", gitDir: null, cause: `${legacy} is not a directory (a gitfile or a symlink could point git anywhere) — remove it` };
+  if (outside && inside === "dir") return { kind: "conflict", gitDir: null, cause: `two git dirs, ${legacy} and ${stateGitDir(claudeHome, id)} — when the second is the migrated copy (the same HEAD), remove ${legacy}` };
+  if (outside) return { kind: "outside", gitDir: stateGitDir(claudeHome, id) };
+  if (inside === "dir") return id ? { kind: "inside", gitDir: legacy, target: stateGitDir(claudeHome, id) } : { kind: "inside-fixed", gitDir: legacy };
+  return { kind: "none", gitDir: null };
+}
+
 const RESTORE = "run `loop-setup restore` (it clones the state branch), or `loop-setup init` for a new workspace";
 
 /**

@@ -33,10 +33,21 @@ There are three paths:
 ```txt
 ~/.claude/loop-setup/workspaces/<slug>-<hex8>/   the loop state: the wiki (index.md, topics/, log.md), the TRACE
                                                  store (trace/records.jsonl), loop-plan.md, loop-run-log.md and
-                                                 quarantine.md; a git repo on the branch claude/loop-state
+                                                 quarantine.md; the work tree of the branch claude/loop-state
+~/.claude/loop-setup/state/<slug>-<hex8>.git     that work tree's git dir, kept outside it (and outside the
+                                                 project's read/write grant)
 <project>/.claude/loop-workspace                 the git-ignored link to that directory
 <project>/.git/config  [loop-setup] workspace    the clone marker (shared by every worktree of the clone)
 ```
+
+The workspace holds no `.git`: a session that can write the workspace cannot plant git config or hooks
+there. Before every git call on the state, `loop-setup` also refuses (exit 2, naming the cause) a
+`.gitattributes` other than the kit template's, any `.gitmodules`, a git dir entry such as `commondir`
+or `config.worktree`, and any config key git does not write for the state repo, because each could
+make git run a command at sync time. `doctor` names the cause; fix it (put the template's
+`.gitattributes` back, remove the planted file or key) and sync again. A workspace made by an older
+kit, with its git dir still at `<workspace>/.git`, moves to `state/` at its next `loop-setup sync` or
+`restore` (a fresh git dir with the same HEAD, refs and history; `doctor` warns until then).
 
 **Portable — what your project carries (commit these):**
 

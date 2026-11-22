@@ -8,7 +8,7 @@ import { runHook } from "./hooks.mjs";
 import { verifyKit } from "./verifykit.mjs";
 import { postureSummary, sandboxPosture } from "./sandbox.mjs";
 import { settingsSources } from "./settings.mjs";
-import { init, linkIgnored, linkTracked, originUrl, remoteHasState, restore, sync, syncStatus } from "./workspace.mjs";
+import { StateRepoRefused, init, linkIgnored, linkTracked, originUrl, remoteHasState, restore, stateRepo, sync, syncStatus } from "./workspace.mjs";
 
 const USAGE = `loop-setup — the loop kit, installed in ~/.claude with one workspace per project
 
@@ -113,8 +113,24 @@ export function doctor({ cwd = process.cwd(), env = process.env } = {}) {
     }
   })();
   add(`.gitignore carries /${LINK_NAME}`, committedIgnore, committedIgnore ? "" : "only the .git/info/exclude backup ignores it", committedIgnore ? "ok" : "warn");
-  if (existsSync(join(layout.workspace, ".git"))) {
-    const s = syncStatus(layout.workspace);
+  // Where the workspace's git dir is (phase C, goal C3). A refused or conflicting state repo stops
+  // here: the sync checks below would run git on it.
+  const STATE_CHECK = "state repo outside the workspace";
+  const loc = stateRepo({ claudeHome, workspace: layout.workspace, workspaceId: layout.workspaceId });
+  if (loc.kind === "none") add(STATE_CHECK, false, "no state repo — cannot sync, re-create it with init or restore");
+  else if (loc.kind === "conflict") add(STATE_CHECK, false, `refused — ${loc.cause}`);
+  else {
+    let s = null;
+    try {
+      s = syncStatus(loc);
+    } catch (e) {
+      if (!(e instanceof StateRepoRefused)) throw e;
+      add(STATE_CHECK, false, `refused — ${e.refusal}`);
+      return checks;
+    }
+    if (loc.kind === "outside") add(STATE_CHECK, true, loc.gitDir);
+    else if (loc.kind === "inside") add(STATE_CHECK, true, `${loc.gitDir} — it moves to ${loc.target} at the next sync or restore`, "warn");
+    else add(STATE_CHECK, true, `${loc.gitDir} — a workspace outside the workspaces root has no id, so its git dir stays in it`, "warn");
     add(`workspace synced to ${STATE_BRANCH}`, s.synced, s.hasRemote ? `${s.dirty} changed, ${s.ahead} unpushed` : "no remote configured", s.synced ? "ok" : "warn");
     const remote = originUrl(layout.projectRoot);
     if (remote) {
@@ -124,7 +140,7 @@ export function doctor({ cwd = process.cwd(), env = process.env } = {}) {
       const norm = normalizeRemote(remote);
       add("auto-restore on session start", auto.includes(norm), auto.includes(norm) ? norm : `install with --auto-restore ${norm} (cloud sessions start empty)`, auto.includes(norm) ? "ok" : "warn");
     }
-  } else add("workspace is a git repository", false, "cannot sync — re-create it with init or restore");
+  }
   return checks;
 }
 
