@@ -416,3 +416,19 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
 - Admission: 0 committed, 1 qualified (TR-6eab59a1408c → topics/remote-env.md, condition: cloud
   session with the setup-script install; at most once per turn via `stop_hook_active`),
   0 quarantined, 0 rejected.
+
+## [2026-11-22] ingest | stale container snapshot, workspace restore gap, git add -N deletions, shim denylist source, next-env rewrite
+- Session: pre-flight found a reused container (kit 2dd64dd, workspace 13 commits behind, stale local
+  main); the user authorized a reinstall; the denylist goal then landed (a9e1ee3, PR #22) with
+  TR-7ceffeec49a1 CLEARed.
+- Admission tally: 2 committed / 3 qualified / 0 quarantined / 1 rejected.
+- Committed: TR-2ed82b98bc8f → topics/workflow.md (SessionStart restores only a missing workspace;
+  doctor's "synced" misses a workspace behind the remote); TR-69332a3f17e0 → topics/code-organization.md
+  (the installed shim's denylist-check reads the installed kit's copy, the repo CLI reads HEAD).
+- Qualified: TR-527aeb7cfe23 → topics/remote-env.md (a session can start on a container saved from an
+  earlier boot; observed once); TR-e3a26b0464fb → topics/trace.md (git add -N . stages deletions, so the
+  implementer capture drops them; git 2.43); TR-704c56b44868 → topics/build-and-verify.md (pnpm build
+  rewrites next-env.d.ts; Next 16.2.9).
+- Rejected: TR-c0815098c611 (pre-phase-B installs lack source.remote — not durable).
+- No CLAUDE.md rule and no new skill proposed. Size: topics/trace.md is at 398 of 400 lines; the next
+  fact for it needs a split first.

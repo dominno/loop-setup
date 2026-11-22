@@ -47,5 +47,10 @@
   session transcript). Observed in a cloud session (2026-11-22) with the kit installed by the setup
   script; it blocks at most once per turn — it returns no decision when the stop is already a
   Stop-hook continuation (`stop_hook_active`). <!-- rec:TR-6eab59a1408c -->
+- A cloud session can start on a container saved from an earlier boot: the setup-script kit
+  install, the loop workspace and the local `main` ref then date from that boot, while the checkout
+  is moved to current `origin/main`. Observed once (2026-11-22): `installed.json` named an
+  ancestor of `origin/main`, and the workspace was 13 commits behind. Compare `source.commit` with
+  `git rev-parse origin/main` before trusting the kit. <!-- rec:TR-527aeb7cfe23 -->
 
 Related: [tooling](./tooling.md) · [testing](./testing.md) · [build-and-verify](./build-and-verify.md)
