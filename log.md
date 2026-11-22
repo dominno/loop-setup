@@ -396,3 +396,13 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
   fresh session on the updated environment.
 - Critic round on the branch: TR-4fe142478925 (important, accept) fixed in 5af23ca and CLEARed after a
   separate re-check round.
+
+## [2026-11-21] lint | quarantine review: TR-325b6a5ea4fb promoted (verification session)
+- Fresh cloud session on the updated environment (container boot 22:56:24Z, setup-script install
+  22:58:35Z, session start 22:58:36Z; nothing installed by hand): kit commands listed and loaded,
+  SessionStart hook output "Restored this session from claude/loop-state" received.
+- Admission: 1 committed (TR-1a9be639eba8 revises TR-325b6a5ea4fb → topics/remote-env.md),
+  0 qualified, 0 quarantined, 0 rejected. Quarantine row TR-325b6a5ea4fb removed.
+- Narrowed: the Stop hook firing at turn end was not observed, so the new claim leaves it out.
+- Scope: only quarantine review (1d) and store checks (1b: `loop-setup lint` ok, `wiki-check` ok);
+  TR-3439a2c9a95a stays quarantined (no reproduction); skills index / diagrams not reviewed.
