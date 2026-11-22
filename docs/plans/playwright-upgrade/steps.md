@@ -110,8 +110,11 @@ Follow-up evidence (after the goal's Stop-hook check):
     (chromium v1243), Chrome Headless Shell 153.0.8010.12 (v1243) and FFmpeg v1011. Their URLs
     answer HTTP 200, and `install-deps --dry-run` resolves a dependency list for
     ubuntu26.04-x64.
-  - Not covered locally: the apt step of `--with-deps` on a real 26.04 runner. That comes with
-    the first CI run (a PR, which this goal does not open).
+  - The apt step of `--with-deps`: Playwright 1.63.0's dependency list for ubuntu26.04-x64 has 12
+    tools and 21 Chromium libraries (`libasound2t64` … `libxrandr2`). All 33 are present in Ubuntu
+    26.04's archive (`dists/resolute`, Version 26.04, main + universe amd64 `Packages.xz`).
+    Running apt itself on a real 26.04 runner comes only with the first CI run (a PR, which this
+    goal does not open).
 
 ## Remaining risks
 
