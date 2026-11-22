@@ -60,6 +60,25 @@ describe("sandboxPosture — L3 needs the sandbox on and the unsandboxed fallbac
     expect(p.problems).toEqual([expect.stringMatching(NOT_HELD)]);
   });
 
+  it.each([
+    ["managed policy sets it true over a user-scope false (managed outranks user)", { managed: { sandbox: { allowUnsandboxedCommands: true } }, user: ON_HELD }, /managed policy sets it true/],
+    ["managed policy sets it true and the user settings set nothing", { managed: { sandbox: { allowUnsandboxedCommands: true } }, user: { sandbox: { enabled: true } } }, /managed policy sets it true/],
+  ])("not met — the fallback is open: %s", (_what, over, re) => {
+    const p = sandboxPosture(sources(over));
+    expect(p).toMatchObject({ ok: false, heldBy: null });
+    expect(p.problems).toEqual([expect.stringMatching(re)]);
+  });
+
+  it("the first managed source that sets allowUnsandboxedCommands decides among managed sources", () => {
+    const many = [
+      { scope: "managed", path: "/etc/claude-code/managed-settings.d/20-b.json", settings: { sandbox: { allowUnsandboxedCommands: false } } },
+      { scope: "managed", path: "/etc/claude-code/managed-settings.json", settings: { sandbox: { allowUnsandboxedCommands: true } } },
+      { scope: "user", path: "/h/.claude/settings.json", settings: { sandbox: { enabled: true } } },
+    ];
+    expect(sandboxPosture(many)).toMatchObject({ ok: true, heldBy: "managed" });
+    expect(sandboxPosture([many[1], many[0], many[2]])).toMatchObject({ ok: false, heldBy: null });
+  });
+
   it("names both conditions at once when neither holds", () => {
     expect(sandboxPosture(sources()).problems).toEqual([expect.stringMatching(OFF), expect.stringMatching(NOT_HELD)]);
   });
