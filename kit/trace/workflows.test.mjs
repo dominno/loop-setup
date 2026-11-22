@@ -1855,20 +1855,30 @@ describe("loop dispatch hygiene: base-checked worktree implementers, maxItems, r
 // patch to vitest.config.ts's include (or to package.json's "test" script) used to pass denylist-check
 // and turn `pnpm test` into a green run that skips every scripts/** gate. So the root package.json, the
 // test/lint/type/E2E runner configs and every path under the root scripts/ directory are protected.
-// So is the repository's own configuration: the root .gitignore and .gitattributes (what git tracks,
-// diffs and checks out), .worktreeinclude (what a fresh worktree copies) and .mcp.json (the MCP
-// servers every session in the project starts). e2e/ and src/ stay open (the loop's real work), a
-// nested .gitignore, .gitattributes or .mcp.json under them included, and so does a scripts/
-// directory that is not the root one.
+// So is the repository's own configuration. A .gitignore or .gitattributes escalates at ANY depth:
+// git honours a nested one for its subtree, so a src/.gitignore can hide a planted file from git
+// status, later diffs, the tree-id and stop-gate fingerprints and review, and a nested .gitattributes
+// changes how its subtree is diffed, merged and checked out (TR-7ceffeec49a1). The rest are read at
+// the root only: .worktreeinclude (what a fresh worktree copies), .mcp.json (the MCP servers every
+// session in the project starts), pnpm-workspace.yaml (which dependencies may run install scripts)
+// and next.config.* (code that pnpm dev and pnpm build run). e2e/ and src/ code stays open (the
+// loop's real work), a nested .mcp.json, .worktreeinclude, pnpm-workspace.yaml or next.config.*
+// included, and so does a scripts/ directory that is not the root one.
 describe("loop denylist: the gate runner (root package.json, runner configs, root scripts/) and the repo config files are protected too", () => {
   const HIT = [
     "vitest.config.ts", "package.json", "eslint.config.mjs", "tsconfig.json", "playwright.config.ts",
     "kit/hooks/stop-gate.test.mjs", "scripts/template-docs.test.mjs", "scripts/check-bundle-size.mjs", "kit/trace/lib.mjs",
     ".gitignore", ".gitattributes", ".worktreeinclude", ".mcp.json",
+    "src/.gitignore", "e2e/.gitattributes", "src/app/deep/.gitignore", "e2e/fixtures/.gitattributes",
+    "pnpm-workspace.yaml", "next.config.mjs", "next.config.ts", "next.config.js",
   ];
-  const CLEAR = ["src/app/page.tsx", "e2e/smoke.spec.ts", "src/scripts/x.ts", "src/.gitignore", "e2e/.gitattributes", "src/app/.mcp.json", "e2e/.worktreeinclude"];
+  const CLEAR = [
+    "src/app/page.tsx", "e2e/smoke.spec.ts", "src/scripts/x.ts", "src/app/.mcp.json", "e2e/.worktreeinclude",
+    "src/foo.gitignore", "src/gitignore.ts", "docs/.gitignore-notes.md", "src/.gitignore.bak", "e2e/.gitattributes.d/x",
+    "src/next.config.ts", "next.config/x.ts", "src/pnpm-workspace.yaml", "packages/a/pnpm-workspace.yaml",
+  ];
 
-  it.each(["loop-iteration.js", "trace-bench.js"])("%s: the production hitsDenylist hits every gate-runner path and leaves src/ and e2e/ open", (file) => {
+  it.each(["loop-iteration.js", "trace-bench.js"])("%s: the production hitsDenylist hits every gate-runner path and leaves src/ and e2e/ code open", (file) => {
     const { hitsDenylist } = loadWorkflowBlock(file, "loop-denylist", ["hitsDenylist"]);
     expect(HIT.filter((p) => !hitsDenylist([p]))).toEqual([]);
     expect(CLEAR.filter((p) => hitsDenylist([p]))).toEqual([]);

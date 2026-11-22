@@ -3,7 +3,7 @@
 import { describe, it, expect, beforeEach, afterEach, afterAll } from "vitest";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DEFAULT_STORE, encodeBench, latestByClaim, loadEntries, loadSchema, opaqueFixtureId, readBench, readPolicyVersion, replay, ROOT, WORKSPACE } from "./lib.mjs";
@@ -1078,9 +1078,10 @@ describe("CLI wiring, end to end in a throwaway repo", () => {
     }
   });
 
-  // The repository's own configuration files are protected at the root only: a nested one under
-  // src/ or e2e/ stays open, as the workflow gate's HIT/CLEAR lists say (kit/trace/workflows.test.mjs).
-  it("denylist-check escalates the root .gitignore, .gitattributes, .worktreeinclude and .mcp.json, and leaves a nested one open", () => {
+  // The repository's own configuration files, as the workflow gate's HIT/CLEAR lists say
+  // (kit/trace/workflows.test.mjs): a .gitignore or .gitattributes at any depth (git honours a nested
+  // one for its subtree), the rest at the root only, so a nested .mcp.json under src/ stays open.
+  it("denylist-check escalates .gitignore and .gitattributes at any depth and the root .worktreeinclude, .mcp.json, pnpm-workspace.yaml and next.config.*, and leaves a nested .mcp.json open", () => {
     const r = tempRepo();
     try {
       const edit = (f) => `diff --git a/${f} b/${f}\n--- a/${f}\n+++ b/${f}\n@@ -1 +1 @@\n-a\n+b\n`;
@@ -1090,11 +1091,82 @@ describe("CLI wiring, end to end in a throwaway repo", () => {
         const out = r.cli(["denylist-check", "--patch", p]);
         return [f, out.status, JSON.parse(out.stdout).hits];
       };
-      const root = [".gitignore", ".gitattributes", ".worktreeinclude", ".mcp.json"];
+      const root = [".gitignore", ".gitattributes", ".worktreeinclude", ".mcp.json", "pnpm-workspace.yaml", "next.config.mjs"];
       expect(root.map(check)).toEqual(root.map((f) => [f, 1, [f]]));
-      const nested = ["src/.gitignore", "e2e/.gitattributes", "src/app/.mcp.json"];
-      expect(nested.map(check)).toEqual(nested.map((f) => [f, 0, []]));
+      const nested = ["src/.gitignore", "e2e/.gitattributes"];
+      expect(nested.map(check)).toEqual(nested.map((f) => [f, 1, [f]]));
+      const open = ["src/app/.mcp.json", "src/next.config.ts", "packages/a/pnpm-workspace.yaml"];
+      expect(open.map(check)).toEqual(open.map((f) => [f, 0, []]));
     } finally {
+      r.cleanup();
+    }
+  });
+
+  // The same rules on REAL patches, captured the way the loop's implementer captures its diff
+  // (`git add -N .`, then `git diff --src-prefix=a/ --dst-prefix=b/`; loop-iteration.js), not hand-written
+  // ones: one change at a time on a committed base tree, then denylist-check on that patch.
+  it("denylist-check reports a real git diff that adds, edits, renames or deletes a nested .gitignore or .gitattributes, or edits pnpm-workspace.yaml or a root next.config.*, in hits (exit 1), and passes src/ and e2e/ code and a nested .mcp.json (exit 0)", () => {
+    const r = tempRepo();
+    const out = mkdtempSync(join(tmpdir(), "trace-patch-"));
+    const put = (files) => {
+      for (const [f, text] of Object.entries(files)) {
+        mkdirSync(dirname(join(r.d, f)), { recursive: true });
+        writeFileSync(join(r.d, f), text);
+      }
+    };
+    try {
+      put({
+        "src/a.ts": "export const a = 1;\n",
+        "src/.gitignore": "*.log\n",
+        "e2e/smoke.spec.ts": "export const smoke = 1;\n",
+        "e2e/.gitattributes": "*.png binary\n",
+        "pnpm-workspace.yaml": "onlyBuiltDependencies:\n  - sharp\n",
+        "next.config.mjs": "export default { reactStrictMode: true };\n",
+      });
+      r.git("add", "-A");
+      r.git("commit", "-qm", "base");
+      // change() edits the working tree; the patch is what git prints for it, then the base tree is restored.
+      // The implementer's capture drops a tracked file's deletion: `git add -N .` stages the removal, so
+      // the worktree-vs-index diff no longer shows it (git 2.43), and a rename keeps only its new side.
+      // The rename and delete cases therefore diff against HEAD (`git diff HEAD -M`), the patch a
+      // hand-made change carries; its rename section names both sides.
+      const IMPLEMENTER = ["diff", "--src-prefix=a/", "--dst-prefix=b/"];
+      const HEAD_M = ["diff", "HEAD", "-M", "--src-prefix=a/", "--dst-prefix=b/"];
+      const check = (change, diffArgs = IMPLEMENTER) => {
+        change();
+        r.git("add", "-N", ".");
+        const diff = r.git(...diffArgs);
+        r.git("reset", "-q");
+        r.git("checkout", "--", ".");
+        r.git("clean", "-fdq", "--", "src", "e2e", "next.config.ts");
+        const p = join(out, "x.patch");
+        writeFileSync(p, diff.stdout);
+        const res = r.cli(["denylist-check", "--patch", p]);
+        const body = JSON.parse(res.stdout);
+        return [diff.status, res.status, body.paths, body.hits];
+      };
+      const hit = [
+        ["a new src/app/.gitignore that ignores everything but itself", () => put({ "src/app/.gitignore": "*\n!.gitignore\n" }), ["src/app/.gitignore"]],
+        ["a new e2e/fixtures/.gitattributes", () => put({ "e2e/fixtures/.gitattributes": "*.ts -diff\n" }), ["e2e/fixtures/.gitattributes"]],
+        ["an edit to src/.gitignore", () => put({ "src/.gitignore": "*.log\nlater.ts\n" }), ["src/.gitignore"]],
+        ["a renamed src/.gitignore", () => renameSync(join(r.d, "src/.gitignore"), join(r.d, "src/ignore.txt")), ["src/.gitignore"], HEAD_M],
+        ["a deleted e2e/.gitattributes", () => rmSync(join(r.d, "e2e/.gitattributes")), ["e2e/.gitattributes"], HEAD_M],
+        ["an edit to pnpm-workspace.yaml", () => put({ "pnpm-workspace.yaml": "onlyBuiltDependencies:\n  - sharp\n  - some-native-dep\n" }), ["pnpm-workspace.yaml"]],
+        ["an edit to next.config.mjs", () => put({ "next.config.mjs": "export default { reactStrictMode: false };\n" }), ["next.config.mjs"]],
+        ["a new next.config.ts", () => put({ "next.config.ts": "export default {};\n" }), ["next.config.ts"]],
+      ];
+      const got = hit.map(([name, change, , diffArgs]) => [name, ...check(change, diffArgs)]);
+      // paths: git's own parse of the patch (both sides of a rename); hits: exactly the protected ones.
+      expect(got.map(([name, gitStatus, status, , hits]) => [name, gitStatus, status, hits])).toEqual(hit.map(([name, , hits]) => [name, 0, 1, hits]));
+      expect(got.find(([name]) => name === "a renamed src/.gitignore")[3].sort()).toEqual(["src/.gitignore", "src/ignore.txt"]);
+      const clear = [
+        ["an edit to src/a.ts", () => put({ "src/a.ts": "export const a = 2;\n" }), ["src/a.ts"]],
+        ["an edit to e2e/smoke.spec.ts", () => put({ "e2e/smoke.spec.ts": "export const smoke = 2;\n" }), ["e2e/smoke.spec.ts"]],
+        ["a new src/app/.mcp.json", () => put({ "src/app/.mcp.json": "{}\n" }), ["src/app/.mcp.json"]],
+      ];
+      expect(clear.map(([name, change]) => [name, ...check(change)])).toEqual(clear.map(([name, , paths]) => [name, 0, 0, paths, []]));
+    } finally {
+      rmSync(out, { recursive: true, force: true });
       r.cleanup();
     }
   });
