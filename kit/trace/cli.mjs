@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { claudeHomeOf, layoutError } from "../setup/facts.mjs";
 import { postureSummary, sandboxPosture, withSandbox } from "../setup/sandbox.mjs";
 import { settingsSources } from "../setup/settings.mjs";
-import { evidenceHome } from "../setup/layout.mjs";
+import { anchorPaths, evidenceHome } from "../setup/layout.mjs";
 import { anchorAdvanced, anchorReport, storeKey, unwritable, withStoreLock, writerId } from "../setup/anchors.mjs";
 import { verifiedKitFile } from "../setup/kitfiles.mjs";
 import { kitGate, parseLevel } from "../setup/integrity.mjs";
@@ -328,19 +328,25 @@ export async function main(argv = process.argv.slice(2)) {
       claudeHome,
       key,
       () => {
-        let w;
-        try {
-          w = writerId(claudeHome, key, { create: true });
-        } catch (e) {
-          if (!unwritable(e)) throw e;
-          w = writerId(claudeHome, key);
+        const existed = writerId(claudeHome, key);
+        let w = existed;
+        if (!w) {
+          try {
+            w = writerId(claudeHome, key, { create: true });
+          } catch (e) {
+            if (!unwritable(e)) throw e;
+          }
         }
         if (!w) throw new Error(`this machine has no writer id for the store (anchors key ${key}) and cannot create one here — start a new session (the SessionStart hook creates it), then write again`);
         const res = fn({ chain: w, workspace: key.startsWith("store-") ? null : key });
-        try {
-          anchorAdvanced({ claudeHome, key, entries: loadEntries(storePath), only: w });
-        } catch (e) {
-          if (!unwritable(e)) throw e;
+        // The writer's own checkpoint — never over a deleted anchors file (that stays a lint error
+        // until a human resets): only into an existing file, or a first one with a new writer id.
+        if (!existed || existsSync(anchorPaths(claudeHome, key).anchors)) {
+          try {
+            anchorAdvanced({ claudeHome, key, entries: loadEntries(storePath), only: w });
+          } catch (e) {
+            if (!unwritable(e)) throw e;
+          }
         }
         return res;
       },

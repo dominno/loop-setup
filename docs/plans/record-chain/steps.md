@@ -193,7 +193,9 @@ was run again; the second run's records are TR-9b325336d7bf … TR-05e230f34069.
 | S04 | SessionStart anchoring and its failure line; the doctor check | kit/setup/hooks.mjs, kit/setup/commands.mjs | same | S03 | done | — |
 | S05 | Policy v4: trace-policy.md marker, sentence and Record guarantees bullet (the precise guarantee, the upgrade rule); `anchors reset` in the adoption guide | kit/rules/trace-policy.md, kit/docs/adoption-guide.md | `pnpm exec vitest run kit/trace/contracts.test.mjs` | S04 | done | — |
 | S03.1 | Pre-round revise TR-2684185404a4 (its repair and failed gates): under the L3 sandbox a writer cannot write `~/.claude/loop-setup/anchors/`, so the hooks (outside the sandbox) create the writer id and the anchors file and anchor every stream — SessionStart and now the Stop hook too (verified first, never over a failure); a writer runs its lock and its own checkpoint best-effort when the directory is not writable, and fails closed only when it has no writer id at all | kit/setup/anchors.mjs, kit/setup/hooks.mjs, kit/trace/cli.mjs, kit/setup/chainrepo.test.mjs | `pnpm exec vitest run kit/setup/chainrepo.test.mjs` | S04 | done | — |
-| S06 | Self-verify chain and the post-implementation critic round | — | `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | S05 | planned | — |
+| S06 | Self-verify chain and the post-implementation critic round | — | `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | S05 | done | — |
+| S06.1 | Post-round TR-eac079ab5043 (qualify; unsandboxed writers): the writer re-created a deleted anchors file without verifying, laundering the loss past `anchors reset`; it now anchors only into an existing file, or a first one with a writer id it just created | kit/trace/cli.mjs, kit/setup/chainrepo.test.mjs | `pnpm exec vitest run kit/setup/chainrepo.test.mjs -t "never re-creates"` | S06 | done | — |
+| S06.2 | Post-round TR-cc11d9353dc3 (accept): stale-lock takeover could rename away a live lock created in between; the lock now carries a nonce, a takeover checks what it renamed and puts a live lock back (`link`, never overwrite), and a holder releases only its own lock | kit/setup/anchors.mjs, kit/setup/anchors.test.mjs | `pnpm exec vitest run kit/setup/anchors.test.mjs` | S06 | done | — |
 
 RED → GREEN:
 - Before S02: `chain.test.mjs` did not load (no `chain.mjs`); 4 chained-writer tests in `lib.test.mjs`
@@ -213,3 +215,17 @@ RED → GREEN:
 Live evidence (read-only, this machine): the new `lint` on the real store (184 lines, all 1.0) → ok,
 0 errors, 0 warnings; the new `doctor` → `ok record store chain and anchors — 0 checkpoint(s)
 anchored`; no anchors directory was created by either.
+
+Post-implementation round (tree 8434d9952a1217b0, HEAD 6269bf0; single-pass reviewer, code-only):
+- `completion` accept: nothing confirmed at blocker, none deferred or revised, no reviewer failed,
+  `notRechecked` empty. The nine pre-round records were re-checked against the code; only
+  TR-fbcce4b1397a was revisited (with new evidence), as TR-eac079ab5043 below.
+- Two confirmed important findings, both fixed RED first (S06.1, S06.2):
+  - TR-eac079ab5043 (qualify): a CLI write re-created a deleted anchors file. RED: "a write never
+    re-creates a deleted anchors file" failed (the file was back, lint green).
+  - TR-cc11d9353dc3 (accept): the stale-lock takeover was not atomic. RED: `anchors.test.mjs` "holds
+    the lock …" (no nonce) and "releases only its own lock" failed.
+- Nice-to-haves: tests for the stale takeover (taken: `anchors.test.mjs`); sync holds the store lock
+  across fetch and push, so a writer waits up to 10 s during a slow push (left, under risks).
+- Full chain at the fixes: typecheck 0, lint 0 (0 warnings), test 0 (24 files, 985), build 0,
+  test:e2e 0 (16).

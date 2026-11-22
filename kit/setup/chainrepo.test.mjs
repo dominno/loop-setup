@@ -244,6 +244,23 @@ describe("anchors: SessionStart checkpoints every stream; a dropped count is cau
     expect(last.checkpoints.find((c) => c.w === w)).toMatchObject({ n: parsed(home, id).filter((v) => v.chain && v.chain.w === w).length });
   });
 
+  it("a write never re-creates a deleted anchors file: lint stays red until a human resets", () => {
+    const af = anchorsFile(home, id);
+    const keep = readFileSync(af, "utf8");
+    rmSync(af);
+    ok(run(home, proj, ["write", "-"], draft("demo:after-rm")));
+    const [rec] = parsed(home, id).slice(-1);
+    ok(run(home, proj, ["act", rec.record_id, "dream", "HOLD", "--note", "after rm"]));
+    expect(existsSync(af)).toBe(false);
+    const l = lint(home, proj);
+    expect(l.status).toBe(1);
+    expect(l.stdout + l.stderr).toMatch(/anchors file .* is missing/);
+    expect(sessionStart({ cwd: proj }, { env: envFor(home) }).hookSpecificOutput.additionalContext).toMatch(/integrity check FAILED: .*anchors file .* is missing/);
+    expect(existsSync(af)).toBe(false); // nor does SessionStart
+    writeFileSync(af, keep);
+    ok(lint(home, proj));
+  });
+
   it("two concurrent writes on one machine share the lock: both stored, the chain intact", async () => {
     const [r1, r2] = await Promise.all([runAsync(home, proj, ["write", "-"], draft("demo:par-1")), runAsync(home, proj, ["write", "-"], draft("demo:par-2"))]);
     expect(r1.status, r1.out).toBe(0);

@@ -3,7 +3,7 @@
 // <home>/loop-setup/anchors/ (layout.mjs names the paths; trace/chain.mjs decides). Nothing here
 // is in the workspace or on the state branch, so a write into the workspace cannot change them.
 import { createHash, randomBytes } from "node:crypto";
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, linkSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { hostname } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { advancedCheckpoints, anchorViolations, checkpointsFor, parseAnchors, walkChains, WRITER_RE } from "../trace/chain.mjs";
@@ -64,10 +64,18 @@ const alive = (pid) => {
     return e.code === "EPERM";
   }
 };
-/** A lock left by a process that is gone on this host (or unreadable and over a minute old). */
-function stale(lock) {
+const readText = (p) => {
   try {
-    const { pid, host } = JSON.parse(readFileSync(lock, "utf8"));
+    return readFileSync(p, "utf8");
+  } catch {
+    return null;
+  }
+};
+/** A lock (as read) left by a process that is gone on this host, or unreadable and over a minute old. */
+function stale(text, lock) {
+  if (text === null) return false;
+  try {
+    const { pid, host } = JSON.parse(text);
     return host === hostname() && Number.isInteger(pid) && !alive(pid);
   } catch {
     try {
@@ -85,12 +93,13 @@ function stale(lock) {
  */
 export function withStoreLock(claudeHome, key, fn, { wait = 10000, onBusy = null, bestEffort = false } = {}) {
   const { lock } = anchorPaths(claudeHome, key);
+  const mine = JSON.stringify({ pid: process.pid, host: hostname(), at: new Date().toISOString(), nonce: randomBytes(8).toString("hex") });
   const deadline = Date.now() + wait;
   for (;;) {
     try {
       mkdirSync(dirname(lock), { recursive: true });
       const fd = openSync(lock, "wx");
-      writeSync(fd, JSON.stringify({ pid: process.pid, host: hostname(), at: new Date().toISOString() }));
+      writeSync(fd, mine);
       closeSync(fd);
       break;
     } catch (e) {
@@ -98,14 +107,25 @@ export function withStoreLock(claudeHome, key, fn, { wait = 10000, onBusy = null
       // concurrent sandboxed writers is then possible, and lint reports it).
       if (bestEffort && unwritable(e)) return fn();
       if (e.code !== "EEXIST") throw e;
-      if (stale(lock)) {
+      const seen = readText(lock);
+      if (stale(seen, lock)) {
+        // Take over by an atomic rename, then check that what was renamed is the stale lock that was
+        // read: if a live process re-created the lock in between, put its lock back (link fails
+        // rather than overwrite when yet another lock appeared meanwhile).
         const aside = `${lock}.stale-${randomBytes(4).toString("hex")}`;
         try {
-          renameSync(lock, aside); // only one taker wins the rename
-          rmSync(aside, { force: true });
+          renameSync(lock, aside);
         } catch {
-          // another process took it over first
+          continue; // another taker won the rename
         }
+        if (readText(aside) !== seen) {
+          try {
+            linkSync(aside, lock);
+          } catch {
+            // a newer lock is in place; leave it to its holder
+          }
+        }
+        rmSync(aside, { force: true });
         continue;
       }
       if (Date.now() > deadline) {
@@ -118,7 +138,7 @@ export function withStoreLock(claudeHome, key, fn, { wait = 10000, onBusy = null
   try {
     return fn();
   } finally {
-    rmSync(lock, { force: true });
+    if (readText(lock) === mine) rmSync(lock, { force: true }); // only its own lock, never one taken over under it
   }
 }
 
