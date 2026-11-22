@@ -140,15 +140,15 @@ status); git errors are already `null` facts (unknown).
 
 | id | description | scope | check | after | status | commit |
 |---|---|---|---|---|---|---|
-| S01 | Tests first (RED): the pure table and port; the real-git scenarios | kit/trace/landed.test.mjs, kit/trace/landedrepo.test.mjs | `pnpm exec vitest run kit/trace/landed.test.mjs kit/trace/landedrepo.test.mjs` | — | done | — |
-| S02 | Core: `landed.mjs` (`landingOf`, `landedStatus`); the port in `readyIds`, `planItems`, `planViolations` | kit/trace/landed.mjs, kit/trace/plan.mjs | same | S01 | done | — |
-| S03 | Adapter: `landingFacts` and the `landed` map in `plan-ready`, `plan-items`, `plan-lint`, `status` | kit/trace/cli.mjs | same | S02 | done | — |
-| S04 | The loop and policy v5: the CLEAR note's `patch-id`/`commit` tokens (loop.md, the planning guide); the `LAND` action (schema, ACTION_ALLOWED, the writer's human-only and CLAUDECODE rules, the policy table, marker 5, contract test) | kit/loop.md, kit/docs/planning-guide.md, kit/rules/trace-policy.md, kit/schema/schema-v1.json, kit/trace/lib.mjs, kit/trace/cli.mjs, kit/trace/contracts.test.mjs | `pnpm exec vitest run scripts/template-docs.test.mjs kit/trace/contracts.test.mjs` | S03 | done | — |
-| S05.1 | Pre-round (diverged context): docs say "same context lines"; real-git scenario: cherry-pick onto a main that changed a line next to the hunk → unknown; a Plan trailer lands it | kit/trace/landedrepo.test.mjs, docs | `pnpm exec vitest run kit/trace/landedrepo.test.mjs -t diverged` | S04 | done | — |
-| S05.2 | Pre-round (legacy fails open): only an unchained CLEAR is legacy; a chained CLEAR without patch-id/commit or with a malformed token is unknown | kit/trace/landed.mjs, kit/trace/landed.test.mjs, kit/trace/landedrepo.test.mjs | `pnpm exec vitest run kit/trace/landed.test.mjs` | S04 | done | — |
-| S05.3 | Pre-round (LAND semantics): LAND refused on a superseded or non-latest record; permanence and the accident-level guard documented | kit/trace/lib.mjs, kit/trace/lib.test.mjs, kit/rules/trace-policy.md, kit/docs/planning-guide.md | `pnpm exec vitest run kit/trace/lib.test.mjs -t LAND` | S04 | done | — |
-| S05.4 | Pre-round (scans, trailer): facts only for waited-on done nodes; ancestor short-circuit; trailers before patch-ids; `--no-merges` on the trailer log; tests for a body-quoted and a merge trailer and a git-call count | kit/trace/landed.mjs, kit/trace/cli.mjs, kit/trace/landedrepo.test.mjs, kit/loop.md | `pnpm exec vitest run kit/trace/landedrepo.test.mjs` | S04 | done | — |
-| S05 | Self-verify chain and the post-implementation critic round | — | `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | S04 | planned | — |
+| S01 | Tests first (RED): the pure table and port; the real-git scenarios | kit/trace/landed.test.mjs, kit/trace/landedrepo.test.mjs | `pnpm exec vitest run kit/trace/landed.test.mjs kit/trace/landedrepo.test.mjs` | — | done | 90414f4 |
+| S02 | Core: `landed.mjs` (`landingOf`, `landedStatus`); the port in `readyIds`, `planItems`, `planViolations` | kit/trace/landed.mjs, kit/trace/plan.mjs | same | S01 | done | 90414f4 |
+| S03 | Adapter: `landingFacts` and the `landed` map in `plan-ready`, `plan-items`, `plan-lint`, `status` | kit/trace/cli.mjs | same | S02 | done | 90414f4 |
+| S04 | The loop and policy v5: the CLEAR note's `patch-id`/`commit` tokens (loop.md, the planning guide); the `LAND` action (schema, ACTION_ALLOWED, the writer's human-only and CLAUDECODE rules, the policy table, marker 5, contract test) | kit/loop.md, kit/docs/planning-guide.md, kit/rules/trace-policy.md, kit/schema/schema-v1.json, kit/trace/lib.mjs, kit/trace/cli.mjs, kit/trace/contracts.test.mjs | `pnpm exec vitest run scripts/template-docs.test.mjs kit/trace/contracts.test.mjs` | S03 | done | 90414f4 |
+| S05.1 | Pre-round (diverged context): docs say "same context lines"; real-git scenario: cherry-pick onto a main that changed a line next to the hunk → unknown; a Plan trailer lands it | kit/trace/landedrepo.test.mjs, docs | `pnpm exec vitest run kit/trace/landedrepo.test.mjs -t diverged` | S04 | done | be096e0 |
+| S05.2 | Pre-round (legacy fails open): only an unchained CLEAR is legacy; a chained CLEAR without patch-id/commit or with a malformed token is unknown | kit/trace/landed.mjs, kit/trace/landed.test.mjs, kit/trace/landedrepo.test.mjs | `pnpm exec vitest run kit/trace/landed.test.mjs` | S04 | done | be096e0 |
+| S05.3 | Pre-round (LAND semantics): LAND refused on a superseded or non-latest record; permanence and the accident-level guard documented | kit/trace/lib.mjs, kit/trace/lib.test.mjs, kit/rules/trace-policy.md, kit/docs/planning-guide.md | `pnpm exec vitest run kit/trace/lib.test.mjs -t LAND` | S04 | done | be096e0 |
+| S05.4 | Pre-round (scans, trailer): facts only for waited-on done nodes; ancestor short-circuit; trailers before patch-ids; `--no-merges` on the trailer log; tests for a body-quoted and a merge trailer and a git-call count | kit/trace/landed.mjs, kit/trace/cli.mjs, kit/trace/landedrepo.test.mjs, kit/loop.md | `pnpm exec vitest run kit/trace/landedrepo.test.mjs` | S04 | done | be096e0 |
+| S05 | Self-verify chain and the post-implementation critic round | — | `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | S04 | done | be096e0 |
 
 RED → GREEN:
 - Before S02: `landed.test.mjs` did not load (no `landed.mjs`). With the pre-change `plan.mjs` and
@@ -170,3 +170,19 @@ before `--no-merges`. After: `landed` + `lib` + `plan` + `landedrepo` 24 + 208 g
 26 files, 1012 tests; typecheck, lint (0 warnings), build and e2e (16) exit 0. One test-only change on
 the way: the legacy node of `landedrepo.test.mjs` is now CLEARed as an unchained (1.0) action, as an
 older kit wrote it — the rule it exercises (only an unchained CLEAR is legacy) is the finding's fix.
+
+Post-implementation round (tree ea9995535bfc027b, HEAD be096e0; single-pass reviewer, code-only):
+`completion` accept, no findings, no reviewer failed, `notRechecked` empty (the reviewer read the
+core, the diff, the callers and the policy/contract change). TR-850ed8145e0c and TR-e29906271d8a
+CLEARed; the five revise records HELD with their resolution; TR-8072f9693313 was refuted. No
+critic-panel blocker is open (the latest blocker records are TR-73f53598baa2, CLEARed, and the two
+revise records of C3 and C4, each re-adjudicated and HELD).
+
+Remaining risks:
+- A combined commit, a rename or deletion, or a landing onto lines that changed next to a hunk has
+  another patch-id: the node stays unknown until a `Plan:` trailer or a human LAND (fail safe).
+- A `Plan:` trailer asserts a landing; it does not prove the whole change landed.
+- LAND's human-only and CLAUDECODE checks guard against accidents; they do not authenticate a human.
+- A base that is not an ancestor of HEAD (a rebase) limits the scan to HEAD's last 1000 commits.
+- `loop-setup status` counts done nodes as done (landing is a readiness rule).
+- The live kit here is still 2dd64dd; policy v5 applies once a kit with this change is installed.

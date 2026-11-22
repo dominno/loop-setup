@@ -237,3 +237,20 @@ Commands (HEAD be096e0):
 Pre-implementation round (tree 761352ceda8dea66): `completion` accept; 2 confirmed important
 (qualify) and 5 revised findings, all taken (S05.1–S05.4; `steps.md`, *Revisions*); TR-8072f9693313
 refuted (note tokens are hex-validated before reaching git).
+
+Post-implementation round (tree ea9995535bfc027b, HEAD be096e0): `completion` accept, no findings, no
+reviewer failed, `notRechecked` empty. Note: in its trimmed `priorRecords`, the `reason` text of
+TR-e29906271d8a was passed garbled (context only; the id, verdict and qualifier were right).
+
+| Critic | Severity | Verdict | Finding | Evidence | Recommended action |
+|---|---|---|---|---|---|
+| — | — | — | (none) | — | — |
+
+Pre-round records closed: TR-850ed8145e0c and TR-e29906271d8a CLEARed; TR-7ffb007e267b,
+TR-18939e8b164b, TR-b05e792136bc, TR-85e0b21a9ddf, TR-29fcbda2e618 (revise) HELD with their
+resolution. No open critic-panel blocker in the store.
+
+Remaining risks: listed in `docs/plans/landed-nodes/steps.md`.
+
+**C5 status: done** (green checkpoint: tests and chain pass, the round accepts with no open blocker,
+records written, sync done, commits pushed).
