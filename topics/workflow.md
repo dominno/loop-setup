@@ -157,6 +157,10 @@
   `loop-setup sync` (lint + wiki-check gate, union merge) pushes it to the orphan branch
   `claude/loop-state` of origin; `loop-setup restore`, or the SessionStart hook for an
   `--auto-restore` project, clones it back into a fresh `~/.claude`. <!-- rec:TR-f2df8fefa89c -->
+- The SessionStart hook restores the workspace only when it is missing (`NO_WORKSPACE` or
+  `MISSING_WORKSPACE`). `doctor`'s "synced" line counts only uncommitted changes and unpushed
+  commits, so an existing workspace that is behind `claude/loop-state` stays behind and still
+  reads as synced. `loop-setup restore` pulls it. <!-- rec:TR-2ed82b98bc8f -->
 
 Related: [build-and-verify](./build-and-verify.md) · [testing](./testing.md) · [trace](./trace.md)
 

@@ -10,5 +10,8 @@
 - Use `eslint-config-next`'s **native flat config** in `eslint.config.mjs`
   (`import next from "eslint-config-next"`). Do **not** use `FlatCompat` — it
   crashes under ESLint 9 ("Converting circular structure to JSON").
+- `pnpm build` (Next 16.2.9) rewrites the tracked `next-env.d.ts` import from
+  `./.next/dev/types/routes.d.ts`, the committed version, to `./.next/types/routes.d.ts`.
+  Restore it with `git checkout -- next-env.d.ts` before committing. <!-- rec:TR-704c56b44868 -->
 
 Related: [tooling](./tooling.md) · [testing](./testing.md) · [workflow](./workflow.md) · [quality-bar](./quality-bar.md)

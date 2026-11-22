@@ -364,6 +364,9 @@ debate stage (critic panel + skeptic already is one).
 - `git diff --src-prefix=a/ --dst-prefix=b/` emits `a/`/`b/` headers even under
   `diff.noprefix` or `diff.mnemonicPrefix`, so the loop implementer asks for them explicitly
   (the denylist parser accepts only `a/`/`b/`). <!-- rec:TR-40be9c919489 -->
+- `git add -N .` stages a tracked file's deletion (git 2.43), so the implementer's capture
+  (`git add -N .`, then `git diff`) leaves deletions out and shows a rename only as its new
+  file. `git diff HEAD -M` shows both sides. <!-- rec:TR-e3a26b0464fb -->
 - Measured (one run, 19-fixture bench, 5 of 10 critics, diff review only — no browser):
   a single-pass all-lens reviewer matched the critic panel (recall 1.00, false-block 0.14
   for both, panel = any critic blocks) at ~5x lower cost; the panel's majority vote lost

@@ -396,3 +396,48 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
   fresh session on the updated environment.
 - Critic round on the branch: TR-4fe142478925 (important, accept) fixed in 5af23ca and CLEARed after a
   separate re-check round.
+
+## [2026-11-21] lint | quarantine review: TR-325b6a5ea4fb promoted (verification session)
+- Fresh cloud session on the updated environment (container boot 22:56:24Z, setup-script install
+  22:58:35Z, session start 22:58:36Z; nothing installed by hand): kit commands listed and loaded,
+  SessionStart hook output "Restored this session from claude/loop-state" received.
+- Admission: 1 committed (TR-1a9be639eba8 revises TR-325b6a5ea4fb → topics/remote-env.md),
+  0 qualified, 0 quarantined, 0 rejected. Quarantine row TR-325b6a5ea4fb removed.
+- Narrowed: the Stop hook firing at turn end was not observed, so the new claim leaves it out.
+- Scope: only quarantine review (1d) and store checks (1b: `loop-setup lint` ok, `wiki-check` ok);
+  TR-3439a2c9a95a stays quarantined (no reproduction); skills index / diagrams not reviewed.
+
+## [2026-11-22] ingest | the runtime fires the kit's Stop hook (phase-B closing proof)
+- Deliberate capture: right after `loop-setup write` of the phase-B critic record TR-191b1092a326
+  (doctor: 1 changed, 0 unpushed), the turn was ended; the runtime returned the kit's reason verbatim
+  as "Stop hook feedback: The loop workspace loop-setup-e3ed255a has unsynced state (1 changed
+  file(s), 0 unpushed commit(s)). Run `loop-setup sync` …" (transcript line 1850, 08:31:59Z,
+  `hook_blocking_error` attachment, hookEvent Stop). Closes the gap TR-1a9be639eba8 narrowed away.
+- Admission: 0 committed, 1 qualified (TR-6eab59a1408c → topics/remote-env.md, condition: cloud
+  session with the setup-script install; at most once per turn via `stop_hook_active`),
+  0 quarantined, 0 rejected.
+
+## [2026-11-22] ingest | stale container snapshot, workspace restore gap, git add -N deletions, shim denylist source, next-env rewrite
+- Session: pre-flight found a reused container (kit 2dd64dd, workspace 13 commits behind, stale local
+  main); the user authorized a reinstall; the denylist goal then landed (a9e1ee3, PR #22) with
+  TR-7ceffeec49a1 CLEARed.
+- Admission tally: 2 committed / 3 qualified / 0 quarantined / 1 rejected.
+- Committed: TR-2ed82b98bc8f → topics/workflow.md (SessionStart restores only a missing workspace;
+  doctor's "synced" misses a workspace behind the remote); TR-69332a3f17e0 → topics/code-organization.md
+  (the installed shim's denylist-check reads the installed kit's copy, the repo CLI reads HEAD).
+- Qualified: TR-527aeb7cfe23 → topics/remote-env.md (a session can start on a container saved from an
+  earlier boot; observed once); TR-e3a26b0464fb → topics/trace.md (git add -N . stages deletions, so the
+  implementer capture drops them; git 2.43); TR-704c56b44868 → topics/build-and-verify.md (pnpm build
+  rewrites next-env.d.ts; Next 16.2.9).
+- Rejected: TR-c0815098c611 (pre-phase-B installs lack source.remote — not durable).
+- No CLAUDE.md rule and no new skill proposed. Size: topics/trace.md is at 398 of 400 lines; the next
+  fact for it needs a split first.
+
+## [2026-11-22] ingest | Playwright pin follows the image (1.63.0 ↔ Chromium 1243), shim fact revised
+- Goal: Playwright 1.56.0 → 1.63.0 (commit 1fab58c); E2E 16/16 on /opt/pw-browsers with no shim; CI e2e back on ubuntu-latest.
+- Admission tally: 0 committed / 2 qualified / 0 quarantined / 0 rejected (both revisions, criterion 4 of the goal).
+- Qualified: TR-ec03808b5b04 revises TR-1a2a7cac54bb (wiki:remote-env:playwright-pin: the pin is 1.63.0, build 1243; the pin follows the image, read off browsers.json) and TR-1ff807be9596 revises TR-e7829fbc9fc1 (wiki:remote-env:pw-browser-build-1243: 2026-11-22 observation, shim only while pin and image disagree) → topics/remote-env.md.
+- Not filed (needs your confirmation, a legacy bullet): the pnpm gotcha says to regenerate the lockfile with `CI=true corepack pnpm@10 install`, but CI=true defaults to --frozen-lockfile, so a changed manifest needs `--no-frozen-lockfile`.
+
+## [2026-11-22] lint | legacy pnpm gotcha rewritten (user confirmed)
+- topics/remote-env.md: the legacy pnpm bullet is rewritten (1e iii) with TR-05757f216432 (qualify, COMMIT_QUALIFIED): the default corepack pnpm is now 12.21.0, not 11; pnpm 11 fails on unapproved native builds; regenerating the lockfile needs `CI=true corepack pnpm@10 install --no-frozen-lockfile`, because CI=true alone implies --frozen-lockfile.
