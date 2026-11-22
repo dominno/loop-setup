@@ -40,7 +40,8 @@ before a non-trivial task.
   - Every L2/L3 action traces to a ready node of `.claude/loop-workspace/loop-plan.md`.
   - Append to `loop-run-log.md` each iteration.
   - Respect the denylist and escalation triggers.
-  - Satisfy the kit's loop checklist before raising the level.
+  - Satisfy the kit's loop checklist before raising the level. L3 needs the sandbox on
+    (`loop-setup l3-check`); sandbox-off L2 has no local tamper resistance.
   - Run the standing loop as `/loop 30m /loop-tick`.
 - **Reporting.**
   - After a critic round, use the table `| Critic | Severity | Verdict | Finding | Evidence | Recommended action |`.
@@ -116,7 +117,11 @@ ready node, and re-plan runs as a first-class step before each dispatch) and
 `.claude/loop-workspace/loop-run-log.md` at the start of each iteration and append an entry
 per iteration; respect the denylist (auth, payments, secrets, infra, CI config, migrations),
 the escalation triggers, and the red-flag stop conditions. Before raising a loop's
-trust level, satisfy `{{KIT}}/loop-checklist.md`.
+trust level, satisfy `{{KIT}}/loop-checklist.md`. L3 also requires the Claude Code sandbox:
+`loop-setup l3-check` is not met unless the effective settings switch it on and hold
+`sandbox.allowUnsandboxedCommands: false` at user scope (`loop-setup doctor` reports the state).
+Sandbox-off L2 has no local tamper resistance: the loop's Bash runs as you and can rewrite the
+installed kit, its manifest and the settings, which `loop-setup verify-kit` only detects afterwards.
 
 **Maker/checker rule:** the pass that verifies a fix must be separate from the pass
 that made it — the implementer never marks its own work "done" (post-implementation

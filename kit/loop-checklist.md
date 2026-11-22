@@ -83,14 +83,24 @@ this repo from the "loop engineering" loop-design checklist
 - [ ] **Measured checker (L3 only):** the latest `bench:trace-bench-lite` record
       (`loop-setup query --latest --claim-id bench:trace-bench-lite`) is `accept` (not
       `qualify` — no excluded runs), was written after the last change to the
-      `<loop-verifier>` block in `{{KIT}}/workflows/loop-iteration.js`, came from a
+      `<loop-verifier>` and `<loop-denylist>` blocks in `{{KIT}}/workflows/loop-iteration.js`, came from a
       `/bench-checkers` run with `repeat ≥ 2` whose verifier arm measured every manifest
       fixture in every repeat (not an `--only` subset, even when scored together with a
       full-manifest run at fewer repeats), and its `failed_gates` contain no F0, F3 or
       F4. **The check is `loop-setup l3-check`:** exit 0 only when all of that holds, else
-      exit 1 listing every unmet condition. The record names the block it measured by its
-      sha256, which must equal the current block's, so any later edit to the block needs a
+      exit 1 listing every unmet condition. The record names both blocks by their sha256,
+      which must equal the current blocks', so any later edit to either block needs a
       re-bench — see `{{KIT}}/rules/trace-policy.md`
+- [ ] **Sandbox (L3 only):** the effective Claude Code settings switch the sandbox on
+      (`sandbox.enabled: true`, best at user scope in `~/.claude/settings.json`, where a
+      repository cannot switch it off between sessions) and hold its unsandboxed fallback closed
+      at user scope: `sandbox.allowUnsandboxedCommands: false` in `~/.claude/settings.json` (or by
+      managed policy), where a project setting cannot reopen it — a project-only `false` does not
+      count. `loop-setup l3-check` checks both and is not met otherwise; `loop-setup doctor`
+      reports the sandbox state. **Sandbox-off L2 has no local tamper resistance:** the loop's
+      Bash runs as you and can rewrite the installed kit, its manifest, the registered commands,
+      the hooks and the settings; `loop-setup verify-kit` detects that drift afterwards, it does
+      not prevent it
 
 ## Red flags (stop & fix before raising the level)
 - Same PR/issue with >3 automated fix attempts without progress.

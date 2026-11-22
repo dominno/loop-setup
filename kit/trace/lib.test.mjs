@@ -45,6 +45,7 @@ import {
   validate,
   VERIFIER_FILE,
   verifierBlockHash,
+  denylistBlockHash,
   writeRecords,
 } from "./lib.mjs";
 
@@ -847,8 +848,18 @@ describe("bench instrument: leak guard and F0 scan", () => {
 // loop-checklist.md's measured-checker item, computed from the latest bench record.
 describe("L3 freshness: bench records name the verifier they measured", () => {
   const block = "// <loop-verifier>\nfunction verifierPrompt() { return 'v1' }\n// </loop-verifier>\n";
+  const denyBlock = "// <loop-denylist>\nconst DENYLIST = /^kit(\\/|$)/\n// </loop-denylist>\n";
   const source = `const before = 1\n${block}const after = 2\n`;
   const sha = (text) => createHash("sha256").update(text).digest("hex");
+
+  it("denylistBlockHash is the sha256 of the <loop-denylist> block, marker lines included: only an edit inside the block changes it", () => {
+    const both = `${source}${denyBlock}const tail = 3\n`;
+    expect(denylistBlockHash(both)).toBe(sha(denyBlock));
+    expect(denylistBlockHash(both.replace("const tail = 3", "const tail = 4"))).toBe(sha(denyBlock));
+    expect(denylistBlockHash(both.replace("^kit", "^kits"))).not.toBe(sha(denyBlock));
+    expect(denylistBlockHash(source)).toBeNull();
+    expect(denylistBlockHash(readFileSync(join(ROOT, VERIFIER_FILE), "utf8"))).toMatch(/^[0-9a-f]{64}$/);
+  });
 
   it("verifierBlockHash is the sha256 of the <loop-verifier> block, marker lines included: only an edit inside the block changes it", () => {
     expect(verifierBlockHash(source)).toBe(sha(block));
@@ -868,11 +879,12 @@ describe("L3 freshness: bench records name the verifier they measured", () => {
     ]);
     const s = scoreBench(manifest, { runs, expectedRuns: 4 });
     const hash = sha(block);
-    const rec = benchRecordDraft(s, { resultsRef: "r.json", runIds: ["0a1b2c3d"], verifierHash: hash });
+    const deny = sha(denyBlock);
+    const rec = benchRecordDraft(s, { resultsRef: "r.json", runIds: ["0a1b2c3d"], verifierHash: hash, denylistHash: deny });
     expect(rec.evidence).toContainEqual({ kind: "file_line", ref: "kit/workflows/loop-iteration.js", result: `<loop-verifier> sha256=${hash}` });
     expect(rec.evidence[0].kind).toBe("measurement");
     expect(writeRecords([rec], ctx())[0].stored).toBe(true);
-    expect(l3Check(replay(loadEntries(store), schema, POLICY), hash)).toMatchObject({ ok: true, unmet: [], verdict: "accept", repeats: 2, recordHash: hash });
+    expect(l3Check(replay(loadEntries(store), schema, POLICY), { verifier: hash, denylist: deny })).toMatchObject({ ok: true, unmet: [], verdict: "accept", repeats: 2, recordHash: hash });
     // Without a hash (the block could not be read) the draft names no verifier, so l3-check never passes it.
     expect(benchRecordDraft(s, { resultsRef: "r.json" }).evidence.map((e) => e.kind)).toEqual(["measurement"]);
   });
@@ -880,9 +892,10 @@ describe("L3 freshness: bench records name the verifier they measured", () => {
 
 describe("l3Check: the L3 measured-checker item, computed from the LATEST bench record", () => {
   const HASH = "b".repeat(64);
+  const DENY = "a".repeat(64); // the <loop-denylist> block the bench ran under (pinned since L3 needs the sandbox)
   // The verifier arm measured the whole (2 bad / 2 good) manifest, as a passing record must show.
   const FULL = { bad: 2, good: 2 };
-  const bench = ({ status = "accept", repeats = 2, gates = ["F2 (informational)"], hash = HASH, ...over } = {}) => ({
+  const bench = ({ status = "accept", repeats = 2, gates = ["F2 (informational)"], hash = HASH, denylist = DENY, ...over } = {}) => ({
     writer_id: "trace-bench/score",
     claim_id: "bench:trace-bench-lite",
     claim_text: `TRACE-Bench-lite (2 bad / 2 good fixtures): ${status} at ${repeats} repeat(s), flags ${gates.join(", ") || "none"}`,
@@ -890,6 +903,7 @@ describe("l3Check: the L3 measured-checker item, computed from the LATEST bench 
     evidence: [
       { kind: "measurement", ref: "loop-setup bench-score r.json [runs 0a1b2c3d]", result: JSON.stringify({ fixtures: FULL, arms: { verifier: { repeats, measured: FULL } } }) },
       ...(hash ? [{ kind: "file_line", ref: VERIFIER_FILE, result: `<loop-verifier> sha256=${hash}` }] : []),
+      ...(denylist ? [{ kind: "file_line", ref: VERIFIER_FILE, result: `<loop-denylist> sha256=${denylist}` }] : []),
     ],
     failed_gates: gates,
     missing: [],
@@ -899,9 +913,9 @@ describe("l3Check: the L3 measured-checker item, computed from the LATEST bench 
     provenance: { workflow: "trace-bench" },
     ...over,
   });
-  const checked = (draft, current = HASH) => {
+  const checked = (draft, current = HASH, denylist = DENY) => {
     expect(writeRecords([draft], ctx())[0].stored).toBe(true);
-    return l3Check(replay(loadEntries(store), schema, POLICY), current);
+    return l3Check(replay(loadEntries(store), schema, POLICY), { verifier: current, denylist });
   };
 
   it("is met by an accept from repeat ≥ 2 that measured the current block (F1 and F2 do not hold it)", () => {
@@ -924,7 +938,8 @@ describe("l3Check: the L3 measured-checker item, computed from the LATEST bench 
     ["an F0", { gates: ["F0 coverage"] }, /F0 coverage/],
     ["an F4", { gates: ["F4 wrong-accept"] }, /F4 wrong-accept/],
     ["a record with no hash (scored before L3 freshness)", { hash: null }, /no <loop-verifier> hash/],
-    ["a measurement whose repeat count does not parse", { evidence: [{ kind: "measurement", ref: "loop-setup bench-score r.json", result: '{"arms":{"verif' }, { kind: "file_line", ref: VERIFIER_FILE, result: `<loop-verifier> sha256=${HASH}` }] }, /repeat count/],
+    ["a measurement whose repeat count does not parse", { evidence: [{ kind: "measurement", ref: "loop-setup bench-score r.json", result: '{"arms":{"verif' }, { kind: "file_line", ref: VERIFIER_FILE, result: `<loop-verifier> sha256=${HASH}` }, { kind: "file_line", ref: VERIFIER_FILE, result: `<loop-denylist> sha256=${DENY}` }] }, /repeat count/],
+    ["a record with no <loop-denylist> hash (scored before denylist pinning)", { denylist: null }, /no <loop-denylist> hash .*re-bench with \/bench-checkers/],
   ])("is not met by %s, and names exactly that condition", (_what, over, re) => {
     const res = checked(bench(over));
     expect(res.ok).toBe(false);
@@ -932,11 +947,22 @@ describe("l3Check: the L3 measured-checker item, computed from the LATEST bench 
     expect(res.unmet[0]).toMatch(re);
   });
 
+  it("is not met once the <loop-denylist> block changed after the bench, saying so and asking for a re-bench", () => {
+    const res = checked(bench(), HASH, "c".repeat(64));
+    expect(res).toMatchObject({ ok: false, denylistRecordHash: DENY, denylistCurrentHash: "c".repeat(64) });
+    expect(res.unmet).toEqual([expect.stringMatching(/another <loop-denylist> block \(sha256 aaaaaaaaaaaa…; the current block's is cccccccccccc…\) — the denylist changed after the bench: re-bench with \/bench-checkers/)]);
+  });
+
+  it("fails closed when the current <loop-denylist> block cannot be read, and says the file is unreadable once when neither block can be read", () => {
+    expect(checked(bench(), HASH, null).unmet).toEqual([expect.stringMatching(/current <loop-denylist> block in kit\/workflows\/loop-iteration\.js cannot be read/)]);
+    expect(l3Check(replay(loadEntries(store), schema, POLICY), { verifier: null, denylist: null }).unmet).toEqual([expect.stringMatching(/the current <loop-verifier> and <loop-denylist> blocks in kit\/workflows\/loop-iteration\.js cannot be read/)]);
+  });
+
   it("reads the latest bench record, licensing or not: an older accept never stands in for a newer qualify", () => {
     const [first] = writeRecords([bench()], ctx());
     const [second] = writeRecords([bench({ status: "qualify", revises: first.record_id })], { ...ctx(), now: "2026-10-08T12:00:00.000Z" });
     expect(second.stored).toBe(true);
-    const res = l3Check(replay(loadEntries(store), schema, POLICY), HASH);
+    const res = l3Check(replay(loadEntries(store), schema, POLICY), { verifier: HASH, denylist: DENY });
     expect(res.record_id).toBe(second.record_id);
     expect(res.unmet).toEqual([expect.stringMatching(/qualify, not accept/)]);
   });
@@ -945,11 +971,11 @@ describe("l3Check: the L3 measured-checker item, computed from the LATEST bench 
     const all = checked(bench({ status: "qualify", repeats: 1, gates: ["F3 instability"], hash: "d".repeat(64) }));
     expect(all.ok).toBe(false);
     expect(all.unmet).toHaveLength(4);
-    const unreadable = l3Check(replay(loadEntries(store), schema, POLICY), null);
+    const unreadable = l3Check(replay(loadEntries(store), schema, POLICY), { verifier: null, denylist: DENY });
     expect(unreadable.ok).toBe(false);
     expect(unreadable.unmet.some((u) => /current <loop-verifier> block .* cannot be read/.test(u))).toBe(true);
-    expect(l3Check(replay([], schema, POLICY), HASH)).toMatchObject({ ok: false, record_id: null, unmet: [expect.stringMatching(/no bench:trace-bench-lite record/)] });
-    const broken = l3Check(replay(parseLines("{not json\n", "records.jsonl"), schema, POLICY), HASH);
+    expect(l3Check(replay([], schema, POLICY), { verifier: HASH, denylist: DENY })).toMatchObject({ ok: false, record_id: null, unmet: [expect.stringMatching(/no bench:trace-bench-lite record/)] });
+    const broken = l3Check(replay(parseLines("{not json\n", "records.jsonl"), schema, POLICY), { verifier: HASH, denylist: DENY });
     expect(broken.ok).toBe(false);
     expect(broken.unmet.some((u) => /does not replay/.test(u))).toBe(true);
   });
@@ -961,6 +987,7 @@ describe("l3Check: the L3 measured-checker item, computed from the LATEST bench 
 // names no verifier. Synthetic manifests and runs only — never real fixture ids or patches.
 describe("L3 needs a full verifier bench: measured fixture counts", () => {
   const HASH = "e".repeat(64);
+  const DENY = "f".repeat(64);
   const manifest = { fixtures: [{ id: "B1", kind: "bad" }, { id: "B2", kind: "bad" }, { id: "G1", kind: "good" }, { id: "G2", kind: "good" }] };
   // Verifier runs on `ids` at `repeats` (default 0 and 1): bad diffs held, good ones licensed — no F0, F3 or F4.
   const verifierRuns = (ids, repeats = [0, 1]) =>
@@ -973,7 +1000,7 @@ describe("L3 needs a full verifier bench: measured fixture counts", () => {
   const scored = (ids) => scoreBench(manifest, { runs: verifierRuns(ids), expectedRuns: ids.length * 2 });
   const l3 = (draft) => {
     expect(writeRecords([draft], ctx())[0].stored).toBe(true);
-    return l3Check(replay(loadEntries(store), schema, POLICY), HASH);
+    return l3Check(replay(loadEntries(store), schema, POLICY), { verifier: HASH, denylist: DENY });
   };
 
   it("scoreBench: each scored arm carries the manifest fixtures it measured — distinct ids among its scored runs", () => {
@@ -1002,7 +1029,7 @@ describe("L3 needs a full verifier bench: measured fixture counts", () => {
     const s = scored(ids);
     expect(s.arms.verifier.repeats).toBe(2);
     expect(s.flags.filter((f) => /^F[034]/.test(f))).toEqual([]);
-    const res = l3(benchRecordDraft(s, { resultsRef: "r.json", runIds: ["0a1b2c3d"], verifierHash: HASH }));
+    const res = l3(benchRecordDraft(s, { resultsRef: "r.json", runIds: ["0a1b2c3d"], verifierHash: HASH, denylistHash: DENY }));
     expect(res.ok).toBe(false);
     expect(res.unmet).toHaveLength(1);
     expect(res.unmet[0]).toMatch(re);
@@ -1012,7 +1039,7 @@ describe("L3 needs a full verifier bench: measured fixture counts", () => {
   it("the same bench with every manifest fixture measured meets l3Check", () => {
     const s = scored(["B1", "B2", "G1", "G2"]);
     expect(s.arms.verifier.measured).toEqual({ bad: 2, good: 2 });
-    const res = l3(benchRecordDraft(s, { resultsRef: "r.json", runIds: ["0a1b2c3d"], verifierHash: HASH }));
+    const res = l3(benchRecordDraft(s, { resultsRef: "r.json", runIds: ["0a1b2c3d"], verifierHash: HASH, denylistHash: DENY }));
     expect(res).toMatchObject({ ok: true, unmet: [], verdict: "accept", repeats: 2, recordHash: HASH });
   });
 
@@ -1023,12 +1050,19 @@ describe("L3 needs a full verifier bench: measured fixture counts", () => {
     ["counts that are not integers", { fixtures: { bad: "2", good: 2 }, arms: { verifier: { repeats: 2, measured: { bad: "2", good: 2 } } } }],
     ["a manifest with no bad fixture (a verifier that never saw a bad diff)", { fixtures: { bad: 0, good: 2 }, arms: { verifier: { repeats: 2, measured: { bad: 0, good: 2 } } } }],
   ])("l3Check fails closed on %s, saying to re-bench the full manifest", (_what, metrics) => {
-    const draft = benchRecordDraft(scored(["B1", "B2", "G1", "G2"]), { resultsRef: "r.json", runIds: ["0a1b2c3d"], verifierHash: HASH });
+    const draft = benchRecordDraft(scored(["B1", "B2", "G1", "G2"]), { resultsRef: "r.json", runIds: ["0a1b2c3d"], verifierHash: HASH, denylistHash: DENY });
     draft.evidence = draft.evidence.map((e) => (e.kind === "measurement" ? { ...e, result: JSON.stringify(metrics) } : e));
     const res = l3(draft);
     expect(res.ok).toBe(false);
     expect(res.unmet).toHaveLength(1);
     expect(res.unmet[0]).toMatch(/re-bench the full manifest/);
+  });
+
+  it("benchRecordDraft names the <loop-denylist> block beside the <loop-verifier> one, and neither without a verifier arm", () => {
+    const deny = (rec) => rec.evidence.filter((e) => e.kind === "file_line" && e.ref === VERIFIER_FILE).map((e) => e.result);
+    expect(deny(benchRecordDraft(scored(["B1", "B2", "G1", "G2"]), { resultsRef: "r.json", verifierHash: HASH, denylistHash: DENY }))).toEqual([`<loop-verifier> sha256=${HASH}`, `<loop-denylist> sha256=${DENY}`]);
+    const single = scoreBench(manifest, { runs: manifest.fixtures.map((f) => ({ arm: "single-pass", fixtureId: f.id, block: f.kind === "bad" })) });
+    expect(deny(benchRecordDraft(single, { resultsRef: "r.json", verifierHash: HASH, denylistHash: DENY }))).toEqual([]);
   });
 
   it("benchRecordDraft names a <loop-verifier> block only when the score has a verifier arm, and states each arm's measured counts next to the manifest's", () => {
@@ -1074,7 +1108,7 @@ describe("L3 needs a full verifier bench: measured fixture counts", () => {
     });
 
     it("l3Check is unmet on that mixed bench (repeat 2, accept, no F0, F3 or F4) with the full-manifest message alone; the record shows where coverage fell short", () => {
-      const draft = benchRecordDraft(scoreBench(manifest, { runs: mixedRuns() }), { resultsRef: "part.json full.json", runIds: ["0a1b2c3d", "4e5f6a7b"], verifierHash: HASH });
+      const draft = benchRecordDraft(scoreBench(manifest, { runs: mixedRuns() }), { resultsRef: "part.json full.json", runIds: ["0a1b2c3d", "4e5f6a7b"], verifierHash: HASH, denylistHash: DENY });
       expect(draft.final_status).toBe("accept");
       expect(draft.claim_text).toMatch(/verifier measured 0\/2 bad and 2\/2 good fixtures in every repeat/);
       const metrics = JSON.parse(draft.evidence.find((e) => e.kind === "measurement").result);
@@ -1088,7 +1122,7 @@ describe("L3 needs a full verifier bench: measured fixture counts", () => {
     });
 
     it("the same manifest with every fixture at repeats 0 and 1 meets l3Check, and its claim says the counts hold in every repeat", () => {
-      const draft = benchRecordDraft(scored(["B1", "B2", "G1", "G2"]), { resultsRef: "r.json", runIds: ["0a1b2c3d"], verifierHash: HASH });
+      const draft = benchRecordDraft(scored(["B1", "B2", "G1", "G2"]), { resultsRef: "r.json", runIds: ["0a1b2c3d"], verifierHash: HASH, denylistHash: DENY });
       expect(draft.claim_text).toMatch(/verifier measured 2\/2 bad and 2\/2 good fixtures in every repeat/);
       expect(l3(draft)).toMatchObject({ ok: true, unmet: [], verdict: "accept", repeats: 2, recordHash: HASH });
       // A run without a verifier arm had no repeats: its claim never says "in every repeat".
@@ -1097,7 +1131,7 @@ describe("L3 needs a full verifier bench: measured fixture counts", () => {
     });
 
     it("l3Check's fail-closed message (a record without the counts) also asks for every fixture in every repeat", () => {
-      const draft = benchRecordDraft(scored(["B1", "B2", "G1", "G2"]), { resultsRef: "r.json", runIds: ["0a1b2c3d"], verifierHash: HASH });
+      const draft = benchRecordDraft(scored(["B1", "B2", "G1", "G2"]), { resultsRef: "r.json", runIds: ["0a1b2c3d"], verifierHash: HASH, denylistHash: DENY });
       draft.evidence = draft.evidence.map((e) => (e.kind === "measurement" ? { ...e, result: JSON.stringify({ arms: { verifier: { repeats: 2 } } }) } : e));
       const res = l3(draft);
       expect(res.unmet).toHaveLength(1);

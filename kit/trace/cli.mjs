@@ -8,7 +8,9 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { layoutError } from "../setup/facts.mjs";
+import { claudeHomeOf, layoutError } from "../setup/facts.mjs";
+import { postureSummary, sandboxPosture, withSandbox } from "../setup/sandbox.mjs";
+import { settingsSources } from "../setup/settings.mjs";
 import { legacyTarget } from "../setup/layout.mjs";
 import { verifiedKitFile } from "../setup/kitfiles.mjs";
 import { kitGate, parseLevel } from "../setup/integrity.mjs";
@@ -51,6 +53,7 @@ import {
   scoreBench,
   storeMetrics,
   verifierBlockHash,
+  denylistBlockHash,
   wikiViolations,
   writeRecords,
 } from "./lib.mjs";
@@ -115,11 +118,13 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
   loop-setup wiki-check                the memory wiki (.claude/loop-workspace) against the store (consistency, not truth): rec:
                                        comments, committed facts, quarantine rows, page sizes — JSON {ok, errors,
                                        warnings}; exit 1 on an error, 2 when the store does not replay
-  loop-setup l3-check [--json]         the L3 measured-checker item of kit/loop-checklist.md, computed: the latest
+  loop-setup l3-check [--json]         the L3 items of kit/loop-checklist.md, computed: the latest
                                        bench:trace-bench-lite record is accept, from a verifier arm run at repeat ≥ 2
                                        over every manifest fixture in every repeat (no --only subset), with no F0, F3
-                                       or F4 in its failed_gates, and names the current <loop-verifier> block by its
-                                       sha256 — exit 0 when all hold, else exit 1 listing every unmet condition
+                                       or F4 in its failed_gates, and names the current <loop-verifier> and
+                                       <loop-denylist> blocks by their sha256; and the effective settings switch the
+                                       sandbox on with sandbox.allowUnsandboxedCommands held false at user scope —
+                                       exit 0 when all hold, else exit 1 listing every unmet condition
   loop-setup reaudit [--claim-prefix P] [--unreachable] [--act | --annotate]
                                        licensing records whose file evidence changed since their commit; one whose
                                        commit the repo no longer has (squashed away) is listed apart, as unreachable;
@@ -134,8 +139,8 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
                                        score trace-bench run(s) (runs concatenated); agent transcripts are scanned for
                                        leaked ground truth (contaminated runs excluded, F0); --record writes the record:
                                        the fixtures each arm measured next to the manifest's counts, and — for a run
-                                       with a verifier arm — the <loop-verifier> block it measured by its sha256 (read
-                                       when you score)
+                                       with a verifier arm — the <loop-verifier> and <loop-denylist> blocks it ran
+                                       with by their sha256 (read when you score)
   loop-setup bench-unpack <dir>        decode the fixture bundle into <dir> (outside the repo!) for editing
   loop-setup bench-pack <dir>          re-encode <dir>/fixtures.json (patches inline) into the bundle
   loop-setup bench-judge [--only ids] [--skip-e2e] [--recover]   verify each fixture's judge.catches by running its
@@ -220,14 +225,15 @@ function codeText() {
     .join("\n");
 }
 
-// The sha256 of the production <loop-verifier> block as it is in the working tree (the bench
-// Workflow runs trace-bench.js's byte-identical copy, parity-tested), or null when it cannot be
-// read: bench-score records it, l3-check compares the latest bench record against it.
-function currentVerifierHash() {
+// The sha256 of the production <loop-verifier> and <loop-denylist> blocks as they are in the working
+// tree (the bench Workflow runs trace-bench.js's byte-identical copies, parity-tested), each null when
+// it cannot be read: bench-score records them, l3-check compares the latest bench record against them.
+function currentBlockHashes() {
   try {
-    return verifierBlockHash(readFileSync(join(KIT_ROOT, "workflows/loop-iteration.js"), "utf8"));
+    const source = readFileSync(join(KIT_ROOT, "workflows/loop-iteration.js"), "utf8");
+    return { verifier: verifierBlockHash(source), denylist: denylistBlockHash(source) };
   } catch {
-    return null; // no such file: nothing to name or compare
+    return { verifier: null, denylist: null }; // no such file: nothing to name or compare
   }
 }
 
@@ -678,12 +684,14 @@ export async function main(argv = process.argv.slice(2)) {
   }
 
   if (cmd === "l3-check") {
-    // The L3 measured-checker item, computed (l3Check): a store that does not replay, or a block that
-    // cannot be read, is an unmet condition too — exit 1 unless every condition holds.
-    const res = l3Check(state, currentVerifierHash());
+    // The L3 items, computed: the measured checker (l3Check — a store that does not replay, or a block
+    // that cannot be read, is an unmet condition too) AND the sandbox posture of the effective settings
+    // (sandboxPosture over the settings adapter) — exit 1 unless every condition holds.
+    const posture = sandboxPosture(settingsSources({ claudeHome: claudeHomeOf(process.env), projectRoot: PROJECT_ROOT }));
+    const res = withSandbox(l3Check(state, currentBlockHashes()), posture);
     if (flags.json) out({ ...res, store: storePath }, true);
     else if (res.ok) {
-      out(`l3-check: met — ${res.record_id} is accept from ${res.repeats} repeat(s) over the full manifest, with no F0, F3 or F4, and measured the current <loop-verifier> block (sha256 ${res.currentHash.slice(0, 12)}…)`);
+      out(`l3-check: met — ${res.record_id} is accept from ${res.repeats} repeat(s) over the full manifest, with no F0, F3 or F4, and measured the current <loop-verifier> block (sha256 ${res.currentHash.slice(0, 12)}…) under the current <loop-denylist> block (sha256 ${res.denylistCurrentHash.slice(0, 12)}…); sandbox ${postureSummary(posture).replace("; ", ", ")}`);
     } else {
       out(`l3-check: NOT met — ${res.unmet.length} unmet condition(s); latest bench:trace-bench-lite record: ${res.record_id || "none"}\n${res.unmet.map((u) => `  - ${u}`).join("\n")}`);
     }
@@ -912,7 +920,8 @@ export async function main(argv = process.argv.slice(2)) {
       const prior = latestByClaim(state.records, state.superseded).get("bench:trace-bench-lite");
       const commit = git(["rev-parse", "--short=12", "HEAD"]) || undefined;
       const branch = git(["rev-parse", "--abbrev-ref", "HEAD"]) || undefined;
-      const res = writeRecords([benchRecordDraft(score, { resultsRef, priorRecordId: prior && prior.record_id, runIds, verifierHash: currentVerifierHash() })], { storePath, now, policyVersion, commit, branch, schema, forbidden: benchForbidden() });
+      const hashes = currentBlockHashes();
+      const res = writeRecords([benchRecordDraft(score, { resultsRef, priorRecordId: prior && prior.record_id, runIds, verifierHash: hashes.verifier, denylistHash: hashes.denylist })], { storePath, now, policyVersion, commit, branch, schema, forbidden: benchForbidden() });
       out(res, true);
       return res.every((r) => r.stored) ? 0 : 1;
     }

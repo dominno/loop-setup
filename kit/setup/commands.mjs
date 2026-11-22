@@ -6,6 +6,8 @@ import { LINK_NAME, STATE_BRANCH, loopHome, statePaths } from "./layout.mjs";
 import { install, normalizeRemote, uninstall, verifyInstall } from "./install.mjs";
 import { runHook } from "./hooks.mjs";
 import { verifyKit } from "./verifykit.mjs";
+import { postureSummary, sandboxPosture } from "./sandbox.mjs";
+import { settingsSources } from "./settings.mjs";
 import { init, linkIgnored, linkTracked, originUrl, remoteHasState, restore, sync, syncStatus } from "./workspace.mjs";
 
 const USAGE = `loop-setup — the loop kit, installed in ~/.claude with one workspace per project
@@ -83,6 +85,10 @@ export function doctor({ cwd = process.cwd(), env = process.env } = {}) {
     add("SessionStart and Stop hooks registered", has("SessionStart") && has("Stop"));
   }
   const layout = currentLayout({ cwd, env });
+  // L3 needs the sandbox on with the unsandboxed fallback held closed (the same decision as l3-check);
+  // without it a loop is fine at L1/L2, so this is a warning, never a failure.
+  const posture = sandboxPosture(settingsSources({ claudeHome, projectRoot: layout.projectRoot }));
+  add("sandbox (L3 requires it)", true, posture.ok ? postureSummary(posture) : `${posture.problems.join("; ")} — L3 is unavailable; sandbox-off L2 has no local tamper resistance`, posture.ok ? "ok" : "warn");
   if (!layout.projectRoot) {
     add("inside a git project", false, "not inside a git repository");
     return checks;

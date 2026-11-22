@@ -10,6 +10,7 @@ import { loopHome } from "./layout.mjs";
 import { manifestPathFor } from "./kitfiles.mjs";
 import { compareInstall, expectedInstall, isCommitId, protectedVerdict, redactRemote, settingsEntryCount } from "./integrity.mjs";
 import { protectedSource } from "./kitremote.mjs";
+import { readSettingsFile } from "./settings.mjs";
 
 const readJson = (p) => {
   try {
@@ -26,20 +27,8 @@ const readFile = (p) => {
     return null;
   }
 };
-/** A settings file: {} when absent, { error } when it does not parse. */
-const readSettings = (p) => {
-  let text;
-  try {
-    text = readFileSync(p, "utf8");
-  } catch {
-    return {};
-  }
-  try {
-    return JSON.parse(text);
-  } catch (e) {
-    return { error: e.message };
-  }
-};
+/** A settings file: {} when absent, { error } when it cannot be read or parsed (fail closed). */
+const readSettings = (p) => readSettingsFile(p) ?? {};
 /** Every entry under dir as { rel → Buffer }, with null for anything that is not a regular file (a symlink, a fifo…). */
 function readTree(dir) {
   const tree = new Map();

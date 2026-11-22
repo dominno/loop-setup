@@ -268,7 +268,8 @@ the live store. Pre-registered — results that count **against** our design:
 **L3 freshness (`loop-setup l3-check`):** a bench record names the verifier it measured — a
 `file_line` item on `kit/workflows/loop-iteration.js` whose result is `<loop-verifier>
 sha256=<hex>`, the hash of that block (marker lines included) as `bench-score --record` reads
-it from the working tree (a run without a verifier arm names none). `loop-setup l3-check` is
+it from the working tree — and the denylist that guarded it, a second such item `<loop-denylist>
+sha256=<hex>` (a run without a verifier arm names neither). `loop-setup l3-check` is
 the measured-checker item of `kit/loop-checklist.md`, computed: the latest
 `bench:trace-bench-lite` record, licensing or not, must be `accept`, from a verifier arm run at
 `repeat ≥ 2` over every manifest fixture in every repeat (its measurement item's
@@ -277,9 +278,11 @@ index present, never the union over repeats, equal the manifest's `fixtures` cou
 without them, or from a run over part of the manifest, e.g. with `bench-args --only`, never
 passes, even when scored with a full-manifest run at fewer repeats; each `perRepeat` entry
 carries its own counts, to show where coverage fell short), with no F0, F3 or F4 in its
-`failed_gates`, and its hash must equal the current block's; exit 0 only when all hold, else
-exit 1 listing every unmet condition (a store that does not replay, or a block that cannot be
-read, is one too). Any edit inside the block needs a re-bench before L3, and a record scored
+`failed_gates`, and both its hashes must equal the current blocks' (a record without the
+`<loop-denylist>` hash, scored before denylist pinning, needs a re-bench); and the effective
+settings must switch the sandbox on with `sandbox.allowUnsandboxedCommands: false` held at user
+scope (kit/setup/sandbox.mjs); exit 0 only when all hold, else exit 1 listing every unmet
+condition (a store that does not replay, or a block that cannot be read, is one too). Any edit inside the block needs a re-bench before L3, and a record scored
 before this check carries no hash, so it never passes. Partial: the hash is read when you
 score, so it cannot see an edit made between the run and the score, or a `trace-bench.js` copy
 (the one the Workflow runs) that drifted from the production block — `pnpm test`'s parity check
