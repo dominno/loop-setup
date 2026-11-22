@@ -124,7 +124,8 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
                                        over every manifest fixture in every repeat (no --only subset), with no F0, F3
                                        or F4 in its failed_gates, and names the current <loop-verifier> and
                                        <loop-denylist> blocks by their sha256; and the effective settings switch the
-                                       sandbox on with sandbox.allowUnsandboxedCommands held false at user scope —
+                                       sandbox on with sandbox.allowUnsandboxedCommands held false at user scope
+                                       and no sandbox.excludedCommands in any scope —
                                        exit 0 when all hold, else exit 1 listing every unmet condition
   loop-setup reaudit [--claim-prefix P] [--unreachable] [--act | --annotate]
                                        licensing records whose file evidence changed since their commit; one whose

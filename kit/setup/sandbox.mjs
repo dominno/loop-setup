@@ -14,6 +14,9 @@
  *     decides (managed policy outranks the user — a managed true opens the fallback); otherwise a
  *     false in the user settings holds it, which a project cannot reopen (Claude Code: "held closed"),
  *     while a project-only false can be flipped back;
+ *   - sandbox.excludedCommands must be empty in every scope: the commands it names run outside the
+ *     sandbox with no filesystem restriction, so one of them could rewrite the kit (a value that is
+ *     not a list fails closed);
  *   - a settings file that does not parse fails closed.
  * → { ok, enabled, enabledBy: scope|null, heldBy: scope|null, problems }
  */
@@ -34,6 +37,12 @@ export function sandboxPosture(sources) {
   const holder = managed ? (managed.settings.sandbox.allowUnsandboxedCommands === false ? managed : null) : user || null;
   if (!holder && managed) problems.push(`sandbox.allowUnsandboxedCommands is not held false at user scope: managed policy sets it true (${managed.path}), which outranks the user settings — the unsandboxed fallback is open`);
   else if (!holder) problems.push("sandbox.allowUnsandboxedCommands is not held false at user scope — set it to false in ~/.claude/settings.json (or by managed policy); until then a command can fall back to running unsandboxed, and a project setting cannot hold it closed");
+  for (const s of sources) {
+    const excluded = s.settings?.sandbox?.excludedCommands;
+    if (excluded != null && !(Array.isArray(excluded) && excluded.length === 0)) {
+      problems.push(`sandbox.excludedCommands is set in ${s.scope} settings (${s.path}): ${JSON.stringify(excluded)} run outside the sandbox — L3 needs it empty in every scope`);
+    }
+  }
   return { ok: problems.length === 0, enabled, enabledBy: enabled ? set.scope : null, heldBy: holder ? holder.scope : null, problems };
 }
 

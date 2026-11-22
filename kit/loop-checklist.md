@@ -96,8 +96,9 @@ this repo from the "loop engineering" loop-design checklist
       repository cannot switch it off between sessions) and hold its unsandboxed fallback closed
       at user scope: `sandbox.allowUnsandboxedCommands: false` in `~/.claude/settings.json` (or by
       managed policy), where a project setting cannot reopen it — a project-only `false` does not
-      count. `loop-setup l3-check` checks both and is not met otherwise; `loop-setup doctor`
-      reports the sandbox state. **Sandbox-off L2 has no local tamper resistance:** the loop's
+      count; and no scope names `sandbox.excludedCommands` (those commands run outside the
+      sandbox, with no filesystem restriction). `loop-setup l3-check` checks all three and is not
+      met otherwise; `loop-setup doctor` reports the sandbox state. **Sandbox-off L2 has no local tamper resistance:** the loop's
       Bash runs as you and can rewrite the installed kit, its manifest, the registered commands,
       the hooks and the settings; `loop-setup verify-kit` detects that drift afterwards, it does
       not prevent it

@@ -79,6 +79,20 @@ describe("sandboxPosture — L3 needs the sandbox on and the unsandboxed fallbac
     expect(sandboxPosture([many[1], many[0], many[2]])).toMatchObject({ ok: false, heldBy: null });
   });
 
+  // Commands named in sandbox.excludedCommands run outside the sandbox with no filesystem restriction,
+  // so one of them could rewrite the kit: L3 needs the list empty in every scope Claude Code honours.
+  it("not met: a non-empty sandbox.excludedCommands in any scope, named with its scope; an empty list is met; a non-list fails closed", () => {
+    const EXCLUDED = /^sandbox\.excludedCommands is set in (managed|local|project|user) settings \(.+\): \["node \*"\] run outside the sandbox — L3 needs it empty in every scope$/;
+    for (const scope of ["managed", "local", "project", "user"]) {
+      const excluded = { sandbox: { excludedCommands: ["node *"] } };
+      const p = sandboxPosture(sources(scope === "user" ? { user: { sandbox: { ...ON_HELD.sandbox, excludedCommands: ["node *"] } } } : { user: ON_HELD, [scope]: excluded }));
+      expect([scope, p.ok, p.problems], scope).toEqual([scope, false, [expect.stringMatching(EXCLUDED)]]);
+      expect(p.problems[0], scope).toContain(`in ${scope} settings`);
+    }
+    expect(sandboxPosture(sources({ user: ON_HELD, project: { sandbox: { excludedCommands: [] } } }))).toMatchObject({ ok: true, problems: [] });
+    expect(sandboxPosture(sources({ user: ON_HELD, local: { sandbox: { excludedCommands: "git *" } } })).problems).toEqual([expect.stringMatching(/^sandbox\.excludedCommands is set in local settings .*"git \*" run outside the sandbox/)]);
+  });
+
   it("names both conditions at once when neither holds", () => {
     expect(sandboxPosture(sources()).problems).toEqual([expect.stringMatching(OFF), expect.stringMatching(NOT_HELD)]);
   });
@@ -171,5 +185,8 @@ describe("the settings adapter and doctor, on real files", () => {
     expect(off).toMatchObject({ ok: true, level: "warn" });
     expect(off.detail).toMatch(/the sandbox is off/);
     expect(off.detail).toMatch(/L3 is unavailable; sandbox-off L2 has no local tamper resistance/);
+    const excluded = check({ sandbox: { ...ON_HELD.sandbox, excludedCommands: ["node *"] } });
+    expect(excluded).toMatchObject({ ok: true, level: "warn" });
+    expect(excluded.detail).toMatch(/sandbox\.excludedCommands is set in user settings/);
   });
 });

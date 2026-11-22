@@ -119,7 +119,8 @@ per iteration; respect the denylist (auth, payments, secrets, infra, CI config, 
 the escalation triggers, and the red-flag stop conditions. Before raising a loop's
 trust level, satisfy `{{KIT}}/loop-checklist.md`. L3 also requires the Claude Code sandbox:
 `loop-setup l3-check` is not met unless the effective settings switch it on and hold
-`sandbox.allowUnsandboxedCommands: false` at user scope (`loop-setup doctor` reports the state).
+`sandbox.allowUnsandboxedCommands: false` at user scope, with no `sandbox.excludedCommands` in any
+scope (`loop-setup doctor` reports the state).
 Sandbox-off L2 has no local tamper resistance: the loop's Bash runs as you and can rewrite the
 installed kit, its manifest and the settings, which `loop-setup verify-kit` only detects afterwards.
 

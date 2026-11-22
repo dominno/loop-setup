@@ -120,7 +120,7 @@ describe("L3 requires the sandbox (kit/loop-checklist.md and kit/rules/KIT.md)",
   });
 
   it("the checklist's L3 items name the sandbox settings l3-check reads, both pinned blocks, and doctor's report", () => {
-    const anchors = ["`sandbox.enabled: true`", "`sandbox.allowUnsandboxedCommands: false`", "user scope", "`<loop-verifier>`", "`<loop-denylist>`", "`loop-setup l3-check`", "`loop-setup doctor`"];
+    const anchors = ["`sandbox.enabled: true`", "`sandbox.allowUnsandboxedCommands: false`", "`sandbox.excludedCommands`", "user scope", "`<loop-verifier>`", "`<loop-denylist>`", "`loop-setup l3-check`", "`loop-setup doctor`"];
     expect(anchors.filter((a) => !checklist.includes(a))).toEqual([]);
   });
 });

@@ -281,7 +281,7 @@ carries its own counts, to show where coverage fell short), with no F0, F3 or F4
 `failed_gates`, and both its hashes must equal the current blocks' (a record without the
 `<loop-denylist>` hash, scored before denylist pinning, needs a re-bench); and the effective
 settings must switch the sandbox on with `sandbox.allowUnsandboxedCommands: false` held at user
-scope (kit/setup/sandbox.mjs); exit 0 only when all hold, else exit 1 listing every unmet
+scope and no `sandbox.excludedCommands` in any scope (kit/setup/sandbox.mjs); exit 0 only when all hold, else exit 1 listing every unmet
 condition (a store that does not replay, or a block that cannot be read, is one too). Any edit inside the block needs a re-bench before L3, and a record scored
 before this check carries no hash, so it never passes. Partial: the hash is read when you
 score, so it cannot see an edit made between the run and the score, or a `trace-bench.js` copy
