@@ -97,3 +97,53 @@ unserialized concurrent migration, the per-call guard cost, no real APFS/NTFS ru
 
 **C3 status: done** (green checkpoint: tests and chain pass, the last round accepts with no open
 blocker, records written, sync done, commits pushed).
+
+## C4 — a tamper-evident record store (per-writer hash chains, anchors outside the workspace)
+
+Design and steps: `docs/plans/record-chain/steps.md` (approved by the user at the checkpoint, then
+revised with the pre-implementation round's findings before any code).
+
+Pre-flight: `loop-setup doctor` exit 0 (no fail).
+
+Commits: 00587ca (the approved design), 180a3d5 (S01–S05), 6269bf0 (S03.1: hooks anchor; a
+sandboxed writer is best-effort).
+
+Success criteria and evidence:
+1. **Schema 1.1, additive.** 1.0 lines replay unchanged (the live store: 184 lines, all 1.0, the new
+   lint ok with 0 errors and 0 warnings). A 1.1 line carries `chain {w, prev}` and
+   `provenance.workspace`, filled by the writer only (a draft carrying either is refused); `w` is
+   random per workspace and machine in `~/.claude/loop-setup/anchors/<id>.writer`, outside the synced
+   state. Every replay — so `loop-setup lint` — verifies every chain (`chain.test.mjs`, the
+   chained-writer block of `lib.test.mjs`).
+2. **Two clones on real git** (`chainrepo.test.mjs`): union merges (merged order asserted, with an
+   older kit's 1.0 line on one side) and a real `git rebase` keep lint green on both homes; editing a
+   middle line and deleting a middle line turn it red.
+3. **Anchors.** SessionStart verifies, then appends checkpoints to `anchors/<id>.jsonl` (per writer
+   `{w, n, sha}`, the legacy lines as an id set, because a merge reorders writers); the writer and the
+   Stop hook anchor too. Deleting an anchored tail is reported by lint, doctor, SessionStart ("Record
+   store integrity check FAILED … not re-anchored") and sync (pre-lint), and the anchors file is not
+   appended to. A missing anchors file (with a writer id) and a corrupt anchors line are failures.
+4. **Policy v4.** `kit/rules/trace-policy.md`: marker 4, the v4 sentence, a *Tamper evidence (policy
+   v4)* bullet with the precise guarantee; the evidence and action tables are unchanged; the contract
+   test pins version 4 and the page/schema agreement; every `<trace-evidence-gate>` copy and
+   `<loop-verifier>` are untouched (their parity tests are green).
+
+Commands (HEAD 6269bf0):
+
+| command | exit | summary |
+|---|---|---|
+| `pnpm exec vitest run kit/trace kit/setup` | 0 | 19 files, 877 tests (before the Stop-hook test); `chainrepo.test.mjs` 10/10 after |
+| `pnpm typecheck` | 0 | `tsc --noEmit` |
+| `pnpm lint` | 0 | `eslint .`, 0 warnings |
+| `pnpm test` | 0 | 23 files, 980 tests |
+| `pnpm build` | 0 | Compiled successfully |
+| `pnpm test:e2e` | 0 | 16 passed |
+| `loop-setup lint` | 0 | ok, 184 records |
+| `loop-setup wiki-check` | 0 | ok |
+| `loop-setup doctor` | 0 | 9 ok, 1 warn (1 changed file before sync) |
+| `loop-setup verify-kit` | 2 | waived (see Pre-flight) |
+| `node kit/bin/loop-setup.mjs lint` / `doctor` (the new code, read-only, live store) | 0 / 0 | ok, 0 errors, 0 warnings / `ok record store chain and anchors — 0 checkpoint(s) anchored` |
+
+Pre-implementation round (tree e99b66087f42e547): the first run could not be recorded (the writer
+refused one draft for a bench ground-truth token, so nothing from it was acted on); the second run's
+nine records were all taken into the design (`steps.md`, *Revisions*).
