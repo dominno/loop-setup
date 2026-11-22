@@ -129,15 +129,37 @@ clone the public repo at a pinned tag or commit) and install from that checkout.
    git clone <this-repo> my-app && cd my-app
    rm -rf .git && git init
    ```
-   The new repo also holds `kit/`. Delete it if you install the kit from its upstream
-   repository instead.
-2. **Install and confirm the baseline is green:**
+2. **Decide what `kit/` is for.** The new repo also holds the kit's source, `kit/`. Pick one:
+   - **Option 1 — install the kit from upstream and remove `kit/`** (the usual choice: your repo
+     carries only your project). Remove the kit's source, the template's own doc test, the
+     `loop-setup` dev script and the kit's test include:
+     ```bash
+     git rm -r -q kit scripts/template-docs.test.mjs
+     npm pkg delete scripts.loop-setup
+     sed -i.bak 's/, "kit\/\*\*\/\*\.test\.mjs"//' vitest.config.ts && rm vitest.config.ts.bak
+     ```
+     In `.github/workflows/verify.yml`, delete the `provenance` job (it runs
+     `node kit/trace/cli.mjs`; add it back later with an installed kit if you want its
+     warnings), and drop the `fetch-depth` lines of the `checks` job (only the kit's history tests
+     needed full history). Then install the kit from upstream, once per machine:
+     ```bash
+     git clone https://github.com/dominno/loop-setup ~/src/loop-setup
+     node ~/src/loop-setup/kit/bin/loop-setup.mjs install --from ~/src/loop-setup --link-bin ~/.local/bin
+     ```
+   - **Option 2 — keep `kit/` as your kit source** (you maintain your own fork of the kit). Keep
+     everything and install from the repo itself:
+     ```bash
+     node kit/bin/loop-setup.mjs install --from . --link-bin ~/.local/bin
+     ```
+     `loop-setup verify-kit` then anchors the install to your repo's `main` (or a `kit-v*` tag),
+     and loops never edit `kit/` (it is on their denylist): kit changes are your own reviewed work.
+3. **Install and confirm the baseline is green:**
    ```bash
    pnpm install
    pnpm verify        # typecheck → lint → unit → build → E2E
    ```
-3. **Install the kit** (above), then run `loop-setup init` in the project. Run
-   `loop-setup sync` once a remote exists; it publishes `claude/loop-state`.
+   Then run `loop-setup init` in the project, and `loop-setup sync` once a remote exists; it
+   publishes `claude/loop-state`.
 4. **Make it yours.** Replace the greeting starter as you build: edit `src/`,
    replace `e2e/` specs, and rewrite `docs/prd.md` with your real requirements.
 5. **Reset the worked examples** when you no longer want them: clear the example
@@ -842,6 +864,19 @@ Scope control stays the same: fix **blockers** and directly-related **important*
 issues; record nice-to-haves; avoid unrelated refactors.
 
 ---
+
+## Command reference (`loop-setup`)
+
+Every subcommand, by what it is for (`loop-setup help` and `loop-setup <command> --help`-style usage
+lines give the flags; the planning commands are explained in the planning guide):
+
+| group | commands |
+|---|---|
+| Install and the workspace | `loop-setup install`, `loop-setup uninstall` (a human's step), `loop-setup init`, `loop-setup restore`, `loop-setup sync`, `loop-setup where` (the kit, project and workspace paths), `loop-setup doctor`, `loop-setup verify-kit`, `loop-setup anchors reset` (a human's step), `loop-setup hook` (run by Claude Code's SessionStart and Stop hooks, not by you) |
+| Records | `loop-setup write`, `loop-setup act`, `loop-setup show`, `loop-setup query`, `loop-setup lint`, `loop-setup tree-id` (the working-tree fingerprint a critic round reuses verdicts by), `loop-setup reaudit`, `loop-setup metrics` (store-level consumer-value numbers), `loop-setup rotate` (move old lines into yearly archives, on the default branch only) |
+| Plan and loop | `loop-setup plan-id`, `loop-setup plan-ready`, `loop-setup plan-items`, `loop-setup plan-lint`, `loop-setup plan-drift`, `loop-setup status`, `loop-setup claim-token`, `loop-setup denylist-check` (the loop's denylist over a patch, before it is applied) |
+| Consistency checks | `loop-setup story-lint`, `loop-setup wiki-check` (the memory wiki against the record store) |
+| Measuring the checkers (TRACE-Bench-lite, `/bench-checkers`) | `loop-setup bench-args`, `loop-setup bench-score`, `loop-setup bench-judge`, `loop-setup bench-unpack`, `loop-setup bench-pack`, `loop-setup l3-check` (whether L3's measured-checker condition holds) |
 
 ## Adoption checklist
 

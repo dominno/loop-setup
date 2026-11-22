@@ -268,6 +268,19 @@ describe("README infographics stay true to the repo", () => {
     }
   });
 
+  it("they draw the installed-kit model: no `pnpm trace`, nothing to copy", () => {
+    for (const n of NAMES) {
+      const text = svg(n);
+      expect(text, n).not.toMatch(/pnpm trace/);
+      expect(text, n).not.toMatch(/\bcop(y|ies|ied)\b/i);
+      expect(text, n).not.toMatch(/\.claude\/memory/);
+    }
+    for (const n of ["infographic-3-components", "infographic-4-loop-and-adoption"]) {
+      expect(svg(n), n).toMatch(/claude\/loop-state/);
+    }
+    for (const cmd of ["loop-setup install", "loop-setup init", "loop-setup sync"]) expect(svg("infographic-4-loop-and-adoption"), cmd).toContain(cmd);
+  });
+
   it("the story-map files drawn on infographic 3 exist", () => {
     for (const f of ["prd.md", "user-stories.md", "implementation-status.md", "e2e-coverage-map.md", "story-verification-log.md", "gaps-and-risks.md"]) {
       expect(svg("infographic-3-components"), f).toContain(f);
@@ -375,5 +388,25 @@ describe("workflow lists", () => {
       tree: missing(tree, (n) => ` ${n}.js `),
       orchestration: missing(orchestration, (n) => `\`${n}\``),
     }).toEqual({ table: [], tree: [], orchestration: [] });
+  });
+});
+
+describe("the guides document the installed kit", () => {
+  it("every loop-setup subcommand in the CLI help appears in the adoption guide or the planning guide", async () => {
+    const { USAGE } = await import("../kit/setup/commands.mjs");
+    const trace = spawnSync(process.execPath, [join(ROOT, "kit/bin/loop-setup.mjs"), "help"], { encoding: "utf8" }).stdout;
+    const subs = [...new Set([...`${USAGE}\n${trace}`.matchAll(/^\s*loop-setup ([a-z][a-z0-9-]*)/gm)].map((m) => m[1]))];
+    expect(subs.length).toBeGreaterThan(30);
+    const guides = read("kit/docs/adoption-guide.md") + read("kit/docs/planning-guide.md");
+    expect(subs.filter((s) => !guides.includes(`loop-setup ${s}`))).toEqual([]);
+  });
+
+  it("Path A covers a repo created from the template, both ways, with exact commands, and the README quickstart links it", () => {
+    const pathA = section(read("kit/docs/adoption-guide.md"), "## Path A — start a new project from this template");
+    // Option 1: remove kit/ (with the kit's vitest include and kit-only CI step) and install from upstream.
+    for (const cmd of ["git rm -r -q kit scripts/template-docs.test.mjs", "npm pkg delete scripts.loop-setup", "vitest.config.ts", "provenance", "install --from ~/src/loop-setup"]) expect(pathA, cmd).toContain(cmd);
+    // Option 2: keep kit/ as the kit source and install from the repo itself.
+    expect(pathA).toContain("node kit/bin/loop-setup.mjs install --from .");
+    expect(read("README.md")).toContain("kit/docs/adoption-guide.md#path-a--start-a-new-project-from-this-template");
   });
 });

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1368 768" width="1368" height="768" font-family="DejaVu Sans, Arial, Helvetica, sans-serif">
   <title>Components in four layers</title>
-  <desc>What to copy into a repo, in four layers: contract (CLAUDE.md, package.json verify, the CI workflow, the shared settings.json), machinery (14 commands, 7 workflows, the loop files, skills-index, the pnpm trace scripts), memory (the always-loaded index, topic pages, log, the TRACE record store, quarantine, and the loop's plan and run log), and evidence (the PRD and the story map), plus the story status ladder.</desc>
+  <desc>What lives where, in four layers: the contract in your repo (CLAUDE.md, package.json verify, the CI workflow, the shared settings.json); the machinery of the kit, installed once in ~/.claude (14 commands, 7 workflows, the loop files, skills-index, the loop-setup CLI); the memory in this project's workspace, kept on the claude/loop-state branch (the index whose catalog the SessionStart hook injects, topic pages, log, quarantine, the TRACE record store, and the loop's plan and run log); and the evidence in your repo's docs/ (the PRD and the story map), plus the story status ladder.</desc>
   <defs>
     <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="#e3eaf3" stroke-width="1"/></pattern>
     <marker id="at" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#11807a"/></marker><marker id="ap" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#5b3fb5"/></marker><marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#2f8a4b"/></marker>
@@ -14,7 +14,7 @@
   </defs>
   <rect width="1368" height="768" fill="#f7fafd"/><rect width="1368" height="768" fill="url(#grid)"/>
   <text x="28" y="56" class="t" font-size="38">COMPONENTS — 4 LAYERS</text>
-  <text x="30" y="84" fill="#1b2f52" font-size="17">what to copy into your repo</text>
+  <text x="30" y="84" fill="#1b2f52" font-size="17">what lives where — 1 + 4 in your repo · 2 the kit, installed in ~/.claude · 3 the workspace, on claude/loop-state</text>
 
   <!-- 1 CONTRACT -->
   <g>
@@ -48,7 +48,7 @@
       <rect x="376" y="326" width="276" height="38" rx="10" fill="#fff" stroke="#11807a" stroke-width="1.8"/><text x="390" y="350" class="it">loop.md</text>
       <rect x="376" y="372" width="276" height="38" rx="10" fill="#fff" stroke="#11807a" stroke-width="1.8"/><text x="390" y="396" class="it">loop-checklist.md</text>
       <rect x="376" y="418" width="276" height="38" rx="10" fill="#fff" stroke="#11807a" stroke-width="1.8"/><text x="390" y="442" class="it">skills-index.md</text>
-      <rect x="376" y="464" width="276" height="48" rx="10" fill="#fff" stroke="#11807a" stroke-width="1.8"/><text x="390" y="484" class="it">scripts/trace/</text><text x="390" y="502" class="sub">pnpm trace: records, plan, story-lint</text>
+      <rect x="376" y="464" width="276" height="48" rx="10" fill="#fff" stroke="#11807a" stroke-width="1.8"/><text x="390" y="484" class="it">loop-setup CLI</text><text x="390" y="502" class="sub">install · init · sync · restore</text>
     </g>
   </g>
 
@@ -60,11 +60,11 @@
     <text x="846" y="206" text-anchor="middle" fill="#5b3fb5" font-weight="800" font-size="24">MEMORY</text>
     <line x1="708" y1="222" x2="984" y2="222" stroke="#5b3fb5" stroke-width="2"/>
     <g class="m">
-      <rect x="708" y="232" width="276" height="44" rx="10" fill="#fff" stroke="#5b3fb5" stroke-width="1.8"/><text x="722" y="251" class="it">memory/index.md</text><text x="722" y="267" class="sub">always loaded (@import)</text>
+      <rect x="708" y="232" width="276" height="44" rx="10" fill="#fff" stroke="#5b3fb5" stroke-width="1.8"/><text x="722" y="251" class="it">index.md</text><text x="722" y="267" class="sub">its catalog injected at session start</text>
       <rect x="708" y="282" width="276" height="44" rx="10" fill="#fff" stroke="#5b3fb5" stroke-width="1.8"/><text x="722" y="301" class="it">topics/*.md</text><text x="722" y="317" class="sub">read on demand</text>
       <rect x="708" y="332" width="134" height="36" rx="10" fill="#fff" stroke="#5b3fb5" stroke-width="1.8"/><text x="722" y="355" class="it">log.md</text>
       <rect x="850" y="332" width="134" height="36" rx="10" fill="#fff" stroke="#5b3fb5" stroke-width="1.8"/><text x="862" y="355" class="it" font-size="12">quarantine.md</text>
-      <rect x="708" y="374" width="276" height="44" rx="10" fill="#efeafb" stroke="#5b3fb5" stroke-width="1.8"/><text x="722" y="393" class="it">trace/records.jsonl</text><text x="722" y="409" class="sub">TRACE records, only via pnpm trace</text>
+      <rect x="708" y="374" width="276" height="44" rx="10" fill="#efeafb" stroke="#5b3fb5" stroke-width="1.8"/><text x="722" y="393" class="it">trace/records.jsonl</text><text x="722" y="409" class="sub">TRACE records, only via loop-setup</text>
     </g>
     <text x="708" y="440" class="s" font-weight="700">loop state (not wiki):</text>
     <g class="m">
@@ -88,7 +88,7 @@
       <rect x="1040" y="424" width="284" height="38" rx="10" fill="#fff" stroke="#2f8a4b" stroke-width="1.8"/><text x="1054" y="448" class="it">story-verification-log.md</text>
       <rect x="1040" y="470" width="284" height="38" rx="10" fill="#fff" stroke="#2f8a4b" stroke-width="1.8"/><text x="1054" y="494" class="it">gaps-and-risks.md</text>
     </g>
-    <text x="1040" y="530" class="s">pnpm trace story-lint keeps them in step</text>
+    <text x="1040" y="530" class="s">loop-setup story-lint keeps them in step</text>
   </g>
 
   <!-- captions -->
@@ -96,7 +96,7 @@
     <path d="M514 588V552" stroke="#11807a" stroke-width="2.5" marker-end="url(#at)"/>
     <text x="514" y="606" text-anchor="middle" fill="#11807a">commands invoke workflows</text>
     <path d="M846 588V552" stroke="#5b3fb5" stroke-width="2.5" marker-end="url(#ap)"/>
-    <text x="846" y="606" text-anchor="middle" fill="#5b3fb5">only index.md is @imported · /dream writes</text>
+    <text x="846" y="606" text-anchor="middle" fill="#5b3fb5">catalog injected at start · /dream writes</text>
     <path d="M1182 588V552" stroke="#2f8a4b" stroke-width="2.5" marker-end="url(#ag)"/>
     <text x="1182" y="606" text-anchor="middle" fill="#2f8a4b">/scan-project-docs · /sync-story-status</text>
     <text x="182" y="606" text-anchor="middle" fill="#0f2347">the gates every change passes</text>
