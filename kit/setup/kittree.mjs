@@ -29,24 +29,49 @@ export function loopTickCommand(loopPrompt) {
   return `---\ndescription: loop-setup kit — one iteration of the hardened watchdog loop (run as /loop 30m /loop-tick; declare the trust level first)\nargument-hint: [L1|L2|L3] [focus]\n---\n\n${loopPrompt}`;
 }
 
+/** Characters that make a path unsafe to hand to a shell, even quoted (expansion, escapes, control). */
+const SHELL_META = /[`$\\;&|<>(){}[\]*?!\x00-\x1f\x7f]/;
+
+/**
+ * A path as one shell word, for the hook commands and the shim (both run through a shell). A path
+ * with a shell metacharacter is refused with a clear error; with those gone, double quotes are always
+ * correct (the plain form), except for a path that holds a double quote: then single quotes, with
+ * any single quote written as '\''.
+ */
+export function shellArg(path) {
+  const s = String(path);
+  const bad = SHELL_META.exec(s);
+  if (bad) throw new Error(`the path ${JSON.stringify(s)} holds the shell metacharacter ${JSON.stringify(bad[0])} — the kit's hook commands and shim run it through a shell; use a Claude home whose path has none of \` $ \\ ; & | < > ( ) { } [ ] * ? ! or control characters`);
+  return s.includes('"') ? `'${s.replace(/'/g, "'\\''")}'` : `"${s}"`;
+}
+
 /** The shim: absolute node and kit paths, so neither PATH nor the environment can redirect it. */
 export function shimText(nodePath, kitDir) {
-  return `#!/bin/sh\nexec "${nodePath}" "${join(kitDir, "bin/loop-setup.mjs")}" "$@"\n`;
+  return `#!/bin/sh\nexec ${shellArg(nodePath)} ${shellArg(join(kitDir, "bin/loop-setup.mjs"))} "$@"\n`;
 }
 
 /** The read-only subcommands the kit allows without a prompt (exact forms, never a blanket grant). */
 const READ_ONLY = ["where", "doctor", "verify-kit", "lint", "query", "show", "tree-id", "metrics", "status", "plan-ready", "plan-lint", "plan-items", "plan-drift", "story-lint", "wiki-check", "l3-check", "claim-token"];
 
-/** The owned settings entries for a kit at kitDir under loopDir (re-derived on every install; the manifest remembers them). */
+/** The lifecycle subcommands that write the Claude home (kit, commands, hooks, settings): a human's step, denied to the agent. */
+const LIFECYCLE_WRITES = ["install", "uninstall"];
+
+/**
+ * The owned settings entries for a kit at kitDir under loopDir (re-derived on every install; the
+ * manifest remembers them). Every path in a hook command goes through shellArg (it throws on an unsafe
+ * path). The deny rules keep the kit's own files and the Claude-home lifecycle writes out of the
+ * agent's hands — in both spellings of the shim, and for a direct `node …/loop-setup.mjs` run.
+ */
 export function ownedSettings({ kitDir, loopDir, shim, withStopGate = false, nodePath }) {
-  const q = (s) => `"${s}"`;
+  shellArg(kitDir); // the permission rules below embed it too
   const hooks = {
-    SessionStart: [{ matcher: "startup|resume|clear|compact", hooks: [{ type: "command", command: `${q(shim)} hook session-start`, timeout: 60 }] }],
-    Stop: [{ hooks: [{ type: "command", command: `${q(shim)} hook stop`, timeout: 30 }] }],
+    SessionStart: [{ matcher: "startup|resume|clear|compact", hooks: [{ type: "command", command: `${shellArg(shim)} hook session-start`, timeout: 60 }] }],
+    Stop: [{ hooks: [{ type: "command", command: `${shellArg(shim)} hook stop`, timeout: 30 }] }],
   };
-  if (withStopGate) hooks.Stop.push({ hooks: [{ type: "command", command: `${q(nodePath)} ${q(join(kitDir, "hooks/stop-gate.mjs"))}`, timeout: 600 }] });
+  if (withStopGate) hooks.Stop.push({ hooks: [{ type: "command", command: `${shellArg(nodePath)} ${shellArg(join(kitDir, "hooks/stop-gate.mjs"))}`, timeout: 600 }] });
   const allow = [`Read(/${kitDir}/**)`, ...READ_ONLY.flatMap((c) => [`Bash(loop-setup ${c})`, `Bash(loop-setup ${c} *)`])];
-  const deny = [`Edit(/${kitDir}/**)`, `Edit(/${join(loopDir, "bin")}/**)`, `Edit(/${join(loopDir, "installed.json")})`];
+  const lifecycle = LIFECYCLE_WRITES.flatMap((c) => [`Bash(loop-setup ${c})`, `Bash(loop-setup ${c} *)`, `Bash(*/loop-setup ${c})`, `Bash(*/loop-setup ${c} *)`]);
+  const deny = [`Edit(/${kitDir}/**)`, `Edit(/${join(loopDir, "bin")}/**)`, `Edit(/${join(loopDir, "installed.json")})`, ...lifecycle, "Bash(node *loop-setup.mjs*)"];
   return { hooks, allow, deny };
 }
 

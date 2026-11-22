@@ -12,6 +12,9 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { loopHome } from "./layout.mjs";
+import { claudeHomeOf } from "./facts.mjs";
+import { lifecycleRefusal } from "./guard.mjs";
+import { NOT_OBJECT, readSettingsFile } from "./settings.mjs";
 import { manifestPathFor } from "./kitfiles.mjs";
 import { redactRemote } from "./integrity.mjs";
 import { DEV_ONLY, ownedSettings as ownedSettingsFor, readKitTree, renderInstall, sha256, shimText } from "./kittree.mjs";
@@ -124,17 +127,39 @@ export function mergeSettings(settings, owned, previous = null) {
 }
 
 /**
- * The user's settings.json: {} only when the file does not exist. A file that exists but does not
- * parse is the user's data — refuse (nothing is changed) instead of replacing it with the kit's entries.
+ * The user's settings.json: {} only when the file does not exist. A file that cannot be read, does not
+ * parse, or parses to something other than a JSON object (a string, an array, a number, null) is the
+ * user's data — refuse (nothing is changed) instead of replacing it with the kit's entries.
  */
 export function readSettings(path) {
-  if (!existsSync(path)) return {};
-  const text = readFileSync(path, "utf8");
+  const v = readSettingsFile(path);
+  if (v === null) return {};
+  if (!v.error) return v;
+  const why = v.error === NOT_OBJECT ? "parses but is not a JSON object (a string, an array, a number or null)" : v.error.startsWith("cannot be read") ? v.error : `does not parse as JSON (${v.error})`;
+  throw new Error(`${path} ${why} — fix it first; loop-setup changed nothing`);
+}
+
+/** settings merged with the owned entries; a settings.json whose hooks or permissions have the wrong shape throws a clear error. */
+function mergedSettings(path, settings, owned, previous) {
   try {
-    return JSON.parse(text);
+    return mergeSettings(settings, owned, previous);
   } catch (e) {
-    throw new Error(`${path} does not parse as JSON (${e.message}) — fix it first; loop-setup changed nothing`);
+    throw new Error(`${path}: its hooks or permissions have the wrong shape (${e.message}) — fix it first; loop-setup changed nothing`);
   }
+}
+
+/** A home as the filesystem resolves it (realpath), or lexically when it does not exist yet. */
+const resolvedHome = (p) => {
+  try {
+    return realpathSync(p);
+  } catch {
+    return resolve(p);
+  }
+};
+/** Throw (before anything is read or written) when a lifecycle write would hit this Claude Code session's own home. */
+function refuseAgentWrite(cmd, claudeHome, env) {
+  const why = lifecycleRefusal({ cmd, claudecode: env.CLAUDECODE, targetHome: resolvedHome(claudeHome), sessionHome: resolvedHome(claudeHomeOf(env)) });
+  if (why) throw new Error(why);
 }
 
 /**
@@ -155,10 +180,12 @@ function writeSettings(path, value) {
 }
 
 /**
- * Install (or upgrade in place) the kit from `from` into claudeHome. Idempotent.
- * opts: { from, claudeHome, linkBin?, withStopGate?, autoRestore?: string[], force?, now? }
+ * Install (or upgrade in place) the kit from `from` into claudeHome. Idempotent. Refused from inside
+ * Claude Code for the session's own home (guard.mjs); env is the process environment by default.
+ * opts: { from, claudeHome, linkBin?, withStopGate?, autoRestore?: string[], force?, now?, env? }
  */
-export function install({ from, claudeHome, linkBin = null, withStopGate = false, autoRestore = [], force = false, now = new Date().toISOString() }) {
+export function install({ from, claudeHome, linkBin = null, withStopGate = false, autoRestore = [], force = false, now = new Date().toISOString(), env = process.env }) {
+  refuseAgentWrite("install", claudeHome, env);
   const loopDir = loopHome(claudeHome);
   const kitDir = join(loopDir, "kit");
   const manifestPath = manifestPathFor(kitDir);
@@ -169,6 +196,12 @@ export function install({ from, claudeHome, linkBin = null, withStopGate = false
   // Read the user's settings first: one that does not parse stops the install before anything changes.
   const settingsPath = join(claudeHome, "settings.json");
   const userSettings = readSettings(settingsPath);
+  // The owned entries, the shim and the merged settings, before any write: an unsafe path (shellArg)
+  // or a wrongly shaped settings.json stops the install here, with nothing changed.
+  const shim = join(loopDir, "bin", "loop-setup");
+  const owned = ownedSettings({ kitDir, loopDir, shim, withStopGate });
+  const shimBody = shimText(process.execPath, kitDir);
+  const merged = mergedSettings(settingsPath, userSettings, owned, previous?.settings || null);
 
   // Commands first, so a clash stops the install before anything changes.
   const commandsDir = join(claudeHome, "commands");
@@ -221,9 +254,8 @@ export function install({ from, claudeHome, linkBin = null, withStopGate = false
   }
 
   // Shim: absolute node and kit paths, so neither PATH nor the environment can redirect it.
-  const shim = join(loopDir, "bin", "loop-setup");
   mkdirSync(dirname(shim), { recursive: true });
-  writeFileSync(shim, shimText(process.execPath, kitDir));
+  writeFileSync(shim, shimBody);
   chmodSync(shim, 0o755);
   let linked = null;
   if (linkBin) {
@@ -241,8 +273,7 @@ export function install({ from, claudeHome, linkBin = null, withStopGate = false
   }
 
   // Settings.
-  const owned = ownedSettings({ kitDir, loopDir, shim, withStopGate });
-  writeSettings(settingsPath, mergeSettings(userSettings, owned, previous?.settings || null));
+  writeSettings(settingsPath, merged);
 
   const manifest = {
     schema: MANIFEST_SCHEMA,
@@ -259,8 +290,9 @@ export function install({ from, claudeHome, linkBin = null, withStopGate = false
   return manifest;
 }
 
-/** Remove what the manifest owns (unchanged files only); workspaces are never touched. */
-export function uninstall({ claudeHome }) {
+/** Remove what the manifest owns (unchanged files only); workspaces are never touched. Refused like install. */
+export function uninstall({ claudeHome, env = process.env }) {
+  refuseAgentWrite("uninstall", claudeHome, env);
   const loopDir = loopHome(claudeHome);
   const kitDir = join(loopDir, "kit");
   const manifestPath = manifestPathFor(kitDir);
@@ -268,6 +300,7 @@ export function uninstall({ claudeHome }) {
   if (!manifest) throw new Error(`the kit is not installed in ${claudeHome} (no ${manifestPath})`);
   const settingsPath = join(claudeHome, "settings.json");
   const userSettings = readSettings(settingsPath); // refuses before anything is removed
+  const merged = existsSync(settingsPath) ? mergedSettings(settingsPath, userSettings, null, manifest.settings) : null; // so does a wrong shape
   const kept = [];
   for (const [name, hash] of Object.entries(manifest.commands || {})) {
     const p = join(claudeHome, "commands", `${name}.md`);
@@ -275,7 +308,7 @@ export function uninstall({ claudeHome }) {
     if (sha256(readFileSync(p)) === hash) rmSync(p);
     else kept.push(p);
   }
-  if (existsSync(settingsPath)) writeSettings(settingsPath, mergeSettings(userSettings, null, manifest.settings));
+  if (merged) writeSettings(settingsPath, merged);
   if (manifest.bin?.linked) {
     try {
       if (lstatSync(manifest.bin.linked).isSymbolicLink()) unlinkSync(manifest.bin.linked);

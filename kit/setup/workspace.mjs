@@ -10,9 +10,9 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { KIT_ROOT, gatherFacts, gitOut } from "./facts.mjs";
-import { LEGACY_DIR, LINK_NAME, MARKER_KEY, STATE_BRANCH, isValidId, resolveLayout, workspaceDir, workspacesRoot } from "./layout.mjs";
+import { LEGACY_DIR, LINK_NAME, MARKER_KEY, STATE_BRANCH, isValidId, isWorkspacePath, resolveLayout, workspaceDir, workspacesRoot } from "./layout.mjs";
 
 /** Git for the STATE repository: hardened against the user's global config (hooks, signing, identity). */
 const HARDEN = ["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", "-c", "core.fsmonitor=", "-c", "user.name=loop-setup", "-c", "user.email=loop-setup@localhost"];
@@ -78,7 +78,7 @@ function writeGrant(projectRoot, ws) {
 }
 
 /** Create or repair the link: only where nothing is (never over a file, a directory or a foreign link). */
-export function ensureLink(projectRoot, ws) {
+export function ensureLink(projectRoot, ws, claudeHome) {
   const lp = join(projectRoot, LINK_NAME);
   try {
     const st = lstatSync(lp);
@@ -92,8 +92,9 @@ export function ensureLink(projectRoot, ws) {
       }
     })();
     if (target === ws) return { link: lp, status: "ok" };
-    // Ours if it points into a workspaces root (stale after a restore under another id); else foreign.
-    if (/\/loop-setup\/workspaces\/[a-z0-9-]+\/?$/.test(readlinkSync(lp))) {
+    // Ours only if it points directly into THIS home's workspaces root (stale after a restore under
+    // another id); a link anywhere else — another home's workspaces included — is foreign.
+    if (isWorkspacePath(resolve(dirname(lp), readlinkSync(lp)), claudeHome)) {
       unlinkSync(lp);
     } else return { link: lp, status: "blocked: foreign link" };
   } catch (e) {
@@ -109,11 +110,11 @@ export const linkIgnored = (projectRoot) => spawnSync("git", ["check-ignore", "-
 export const linkTracked = (projectRoot) => spawnSync("git", ["ls-files", "--error-unmatch", "--", LINK_NAME], { cwd: projectRoot, stdio: "ignore" }).status === 0;
 
 /** Bind a project checkout to a workspace: marker, link, exclude block, grant. */
-export function bind(projectRoot, id, ws) {
+export function bind(projectRoot, id, ws, claudeHome) {
   if (linkTracked(projectRoot)) throw new Error(`${LINK_NAME} is tracked by git in ${projectRoot} — the link must be untracked; remove it from the index first`);
   execFileSync("git", ["config", "--local", MARKER_KEY, id], { cwd: projectRoot });
   const exclude = writeExclude(projectRoot);
-  const link = ensureLink(projectRoot, ws);
+  const link = ensureLink(projectRoot, ws, claudeHome);
   const grant = writeGrant(projectRoot, ws);
   return { marker: `${MARKER_KEY}=${id}`, exclude, link, grant, ignored: linkIgnored(projectRoot), gitignoreLine: `/${LINK_NAME}` };
 }
@@ -168,7 +169,7 @@ export function init({ cwd = process.cwd(), env = process.env, fromLegacy, id, r
     rmSync(stage, { recursive: true, force: true });
     throw e;
   }
-  return { id: wsId, workspace: ws, fromLegacy: !!useLegacy, ...bind(projectRoot, wsId, ws) };
+  return { id: wsId, workspace: ws, fromLegacy: !!useLegacy, ...bind(projectRoot, wsId, ws, claudeHome) };
 }
 
 /** Does the remote have the state branch? null when it cannot be asked. */
@@ -188,7 +189,7 @@ export function restore({ cwd = process.cwd(), env = process.env } = {}) {
   if (facts.marker?.exists) {
     const ws = workspaceDir(claudeHome, facts.marker.id);
     const pulled = pull(ws);
-    return { id: facts.marker.id, workspace: ws, restored: false, pulled, ...bind(projectRoot, facts.marker.id, ws) };
+    return { id: facts.marker.id, workspace: ws, restored: false, pulled, ...bind(projectRoot, facts.marker.id, ws, claudeHome) };
   }
   const remote = originUrl(projectRoot);
   if (!remote) throw new Error("the project has no origin remote to restore the workspace from — run `loop-setup init`");
@@ -208,11 +209,11 @@ export function restore({ cwd = process.cwd(), env = process.env } = {}) {
   if (existsSync(ws)) {
     rmSync(stage, { recursive: true, force: true });
     const pulled = pull(ws);
-    return { id: meta.id, workspace: ws, restored: false, pulled, ...bind(projectRoot, meta.id, ws) };
+    return { id: meta.id, workspace: ws, restored: false, pulled, ...bind(projectRoot, meta.id, ws, claudeHome) };
   }
   mkdirSync(workspacesRoot(claudeHome), { recursive: true });
   renameSync(stage, ws);
-  return { id: meta.id, workspace: ws, restored: true, pulled: false, ...bind(projectRoot, meta.id, ws) };
+  return { id: meta.id, workspace: ws, restored: true, pulled: false, ...bind(projectRoot, meta.id, ws, claudeHome) };
 }
 
 /** Fetch the remote state branch and merge it (union for append-only files). Returns a short status. */

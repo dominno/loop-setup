@@ -58,7 +58,9 @@ describe("install contract (kittree.mjs) — one source for install and verify-k
     expect(base.hooks.Stop).toHaveLength(1);
     expect(gated.hooks.Stop[1].hooks[0].command).toBe(`"${NODE}" "${KIT}/hooks/stop-gate.mjs"`);
     expect(base.allow).toContain("Bash(loop-setup verify-kit)");
-    expect(base.deny).toEqual([`Edit(/${KIT}/**)`, "Edit(//h/.claude/loop-setup/bin/**)", "Edit(//h/.claude/loop-setup/installed.json)"]);
+    // The kit's own files, then the Claude-home lifecycle writes (both shim spellings) and a direct node run.
+    const lifecycle = ["install", "uninstall"].flatMap((c) => [`Bash(loop-setup ${c})`, `Bash(loop-setup ${c} *)`, `Bash(*/loop-setup ${c})`, `Bash(*/loop-setup ${c} *)`]);
+    expect(base.deny).toEqual([`Edit(/${KIT}/**)`, "Edit(//h/.claude/loop-setup/bin/**)", "Edit(//h/.claude/loop-setup/installed.json)", ...lifecycle, "Bash(node *loop-setup.mjs*)"]);
   });
 
   it("readKitTree reads blobs at a revision through a git port, drops dev-only files and keeps bytes exact", () => {

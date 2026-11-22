@@ -15,6 +15,8 @@ const USAGE = `loop-setup — the loop kit, installed in ~/.claude with one work
   loop-setup install --from <kit repo|kit dir> [--link-bin <dir>] [--auto-restore <host/owner/repo>[,…]]
                      [--with-stop-gate] [--force]      install or upgrade the kit into ~/.claude
   loop-setup uninstall                                 remove what install owns (never a workspace)
+                                                       (both are a human's step: refused from inside Claude Code,
+                                                       CLAUDECODE set, for the session's own Claude home)
   loop-setup init [--from-legacy] [--id <id>]          create this project's workspace and bind it
   loop-setup restore                                   clone the workspace from ${STATE_BRANCH} and bind it
   loop-setup sync [--message <m>] [--no-push] [--force]  commit, merge ${STATE_BRANCH}, lint, push
@@ -144,12 +146,13 @@ export async function runLifecycle(cmd, argv) {
         withStopGate: !!flags["with-stop-gate"],
         autoRestore: typeof flags["auto-restore"] === "string" ? flags["auto-restore"].split(",") : [],
         force: !!flags.force,
+        env,
       });
       print(json ? m : `installed ${m.kit.name} ${m.kit.version} (${m.source.commit ? m.source.commit.slice(0, 12) : "from a directory"}) into ${join(loopHome(claudeHomeOf(env)), "kit")}\n  commands: ${Object.keys(m.commands).map((c) => `/${c}`).join(" ")}\n  shim: ${m.bin.shim}${m.bin.linked ? ` (linked as ${m.bin.linked})` : ""}\n  auto-restore: ${m.autoRestore.join(", ") || "none"}`, json);
       return 0;
     }
     if (cmd === "uninstall") {
-      const r = uninstall({ claudeHome: claudeHomeOf(env) });
+      const r = uninstall({ claudeHome: claudeHomeOf(env), env });
       print(json ? r : `uninstalled${r.kept.length ? ` (kept modified: ${r.kept.join(", ")})` : ""}; workspaces kept in ${join(loopHome(claudeHomeOf(env)), "workspaces")}`, json);
       return 0;
     }

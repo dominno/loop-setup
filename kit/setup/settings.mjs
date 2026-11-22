@@ -4,6 +4,9 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
+/** The { error } of a settings file that parses to something other than a JSON object (string, array, number, null). */
+export const NOT_OBJECT = "not a JSON object";
+
 /**
  * A settings file: null only when it does not exist; the parsed object; or { error } — for a file
  * that cannot be read (EACCES, a directory at the path), does not parse, or is not a JSON object.
@@ -22,7 +25,7 @@ export function readSettingsFile(path) {
   } catch (e) {
     return { error: e.message };
   }
-  return value !== null && typeof value === "object" && !Array.isArray(value) ? value : { error: "not a JSON object" };
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value : { error: NOT_OBJECT };
 }
 
 /** Where this machine's managed (policy) settings live. */
