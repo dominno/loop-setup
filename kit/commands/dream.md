@@ -125,10 +125,13 @@ $ARGUMENTS
    whose cited evidence file changed since the record's commit (`changed`) and, apart
    from them, facts whose record's commit the repository no longer has (`unreachable`:
    squashed away and pruned, or a shallow clone), where nothing can be diffed, so every
-   cited path needs a re-check. For each, find the bullets citing `rec:<id>`, re-verify
+   cited path needs a re-check. It also lists cited files split in two since the record
+   (`split`: "split at <commit> — re-verify", e.g. the trace topic whose policy half went to
+   the kit), which cannot be compared at all. For each, find the bullets citing `rec:<id>`, re-verify
    them, and **report** the stale ones (rewriting or removing a fact still needs
    confirmation, then 1e). `loop-setup reaudit --act` appends a `REAUDIT` action so the
-   queue is itself on record.
+   queue is itself on record; for a split it acknowledges that split, which is then no
+   longer listed.
 1d. **Quarantine review:** for each row in `.claude/loop-workspace/quarantine.md`, check whether
    its `missing` evidence is now available. If so, re-adjudicate with a new record that
    `revises` the quarantined one — promote it (`COMMIT` + file it per ingest step 4) or

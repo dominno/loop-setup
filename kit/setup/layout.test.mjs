@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { LINK_NAME, STATE_BRANCH, isValidId, loopHome, resolveLayout, statePaths, workspaceDir } from "./layout.mjs";
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 // The pure core: every branch of the resolver is decided from facts alone (no fs, git, env).
 const HOME = "/home/u/.claude";
@@ -128,5 +134,129 @@ describe("legacyTarget (evidence refs written before the kit moved out of the re
   it("leaves every other path alone", async () => {
     const { legacyTarget } = await import("./layout.mjs");
     for (const p of ["src/app/page.tsx", "docs/prd.md", ".claude/settings.json", "scripts/check-bundle-size.mjs", ".claude/workflowsX/a.js"]) expect(legacyTarget(p), p).toBe(null);
+  });
+});
+
+// Evidence refs written before the kit left the project tree. reaudit compares a record's cited
+// file at the record's commit against where that file lives now: a moved file against its kit path
+// (a file-level map built from the kit move's renames, ec6d24b), legacy state against the workspace,
+// and a file that was split in two is not compared at all — the record is told to re-verify.
+describe("legacy evidence refs: one pure resolution for every path an old record cites", () => {
+  it("normalizeRefPath makes an absolute path under the project or a legacy root repo-relative, and leaves other paths alone", async () => {
+    const { normalizeRefPath } = await import("./layout.mjs");
+    expect(normalizeRefPath("/home/user/loop-setup/scripts/trace/lib.mjs")).toBe("scripts/trace/lib.mjs");
+    expect(normalizeRefPath("/tmp/clone/src/a.ts", ["/tmp/clone"])).toBe("src/a.ts");
+    expect(normalizeRefPath("/tmp/clone/src/a.ts", ["/tmp/clone/"])).toBe("src/a.ts");
+    expect(normalizeRefPath("./src/a.ts")).toBe("src/a.ts");
+    expect(normalizeRefPath("src/a.ts")).toBe("src/a.ts");
+    expect(normalizeRefPath("/etc/hosts")).toBe("/etc/hosts");
+    expect(normalizeRefPath("/home/user/loop-setupX/a.ts")).toBe("/home/user/loop-setupX/a.ts");
+  });
+
+  it("resolveLegacyRef gives each path exactly one kind: unchanged, moved, workspace, split or unmapped", async () => {
+    const { resolveLegacyRef } = await import("./layout.mjs");
+    expect(resolveLegacyRef("src/app/page.tsx")).toEqual({ kind: "unchanged", path: "src/app/page.tsx", target: { root: "project", path: "src/app/page.tsx" } });
+    expect(resolveLegacyRef("scripts/trace/lib.mjs")).toEqual({ kind: "moved", path: "scripts/trace/lib.mjs", target: { root: "project", path: "kit/trace/lib.mjs" } });
+    expect(resolveLegacyRef("/home/user/loop-setup/.claude/commands/dream.md")).toEqual({ kind: "moved", path: ".claude/commands/dream.md", target: { root: "project", path: "kit/commands/dream.md" } });
+    expect(resolveLegacyRef(".claude/memory/topics/workflow.md")).toEqual({ kind: "workspace", path: ".claude/memory/topics/workflow.md", target: { root: "workspace", path: "topics/workflow.md" } });
+    expect(resolveLegacyRef("CLAUDE.md")).toMatchObject({ kind: "split", path: "CLAUDE.md", at: "4ccf257", into: [{ root: "project", path: "CLAUDE.md" }, { root: "project", path: "kit/rules/KIT.md" }] });
+    expect(resolveLegacyRef("/home/user/loop-setup/.claude/memory/topics/trace.md")).toMatchObject({ kind: "split", path: ".claude/memory/topics/trace.md", at: "ec6d24b", into: [{ root: "workspace", path: "topics/trace.md" }, { root: "project", path: "kit/rules/trace-policy.md" }] });
+    expect(resolveLegacyRef(".claude/memory/loop-plan.md")).toMatchObject({ kind: "split", at: "9654bfb", into: [{ root: "workspace", path: "loop-plan.md" }, { root: "project", path: "kit/templates/workspace/loop-plan.md" }] });
+    // A file under a directory the move emptied, with no rename of its own, and an absolute path outside every root.
+    expect(resolveLegacyRef(".claude/workflows/gone.js")).toMatchObject({ kind: "unmapped", path: ".claude/workflows/gone.js" });
+    expect(resolveLegacyRef("/etc/hosts")).toMatchObject({ kind: "unmapped", path: "/etc/hosts" });
+    // Outside the kit's own repo (an adopter) the kit move's facts do not apply: its CLAUDE.md, its own
+    // .claude/commands/ or scripts/hooks/ files and a /home/user/loop-setup path are not the kit's history.
+    expect(resolveLegacyRef("CLAUDE.md", { kitRepo: false }).kind).toBe("unchanged");
+    expect(resolveLegacyRef(".claude/commands/own.md", { kitRepo: false }).kind).toBe("unchanged");
+    expect(resolveLegacyRef("scripts/hooks/own.mjs", { kitRepo: false }).kind).toBe("unchanged");
+    expect(resolveLegacyRef("scripts/trace/lib.mjs", { kitRepo: false }).kind).toBe("unchanged");
+    expect(resolveLegacyRef("/home/user/loop-setup/src/a.ts", { kitRepo: false })).toMatchObject({ kind: "unmapped", path: "/home/user/loop-setup/src/a.ts" });
+    expect(resolveLegacyRef("/tmp/proj/src/a.ts", { roots: ["/tmp/proj"], kitRepo: false })).toMatchObject({ kind: "unchanged", path: "src/a.ts" });
+    expect(resolveLegacyRef(".claude/memory/topics/a.md", { kitRepo: false })).toMatchObject({ kind: "workspace", target: { root: "workspace", path: "topics/a.md" } });
+    // Near misses of the map stay unchanged: a sibling directory, a project script that never moved.
+    expect(resolveLegacyRef(".claude/workflowsX/a.js").kind).toBe("unchanged");
+    expect(resolveLegacyRef("scripts/check-bundle-size.mjs").kind).toBe("unchanged");
+  });
+
+  it("evidenceHome tells a record older than a split to re-verify, and compares a newer one with the file's post-split home", async () => {
+    const { evidenceHome } = await import("./layout.mjs");
+    expect(evidenceHome("CLAUDE.md", { predates: () => true })).toEqual({ path: "CLAUDE.md", split: "4ccf257" });
+    expect(evidenceHome("CLAUDE.md", { predates: () => false })).toEqual({ path: "CLAUDE.md", target: { root: "project", path: "CLAUDE.md" } });
+    expect(evidenceHome("/home/user/loop-setup/.claude/memory/topics/trace.md", { predates: (at) => at === "ec6d24b" })).toEqual({ path: ".claude/memory/topics/trace.md", split: "ec6d24b" });
+    expect(evidenceHome(".claude/memory/topics/trace.md", { predates: () => false })).toEqual({ path: ".claude/memory/topics/trace.md", target: { root: "workspace", path: "topics/trace.md" } });
+    expect(evidenceHome("scripts/trace/lib.mjs")).toEqual({ path: "scripts/trace/lib.mjs", target: { root: "project", path: "kit/trace/lib.mjs" } });
+    expect(evidenceHome(".claude/workflows/gone.js")).toEqual({ path: ".claude/workflows/gone.js", target: null });
+    // A file still where the record cited it is compared there, whatever the map says (a project that kept it).
+    expect(evidenceHome(".claude/memory/topics/a.md", { exists: () => true })).toEqual({ path: ".claude/memory/topics/a.md", target: { root: "project", path: ".claude/memory/topics/a.md" } });
+    expect(evidenceHome(".claude/commands/own.md", { exists: (p) => p === ".claude/commands/own.md" })).toEqual({ path: ".claude/commands/own.md", target: { root: "project", path: ".claude/commands/own.md" } });
+    expect(evidenceHome("scripts/trace/lib.mjs", { exists: () => false })).toEqual({ path: "scripts/trace/lib.mjs", target: { root: "project", path: "kit/trace/lib.mjs" } });
+    expect(evidenceHome("CLAUDE.md", { kitRepo: false, predates: () => null })).toEqual({ path: "CLAUDE.md", target: { root: "project", path: "CLAUDE.md" } });
+    // The order cannot be known (the split commit is not in the repository): counts as older, re-verify.
+    expect(evidenceHome("CLAUDE.md", { predates: () => null })).toEqual({ path: "CLAUDE.md", split: "4ccf257" });
+    expect(evidenceHome(".claude/memory/topics/trace.md", { predates: () => null })).toEqual({ path: ".claude/memory/topics/trace.md", split: "ec6d24b" });
+  });
+
+  // Golden: every distinct path the frozen pre-move store cites, as reaudit reads it, and its kind.
+  // A new legacy path in the fixture, or a mapping change, shows up here; zero may stay unmapped.
+  it("every path the legacy-v1 fixture store cites resolves to exactly one kind, and none is unmapped", async () => {
+    const { resolveLegacyRef } = await import("./layout.mjs");
+    const { evidencePaths } = await import("../trace/lib.mjs");
+    const store = readFileSync(join(ROOT, "kit/test/fixtures/legacy-v1/trace/records.jsonl"), "utf8");
+    const records = store.trim().split("\n").map((l) => JSON.parse(l)).filter((e) => e.kind === "record");
+    const paths = [...new Set(records.flatMap((r) => [...evidencePaths(r)]))].sort();
+    const moved = "moved", unchanged = "unchanged", workspace = "workspace", split = "split";
+    const GOLDEN = {
+      ".claude/commands/bench-checkers.md": moved, ".claude/commands/critic-round.md": moved, ".claude/commands/dream.md": moved,
+      ".claude/commands/scan-project-docs.md": moved, ".claude/commands/sync-story-status.md": moved,
+      ".claude/loop-checklist.md": moved, ".claude/loop.md": moved,
+      ".claude/memory/topics/trace.md": split, ".claude/memory/topics/workflow.md": workspace, ".claude/memory/trace/records.jsonl": workspace,
+      ".claude/trace/bench/README.md": moved, ".claude/trace/schema-v1.json": moved,
+      ".claude/workflows/critic-panel.js": moved, ".claude/workflows/e2e-design.js": moved, ".claude/workflows/gap-analysis.js": moved,
+      ".claude/workflows/improve-skills.js": moved, ".claude/workflows/loop-iteration.js": moved, ".claude/workflows/scan-docs.js": moved,
+      ".claude/workflows/trace-bench.js": moved,
+      "/home/user/loop-setup/.claude/commands/dream.md": moved, "/home/user/loop-setup/.claude/memory/topics/trace.md": split,
+      "/home/user/loop-setup/scripts/trace/bench-judge.mjs": moved, "/home/user/loop-setup/scripts/trace/contracts.test.mjs": moved,
+      "/home/user/loop-setup/scripts/trace/lib.mjs": moved, "/home/user/loop-setup/scripts/trace/wiki.test.mjs": moved,
+      "docs/stories/US-001-greeting.md": unchanged, "docs/workflow-graphs.md": moved, "e2e/smoke.spec.ts": unchanged,
+      "node_modules/.pnpm/playwright@1.56.0/.../webServerPlugin.js": unchanged, "node_modules/next/dist/server/config.js": unchanged,
+      "package.json": unchanged, "playwright.config.ts": unchanged, "scripts/template-docs.test.mjs": unchanged,
+      "scripts/trace/bench-judge.mjs": moved, "scripts/trace/cli.mjs": moved, "scripts/trace/cli.test.mjs": moved,
+      "scripts/trace/config.test.mjs": moved, "scripts/trace/contracts.test.mjs": moved, "scripts/trace/lib.mjs": moved,
+      "scripts/trace/lib.test.mjs": moved, "scripts/trace/plan.mjs": moved, "scripts/trace/story-map.mjs": moved,
+      "scripts/trace/wiki.test.mjs": moved, "scripts/trace/workflows.test.mjs": moved,
+    };
+    const kinds = Object.fromEntries(paths.map((p) => [p, resolveLegacyRef(p).kind]));
+    expect(kinds).toEqual(GOLDEN);
+    expect(paths.filter((p) => resolveLegacyRef(p).kind === "unmapped")).toEqual([]);
+  });
+});
+
+// The map and the splits are facts about this repository's history, checked against it. These tests
+// read git history, so they need a full clone (CI's checks job fetches it).
+describe("legacy evidence refs against the repository's history", () => {
+  const git = (...args) => execFileSync("git", args, { cwd: ROOT, encoding: "utf8" });
+  const fullHistory = () => expect(git("rev-parse", "--is-shallow-repository").trim(), "these tests need full git history (git fetch --unshallow)").toBe("false");
+
+  it("LEGACY_REF_MAP is exactly the kit move's renames from outside kit/ into kit/ (git diff -M --name-status of the move commit)", async () => {
+    fullHistory();
+    const { LEGACY_MOVE_COMMIT, LEGACY_REF_MAP } = await import("./layout.mjs");
+    const renames = git("diff", "-M", "--name-status", `${LEGACY_MOVE_COMMIT}^`, LEGACY_MOVE_COMMIT)
+      .split("\n").map((l) => l.split("\t"))
+      .filter(([status, from, to]) => /^R/.test(status) && !from.startsWith("kit/") && to?.startsWith("kit/"))
+      .map(([, from, to]) => [from, to]);
+    expect(renames.length).toBeGreaterThan(0);
+    const byPath = (a, b) => a[0].localeCompare(b[0]);
+    expect([...LEGACY_REF_MAP].sort(byPath)).toEqual(renames.sort(byPath));
+  });
+
+  it("the move left every vacated directory empty, and each split commit added the kit half of its file", async () => {
+    fullHistory();
+    const { LEGACY_MOVE_COMMIT, LEGACY_SPLITS, LEGACY_VACATED_DIRS } = await import("./layout.mjs");
+    for (const dir of LEGACY_VACATED_DIRS) expect(git("ls-tree", "-r", "--name-only", LEGACY_MOVE_COMMIT, "--", dir).trim(), dir).toBe("");
+    for (const s of LEGACY_SPLITS) {
+      const kitHalf = s.into.find((t) => t.root === "project" && t.path.startsWith("kit/"));
+      expect(git("show", "--name-status", "--format=", s.at, "--", kitHalf.path).trim(), `${s.from} at ${s.at}`).toBe(`A\t${kitHalf.path}`);
+    }
   });
 });

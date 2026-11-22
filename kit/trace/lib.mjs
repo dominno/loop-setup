@@ -596,32 +596,52 @@ function refPathParts(e) {
   return [];
 }
 
+/** The paths reaudit reads from a record's evidence (pathFromRef over refPathParts), as cited. */
+export function evidencePaths(record) {
+  const paths = new Set();
+  for (const e of record.evidence || []) {
+    for (const part of refPathParts(e)) {
+      const p = pathFromRef(part);
+      if (p) paths.add(p);
+    }
+  }
+  return paths;
+}
+
+/** The ref of the REAUDIT action that acknowledges a split evidence file: split:<split commit>:<path as cited>. */
+export const splitAckRef = (at, path) => `split:${at}:${path}`;
+
 /**
  * Re-audit (Mnemosyne reconsolidation): latest licensing records whose file evidence
- * changed since the record's commit. `changedSince(commit, path) → boolean` is injected.
- * So is `reachable(commit) → boolean`: a record whose commit the repository no longer has
- * (squashed away and pruned, or a shallow clone) cannot be diffed at all, so it is listed
- * apart — `unreachable` plus every cited path, each needing a re-check — never as
- * "evidence changed".
+ * changed since the record's commit. `changedSince(commit, path)` is injected: false, true
+ * (changed), or { split: <commit> } for a file split in two since (kit/setup/layout.mjs
+ * LEGACY_SPLITS) — not comparable, so listed under `split` ("split at <commit> — re-verify"),
+ * never as changed, until a REAUDIT action whose ref is splitAckRef(<commit>, <path>)
+ * (`actions`: the store's record_id → actions map) acknowledges it. `reachable(commit) →
+ * boolean` is injected too: a record whose commit the repository no longer has (squashed away
+ * and pruned, or a shallow clone) cannot be diffed at all, so it is listed apart —
+ * `unreachable` plus every cited path, each needing a re-check — never as "evidence changed".
  */
-export function reauditCandidates(records, superseded, changedSince, reachable = () => true) {
+export function reauditCandidates(records, superseded, changedSince, reachable = () => true, actions = new Map()) {
   const out = [];
   for (const r of latestByClaim(records, superseded).values()) {
     if (!LICENSING.includes(r.final_status)) continue;
-    const paths = new Set();
-    for (const e of r.evidence) {
-      for (const part of refPathParts(e)) {
-        const p = pathFromRef(part);
-        if (p) paths.add(p);
-      }
-    }
+    const paths = evidencePaths(r);
     if (!paths.size) continue;
     if (!reachable(r.provenance.commit)) {
       out.push({ record_id: r.record_id, claim_id: r.claim_id, claim_text: r.claim_text, unreachable: r.provenance.commit, paths: [...paths] });
       continue;
     }
-    const changed = [...paths].filter((p) => changedSince(r.provenance.commit, p));
-    if (changed.length) out.push({ record_id: r.record_id, claim_id: r.claim_id, claim_text: r.claim_text, changed });
+    const acked = new Set((actions.get(r.record_id) || []).filter((a) => a.action === "REAUDIT" && a.ref).map((a) => a.ref));
+    const changed = [];
+    const split = [];
+    for (const p of paths) {
+      const answer = changedSince(r.provenance.commit, p);
+      if (answer && typeof answer === "object" && answer.split) {
+        if (!acked.has(splitAckRef(answer.split, p))) split.push({ path: p, at: answer.split, note: `split at ${answer.split} — re-verify` });
+      } else if (answer) changed.push(p);
+    }
+    if (changed.length || split.length) out.push({ record_id: r.record_id, claim_id: r.claim_id, claim_text: r.claim_text, ...(changed.length ? { changed } : {}), ...(split.length ? { split } : {}) });
   }
   return out;
 }
