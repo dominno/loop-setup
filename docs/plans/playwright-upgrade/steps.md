@@ -47,10 +47,10 @@ Tests first:
 
 | id | description | scope | check | after | status | commit |
 |---|---|---|---|---|---|---|
-| S01 | Tests first: the e2e-job test in `template-docs.test.mjs` (RED), and the shim-less `pnpm test:e2e` run on 1.56.0 (RED) | scripts/template-docs.test.mjs | `pnpm exec vitest run scripts/template-docs.test.mjs` | — | done | — |
-| S02 | Pin `@playwright/test` to 1.63.0. Regenerate the lockfile with `CI=true corepack pnpm@10 install`. `pnpm install --frozen-lockfile` passes, and no other dependency moves. | package.json, pnpm-lock.yaml | `pnpm install --frozen-lockfile && pnpm test:e2e` | S01 | done | — |
-| S03 | CI's e2e job on `ubuntu-latest`, pin comment removed. The docs name Playwright 1.63. | .github/workflows/verify.yml, README.md, kit/docs/adoption-guide.md | `pnpm exec vitest run scripts/template-docs.test.mjs` | S02 | done | — |
-| S04 | Self-verify chain, the post-implementation critic round, and the wiki facts revised through `/dream` | — | `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | S03 | planned | — |
+| S01 | Tests first: the e2e-job test in `template-docs.test.mjs` (RED), and the shim-less `pnpm test:e2e` run on 1.56.0 (RED) | scripts/template-docs.test.mjs | `pnpm exec vitest run scripts/template-docs.test.mjs` | — | done | 1fab58c |
+| S02 | Pin `@playwright/test` to 1.63.0. Regenerate the lockfile with `CI=true corepack pnpm@10 install`. `pnpm install --frozen-lockfile` passes, and no other dependency moves. | package.json, pnpm-lock.yaml | `pnpm install --frozen-lockfile && pnpm test:e2e` | S01 | done | 1fab58c |
+| S03 | CI's e2e job on `ubuntu-latest`, pin comment removed. The docs name Playwright 1.63. | .github/workflows/verify.yml, README.md, kit/docs/adoption-guide.md | `pnpm exec vitest run scripts/template-docs.test.mjs` | S02 | done | 1fab58c |
+| S04 | Self-verify chain, the post-implementation critic round, and the wiki facts revised through `/dream` | — | `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | S03 | done | 1fab58c |
 
 Pre-implementation critic round (tree 30cc9c917a8aba0e; single-pass reviewer, code-only):
 `completion` accept. Nothing confirmed, deferred or revised, and no records. It was thin, though:
@@ -82,6 +82,18 @@ Lockfile:
   - Regenerating from the unchanged 1.56.0 manifest leaves the lockfile untouched (95 suffixes).
     The churn therefore appears only once the bump makes pnpm re-resolve, not from the pnpm
     version alone.
+
+Post-implementation critic round (tree 07f78239e0f99f54, HEAD 1fab58c; single-pass reviewer plus
+the completeness critic, code-only):
+- `completion` accept. Nothing confirmed, deferred or revised, no nice-to-haves, no reviewer failed,
+  `notRechecked` empty, no records.
+- The reviewers read the diff, the e2e job and the repo for leftover `1.56`/shim/`ubuntu-24`
+  mentions. The completeness critic re-ran the `packages:` name@version diff of the lockfile
+  between `main` and HEAD.
+
+Wiki (`/dream`, `topics/remote-env.md`): TR-ec03808b5b04 revises TR-1a2a7cac54bb (the pin), and
+TR-1ff807be9596 revises TR-e7829fbc9fc1 (the 2026-11-22 observation and the fallback shim). Both are
+`COMMIT_QUALIFIED`.
 
 ## Remaining risks
 
