@@ -204,13 +204,18 @@ const DENYLIST = [
   // ...and what runs the gates: a one-line patch to the root package.json ("test" script) or to a
   // runner config (vitest's include) would turn pnpm test into a green run that skips every
   // scripts/** gate. So the root package.json, the test/lint/type/E2E runner configs and every path
-  // under the root scripts/ directory escalate too. e2e/ and src/ stay open: the loop's real work.
+  // under the root scripts/ directory escalate too. e2e/ and src/ code stays open: the loop's real work.
   /^package\.json$/i, /^(vitest|playwright|eslint)\.config\.[^/]+$/i, /^tsconfig\.json$/i, /^scripts(\/|$)/i,
-  // ...and the repository's own configuration at the root: .gitignore and .gitattributes decide what
-  // git tracks, diffs and checks out (a hidden file, an export-ignore, a merge or eol attribute),
-  // .worktreeinclude what a fresh worktree copies, and .mcp.json the MCP servers every session in the
-  // project starts. A nested .gitignore, .gitattributes or .mcp.json under src/ or e2e/ stays open.
-  /^\.gitignore$/i, /^\.gitattributes$/i, /^\.worktreeinclude$/i, /^\.mcp\.json$/i,
+  // ...and the repository's own configuration. .gitignore and .gitattributes decide what git tracks,
+  // diffs and checks out (a hidden file, an export-ignore, a merge or eol attribute), and git honours
+  // them in every directory for its subtree: a nested src/.gitignore can hide a planted file from git
+  // status, later diffs, the tree-id and stop-gate fingerprints and review, so both escalate at any
+  // depth. The rest are read at the root only: .worktreeinclude (what a fresh worktree copies),
+  // .mcp.json (the MCP servers every session in the project starts), pnpm-workspace.yaml (which
+  // dependencies may run install scripts) and next.config.* (code that pnpm dev and pnpm build run).
+  // A nested .mcp.json, and src/ and e2e/ code, stay open.
+  /(^|\/)\.gitignore$/i, /(^|\/)\.gitattributes$/i, /^\.worktreeinclude$/i, /^\.mcp\.json$/i,
+  /^pnpm-workspace\.yaml$/i, /^next\.config\.[^/]+$/i,
 ]
 const hitsDenylist = (files) => (files || []).some((f) => DENYLIST.some((re) => re.test(f)))
 
@@ -343,7 +348,7 @@ const outcomes = await pipeline(
   items,
   (item, _item, i) =>
     Promise.resolve().then(() => agent(
-      `Implement the SMALLEST safe fix for this loop work item in your isolated worktree. Stay in scope; NEVER touch denylist paths (auth, payments, secrets/.env, infra, CI config, migrations, .claude/, CLAUDE.md, the root scripts/ directory, the root package.json, the vitest, playwright, eslint and tsconfig configs, and the root .gitignore, .gitattributes, .worktreeinclude and .mcp.json), and never add a symlink or a submodule or change a file's mode: the gate escalates those on any path.\n- Your worktree is a fresh checkout without dependencies. First record \`git rev-parse HEAD\` as \`baseSha\`. Then install with the lockfile: \`pnpm install --frozen-lockfile --prefer-offline\`; in the web env, use the pnpm invocation from .claude/loop-workspace/topics/remote-env.md (pnpm 10 vs 11).\n- Edit only inside your worktree, and run typecheck, lint and unit tests there.\n- Never run pnpm dev, pnpm build, pnpm test:e2e or pnpm verify: build rewrites tracked files into your diff, and port 3000 belongs to the user. The Lead runs those after applying.\n- Never commit, push, switch branches, stash or reset, and never stop or kill a process you did not start.\n- Before capturing the diff, run \`git add -N .\` so new files appear in it. Then capture the ACTUAL change with \`git diff --src-prefix=a/ --dst-prefix=b/\` (explicit prefixes: the gate parses only a/ and b/, whatever the git config says) and return it as \`diff\` (the real patch, not a summary). Report changedFiles repo-relative, as the a/ and b/ paths in the diff. In notes, give each check command with its exit code (no | tail) and your worktree root. Set checksPassed to whether those checks passed.\n\n${JSON.stringify(item)}`,
+      `Implement the SMALLEST safe fix for this loop work item in your isolated worktree. Stay in scope; NEVER touch denylist paths (auth, payments, secrets/.env, infra, CI config, migrations, .claude/, CLAUDE.md, the root scripts/ directory, the root package.json, the vitest, playwright, eslint and tsconfig configs, a .gitignore or .gitattributes in any directory, and the root .worktreeinclude, .mcp.json, pnpm-workspace.yaml and next.config.*), and never add a symlink or a submodule or change a file's mode: the gate escalates those on any path.\n- Your worktree is a fresh checkout without dependencies. First record \`git rev-parse HEAD\` as \`baseSha\`. Then install with the lockfile: \`pnpm install --frozen-lockfile --prefer-offline\`; in the web env, use the pnpm invocation from .claude/loop-workspace/topics/remote-env.md (pnpm 10 vs 11).\n- Edit only inside your worktree, and run typecheck, lint and unit tests there.\n- Never run pnpm dev, pnpm build, pnpm test:e2e or pnpm verify: build rewrites tracked files into your diff, and port 3000 belongs to the user. The Lead runs those after applying.\n- Never commit, push, switch branches, stash or reset, and never stop or kill a process you did not start.\n- Before capturing the diff, run \`git add -N .\` so new files appear in it. Then capture the ACTUAL change with \`git diff --src-prefix=a/ --dst-prefix=b/\` (explicit prefixes: the gate parses only a/ and b/, whatever the git config says) and return it as \`diff\` (the real patch, not a summary). Report changedFiles repo-relative, as the a/ and b/ paths in the diff. In notes, give each check command with its exit code (no | tail) and your worktree root. Set checksPassed to whether those checks passed.\n\n${JSON.stringify(item)}`,
       { label: `impl:${item.id || 'item'}-${i}`, phase: 'Implement', schema: IMPL_SCHEMA, isolation: 'worktree' },
     )).catch(agentFailed(`impl:${item.id || 'item'}-${i}`)).then((impl) => ({ impl })),
   ({ impl }, item, i) => {

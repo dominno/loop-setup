@@ -292,7 +292,7 @@ flowchart LR
   budget -- "under floor" --> esc0[▫️ escalate all]
   budget -- ok --> P
   subgraph P["pipeline — per item, independent"]
-    impl[⚪ implementer<br/>fresh worktree: deps installed, base reported<br/>real git diff, new files included] -- "result wrapped: a dead implementer still reaches the gates" --> dl{▫️ denylist gate<br/>.claude / CLAUDE.md / root scripts / root package.json<br/>vitest, playwright, eslint, tsconfig configs / auth / secrets…<br/>root .gitignore, .gitattributes, .worktreeinclude, .mcp.json<br/>on repo-relative changedFiles + diff paths<br/>or unparsable diff paths<br/>or a symlink, gitlink or mode change on any path}
+    impl[⚪ implementer<br/>fresh worktree: deps installed, base reported<br/>real git diff, new files included] -- "result wrapped: a dead implementer still reaches the gates" --> dl{▫️ denylist gate<br/>.claude / CLAUDE.md / root scripts / root package.json<br/>vitest, playwright, eslint, tsconfig configs / auth / secrets…<br/>.gitignore, .gitattributes at any depth<br/>root .worktreeinclude, .mcp.json, pnpm-workspace.yaml, next.config.*<br/>on repo-relative changedFiles + diff paths<br/>or unparsable diff paths<br/>or a symlink, gitlink or mode change on any path}
     dl -- hit --> escd[escalated-denylist<br/>defer: human approval]
     dl -- clear --> bm{"▫️ base check:<br/>reported baseSha = headSha?"}
     bm -- "no (a live report)" --> dbm[deferred: base-mismatch<br/>unverified, re-dispatch from HEAD]

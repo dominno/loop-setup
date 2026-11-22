@@ -272,8 +272,9 @@ the memory wiki's topic pages) and `CLAUDE.md`, plus the TRACE gate code in
 the root `package.json`, and the `vitest.config.*`, `playwright.config.*`,
 `eslint.config.*` and `tsconfig.json` runner configs, since a one-line change to the
 `test` script or to vitest's include could make `pnpm test` skip every `scripts/**`
-gate), and the repository's own configuration at the root (`.gitignore`, `.gitattributes`,
-`.worktreeinclude`, `.mcp.json`): a loop never self-modifies its own instructions or gates
+gate), and the repository's own configuration (a `.gitignore` or `.gitattributes` in any directory,
+since git honours a nested one for its subtree, and at the root `.worktreeinclude`, `.mcp.json`,
+`pnpm-workspace.yaml` and `next.config.*`): a loop never self-modifies its own instructions or gates
 autonomously, even at L3 — propose and escalate instead** (this is enforced
 deterministically by the `loop-iteration.js` denylist regex; the sanctioned path to
 change the prompt surface is the manual, confirmation-gated `/improve-skills`). A diff

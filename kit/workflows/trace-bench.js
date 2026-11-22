@@ -122,13 +122,18 @@ const DENYLIST = [
   // ...and what runs the gates: a one-line patch to the root package.json ("test" script) or to a
   // runner config (vitest's include) would turn pnpm test into a green run that skips every
   // scripts/** gate. So the root package.json, the test/lint/type/E2E runner configs and every path
-  // under the root scripts/ directory escalate too. e2e/ and src/ stay open: the loop's real work.
+  // under the root scripts/ directory escalate too. e2e/ and src/ code stays open: the loop's real work.
   /^package\.json$/i, /^(vitest|playwright|eslint)\.config\.[^/]+$/i, /^tsconfig\.json$/i, /^scripts(\/|$)/i,
-  // ...and the repository's own configuration at the root: .gitignore and .gitattributes decide what
-  // git tracks, diffs and checks out (a hidden file, an export-ignore, a merge or eol attribute),
-  // .worktreeinclude what a fresh worktree copies, and .mcp.json the MCP servers every session in the
-  // project starts. A nested .gitignore, .gitattributes or .mcp.json under src/ or e2e/ stays open.
-  /^\.gitignore$/i, /^\.gitattributes$/i, /^\.worktreeinclude$/i, /^\.mcp\.json$/i,
+  // ...and the repository's own configuration. .gitignore and .gitattributes decide what git tracks,
+  // diffs and checks out (a hidden file, an export-ignore, a merge or eol attribute), and git honours
+  // them in every directory for its subtree: a nested src/.gitignore can hide a planted file from git
+  // status, later diffs, the tree-id and stop-gate fingerprints and review, so both escalate at any
+  // depth. The rest are read at the root only: .worktreeinclude (what a fresh worktree copies),
+  // .mcp.json (the MCP servers every session in the project starts), pnpm-workspace.yaml (which
+  // dependencies may run install scripts) and next.config.* (code that pnpm dev and pnpm build run).
+  // A nested .mcp.json, and src/ and e2e/ code, stay open.
+  /(^|\/)\.gitignore$/i, /(^|\/)\.gitattributes$/i, /^\.worktreeinclude$/i, /^\.mcp\.json$/i,
+  /^pnpm-workspace\.yaml$/i, /^next\.config\.[^/]+$/i,
 ]
 const hitsDenylist = (files) => (files || []).some((f) => DENYLIST.some((re) => re.test(f)))
 
