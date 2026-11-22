@@ -29,6 +29,7 @@ Layers: **core** = `kit/setup/kittree.mjs` (install contract) and `kit/setup/int
 | S04 | Gates: `--level` on `denylist-check` and `plan-items` (L2/L3/undeclared refuse, L1 warns) for an installed kit; the lifecycle fixture gets a bare origin | kit/trace/cli.mjs, kit/setup/verifykit.test.mjs, kit/setup/lifecycle.test.mjs | `pnpm exec vitest run kit/setup` | S03 | done | 84f6395 |
 | S05 | Docs: loop.md step 10 passes `--level`; command help and usage; README and planning guide; remaining risks | kit/loop.md, kit/trace/cli.mjs, kit/setup/commands.mjs, README.md, kit/docs/planning-guide.md, docs/plans/verify-kit/steps.md | `pnpm test` | S04 | done | 84f6395 |
 | S06 | Self-verify chain and the post-implementation critic round | — | `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | S05 | in-progress |  |
+| S06.1 | Post-implementation round TR-9fa2ebddf867 (accept): `redactRemote` kept a token used as the user name of an https origin, so a PAT reached installed.json and verify-kit output — drop all http(s) userinfo, keep an ssh user name, drop any password | kit/setup/integrity.mjs, kit/setup/integrity.test.mjs, kit/setup/verifykit.test.mjs | `pnpm exec vitest run kit/setup/integrity.test.mjs kit/setup/verifykit.test.mjs` | S06 | in-progress |  |
 
 ## Remaining risks (by design)
 
@@ -45,4 +46,7 @@ Layers: **core** = `kit/setup/kittree.mjs` (install contract) and `kit/setup/int
   not examined, except that `disableAllHooks` anywhere it applies fails the check.
 - A remote recorded as a loopback git-proxy URL (`http://…@127.0.0.1:<port>/git/…`) fails closed once
   that endpoint is gone (TR-90c5f02cec46); the documented cloud flow reinstalls in every container.
+  An http(s) remote is recorded without its userinfo (a token can be the user name), so a remote that
+  only works with credentials embedded in the URL needs a git credential helper, or verify-kit fails
+  closed (exit 2).
 - Every check fetches the protected refs afresh (about 1.4 s for this repository); there is no cache.

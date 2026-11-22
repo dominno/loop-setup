@@ -18,8 +18,15 @@ export const isProtectedRef = (ref) => ref === "refs/heads/main" || /^refs\/tags
 /** A full commit id (sha1 or sha256) — the only form of a commit that ever reaches git. */
 export const isCommitId = (s) => typeof s === "string" && /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(s);
 
-/** A remote URL with any password removed (user names stay: the cloud git proxy needs its own). */
-export const redactRemote = (url) => String(url).replace(/^([a-z][a-z0-9+.-]*:\/\/[^:@/]*):[^@/]*@/i, "$1@");
+/**
+ * A remote URL with no credential left in it, as installed.json records it and verify-kit prints it:
+ * an http(s) URL loses all its userinfo (a token can be the user name; git's credential helper
+ * supplies what the remote needs), any other URL loses a password (an ssh user name stays: ssh needs it).
+ */
+export const redactRemote = (url) =>
+  String(url)
+    .replace(/^(https?:\/\/)[^@/]*@/i, "$1")
+    .replace(/^([a-z][a-z0-9+.-]*:\/\/[^:@/]*):[^@/]*@/i, "$1@");
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 

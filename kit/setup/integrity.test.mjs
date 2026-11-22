@@ -2,7 +2,7 @@
 // installer (kit/setup/kittree.mjs): pure functions, tested directly with in-memory facts.
 // The real stack (a bare remote, a real install, the installed shim) is kit/setup/verifykit.test.mjs.
 import { describe, expect, it } from "vitest";
-import { compareInstall, expectedInstall, isCommitId, kitGate, parseLevel, protectedVerdict } from "./integrity.mjs";
+import { compareInstall, expectedInstall, isCommitId, kitGate, parseLevel, protectedVerdict, redactRemote } from "./integrity.mjs";
 import { ownedSettings, readKitTree, renderInstall, renderKit, sha256, shimText } from "./kittree.mjs";
 
 const HOME = "/h/.claude";
@@ -178,7 +178,7 @@ describe("protectedVerdict — the commit must be on the remote's main or a kit-
   it("an unreachable remote cannot be verified (code UNVERIFIABLE), with the credentials redacted", () => {
     const v = protectedVerdict({ reachable: false, error: "fatal: could not read from remote" }, { commit: C, remote: R });
     expect(v).toMatchObject({ ok: false, code: "UNVERIFIABLE" });
-    expect(v.problems[0]).toMatch(/^remote https:\/\/x@example\.com\/kit\.git unreachable/);
+    expect(v.problems[0]).toMatch(/^remote https:\/\/example\.com\/kit\.git unreachable/);
     expect(v.problems[0]).not.toContain("secret");
   });
 
@@ -192,8 +192,24 @@ describe("protectedVerdict — the commit must be on the remote's main or a kit-
   it("a commit no protected ref contains is a tamper (code TAMPERED), and so is a protected commit with no kit/", () => {
     const v = protectedVerdict(facts({ containing: [] }), { commit: C, remote: R });
     expect(v).toMatchObject({ ok: false, code: "TAMPERED" });
-    expect(v.problems[0]).toBe(`installed.json: source.commit ${C.slice(0, 12)} is not on a protected ref of https://x@example.com/kit.git (refs/heads/main, refs/tags/kit-v*)`);
+    expect(v.problems[0]).toBe(`installed.json: source.commit ${C.slice(0, 12)} is not on a protected ref of https://example.com/kit.git (refs/heads/main, refs/tags/kit-v*)`);
     expect(protectedVerdict(facts({ hasKit: false }), { commit: C, remote: R })).toMatchObject({ ok: false, code: "TAMPERED" });
+  });
+
+  it("redactRemote never keeps a credential: all userinfo of an http(s) URL (a token can be the user name), a password elsewhere; an ssh user stays", () => {
+    const cases = [
+      ["https://ghp_SECRETTOKEN@github.com/o/r.git", "https://github.com/o/r.git"],
+      ["https://github_pat_11ABC@github.com/o/r", "https://github.com/o/r"],
+      ["https://x-access-token:ghs_SECRET@github.com/o/r", "https://github.com/o/r"],
+      ["http://local_proxy@127.0.0.1:41000/git/o/r", "http://127.0.0.1:41000/git/o/r"],
+      ["HTTPS://user:pass@example.com/kit.git", "HTTPS://example.com/kit.git"],
+      ["ssh://git@github.com/o/r.git", "ssh://git@github.com/o/r.git"],
+      ["ssh://git:secret@github.com/o/r.git", "ssh://git@github.com/o/r.git"],
+      ["git@github.com:o/r.git", "git@github.com:o/r.git"],
+      ["/srv/git/kit.git", "/srv/git/kit.git"],
+      ["https://github.com/o/r@v1", "https://github.com/o/r@v1"],
+    ];
+    for (const [url, want] of cases) expect(redactRemote(url), url).toBe(want);
   });
 
   it("only a full commit id and a remote that is not an option ever reach git", () => {

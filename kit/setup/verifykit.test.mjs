@@ -239,6 +239,19 @@ describe("verify-kit fails closed when it cannot verify (exit 2)", () => {
   }, SLOW);
 });
 
+describe("install records the remote verify-kit fetches from, never a credential in it", () => {
+  it("an origin with a token as its user name is recorded without it", () => {
+    const src = join(T, "kitsrc-token");
+    git(T, "clone", "-q", kitSrc, src);
+    git(src, "remote", "set-url", "origin", "https://ghp_FAKETOKEN0123@example.com/o/loop-setup.git");
+    const home = join(T, `h${(homes += 1)}`, ".claude");
+    mkdirSync(home, { recursive: true });
+    install({ from: src, claudeHome: home });
+    expect(readJson(manifestOf(home)).source).toMatchObject({ remote: "https://example.com/o/loop-setup.git", prefix: "kit" });
+    expect(readFileSync(manifestOf(home), "utf8")).not.toContain("ghp_");
+  }, SLOW);
+});
+
 describe("verify-kit cannot verify what it cannot anchor (exit 2)", () => {
   it("a kit installed from a directory (no commit, no remote), and a recorded kit prefix other than kit/", () => {
     const unpacked = join(T, `unpacked-${(homes += 1)}`);
