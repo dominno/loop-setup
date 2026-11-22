@@ -3,11 +3,12 @@
 - Chromium is pre-provisioned at `/opt/pw-browsers`; `PLAYWRIGHT_BROWSERS_PATH`
   is already set. Run installs with `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` and do
   **not** run `playwright install`.
-- `@playwright/test` is pinned to **1.56.0**, which launches Chromium build **1194**; the
-  pre-provisioned build is a property of the container image (1194 earlier, 1243 on
-  2026-11-06). A mismatch shows as "Executable doesn't exist … -1194": bridge it with the
-  scratchpad `PLAYWRIGHT_BROWSERS_PATH` shim below, not by bumping Playwright (CI pins its
-  own browser). <!-- rec:TR-1a2a7cac54bb -->
+- `@playwright/test` is pinned to **1.63.0**. Its `browsers.json` names Chromium (and headless
+  shell) build **1243** and ffmpeg 1011, which is what the container image ships in
+  `/opt/pw-browsers`, so `pnpm test:e2e` runs with no shim. The image's build can change
+  (1194 before 2026-11-06, 1243 since). The pinned version alone picks the build, so when the image
+  moves, read the new build off each candidate's `browsers.json` (`npm pack playwright-core@<v>`)
+  and move the pin. CI installs its own browser. <!-- rec:TR-ec03808b5b04 -->
 - Manual MCP browser verification is unavailable in headless web sessions (no
   Chrome/Playwright MCP attached); automated Chromium E2E is the verification path.
 - **CI is different from the web env:** GitHub Actions has no pre-provisioned
@@ -28,12 +29,15 @@
   container's 4 CPUs at ~99% for hours (observed once, 2026-10-31). Find them with
   `ps -eo pid,ppid,pcpu,args` and `readlink /proc/<pid>/cwd`, and remove them by PID only.
   <!-- rec:TR-feb3bd831b17 -->
-- Observed 2026-11-06 (one container; the image can change again): `/opt/pw-browsers` held
-  Chromium build **1243**, not the 1194 that the pinned Playwright 1.56.0 launches, so
-  `pnpm test:e2e` failed with "Executable doesn't exist … headless_shell-1194". A scratchpad
-  `PLAYWRIGHT_BROWSERS_PATH` with `chromium_headless_shell-1194/chrome-linux/headless_shell`
-  symlinked to the 1243 binary (plus `ffmpeg-1011`) passed all 16 E2E tests with no repo change.
-  <!-- rec:TR-e7829fbc9fc1 -->
+- Observed 2026-11-22 (one container; the image can change again): `/opt/pw-browsers` held
+  `chromium-1243`, `chromium_headless_shell-1243` and `ffmpeg-1011`.
+  - On Playwright 1.63.0, `pnpm test:e2e` passed 16/16 with no shim.
+  - On 1.56.0, 15 of 16 tests failed with "Executable doesn't exist …
+    chromium_headless_shell-1194/chrome-linux/headless_shell".
+  - While the pin and the image disagree, a scratchpad `PLAYWRIGHT_BROWSERS_PATH` that maps the
+    expected path to the image's `chrome-headless-shell-linux64/chrome-headless-shell` (plus
+    `ffmpeg-1011`) bridges them with no repo change.
+  <!-- rec:TR-1ff807be9596 -->
 - A kit installed into `~/.claude` by the environment **setup script** (it runs before Claude
   starts) is loaded by a fresh web session: its user-scope commands in `~/.claude/commands` are
   available as skills, and its SessionStart hook in `~/.claude/settings.json` runs, even though

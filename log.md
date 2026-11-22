@@ -432,3 +432,9 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
 - Rejected: TR-c0815098c611 (pre-phase-B installs lack source.remote — not durable).
 - No CLAUDE.md rule and no new skill proposed. Size: topics/trace.md is at 398 of 400 lines; the next
   fact for it needs a split first.
+
+## [2026-11-22] ingest | Playwright pin follows the image (1.63.0 ↔ Chromium 1243), shim fact revised
+- Goal: Playwright 1.56.0 → 1.63.0 (commit 1fab58c); E2E 16/16 on /opt/pw-browsers with no shim; CI e2e back on ubuntu-latest.
+- Admission tally: 0 committed / 2 qualified / 0 quarantined / 0 rejected (both revisions, criterion 4 of the goal).
+- Qualified: TR-ec03808b5b04 revises TR-1a2a7cac54bb (wiki:remote-env:playwright-pin: the pin is 1.63.0, build 1243; the pin follows the image, read off browsers.json) and TR-1ff807be9596 revises TR-e7829fbc9fc1 (wiki:remote-env:pw-browser-build-1243: 2026-11-22 observation, shim only while pin and image disagree) → topics/remote-env.md.
+- Not filed (needs your confirmation, a legacy bullet): the pnpm gotcha says to regenerate the lockfile with `CI=true corepack pnpm@10 install`, but CI=true defaults to --frozen-lockfile, so a changed manifest needs `--no-frozen-lockfile`.
