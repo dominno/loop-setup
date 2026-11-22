@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1368 768" width="1368" height="768" font-family="DejaVu Sans, Arial, Helvetica, sans-serif">
   <title>TRACE records from claim to durable change</title>
-  <desc>How a claim becomes a durable change. A maker types a claim (factual, measured, causal, predictive, normative, practical); a separate checker gives it a verdict (accept, qualify, revise, defer, reject, each with its required field; no readable verdict is a defer); the evidence gate caps an accept or qualify whose evidence is weaker than its claim type demands (reading never counts); loop-setup write appends the record to the append-only store, hash-chained per writer; a consumer action on the latest record (CLEAR, COMMIT, COMMIT_QUALIFIED, QUARANTINE, HOLD, REJECT, REUSE, REAUDIT, and the human-only LAND) makes the durable change. Fail-closed rules: actions are refused on a non-licensing verdict or a record that is not the newest for its claim; a defer is settled only by a separate checker; unattended only accept is applied; LAND and anchors reset are human steps refused inside Claude Code.</desc>
+  <desc>How a claim becomes a durable change. A maker types a claim (factual, measured, causal, predictive, normative, practical); a separate checker gives it a verdict (accept, qualify, revise, defer, reject, each with its required field; no readable verdict is a defer); the evidence gate drops an accept or qualify whose evidence is below its claim type's floor to that type's fallback (defer, or qualify for causal and predictive claims) (reading never counts); loop-setup write appends the record to the append-only store, hash-chained per writer; a consumer action on the latest record (CLEAR, COMMIT, COMMIT_QUALIFIED, QUARANTINE, HOLD, REJECT, REUSE, REAUDIT, and the human-only LAND) makes the durable change. Fail-closed rules: actions are refused on a non-licensing verdict or a record that is not the newest for its claim; a defer is settled only by a separate checker; unattended only accept is applied; LAND and anchors reset are human steps refused inside Claude Code.</desc>
   <defs>
     <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
       <path d="M24 0H0V24" fill="none" stroke="#e3eaf3" stroke-width="1"/>
@@ -81,7 +81,7 @@
   <circle cx="830" cy="128" r="14" fill="#c48a0e"/><text x="830" y="134" text-anchor="middle" fill="#fff" font-weight="800" font-size="15">3</text>
   <text x="852" y="135" class="h" style="fill:#8a5f00">EVIDENCE GATE</text>
   <text x="1322" y="134" class="s" text-anchor="end">no claim stronger than its evidence</text>
-  <text x="822" y="160" class="s">an accept or qualify is capped when its evidence is below its type's floor</text>
+  <text x="822" y="160" class="s">a licensing verdict whose evidence is below its type's floor falls to else</text>
   <g>
     <text x="822" y="186" class="s" font-weight="700">claim type</text><text x="928" y="186" class="s" font-weight="700">accept needs one of</text><text x="1272" y="186" class="s" font-weight="700">else</text>
     <line x1="822" y1="194" x2="1322" y2="194" stroke="#e5d3a6" stroke-width="1.5"/>
