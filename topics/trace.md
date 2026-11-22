@@ -15,6 +15,7 @@ truth (paper §7.2).
 written under a newer policy — bump it whenever a table below or a record rule changes.)
 v3 adds the memory write boundary for `wiki:` records (**Record guarantees**); records
 written under v1/v2 replay unchanged.
+- This page is the wiki's copy at v3; the kit enforces `kit/rules/trace-policy.md`, v5 on main since phase C (v4 chains and anchors, v5 landed nodes): [state-integrity](./state-integrity.md). <!-- rec:TR-f6e6816043a8 -->
 
 - Schema: `kit/schema/schema-v1.json` · Store: `.claude/loop-workspace/trace/records.jsonl`
   (append-only JSONL, archives `<YYYY>.jsonl`) · Writer/linter: `loop-setup …`

@@ -19,5 +19,10 @@
   runs fully isolated: CLI behaviour that touches HEAD, the working tree or the fixture
   bundle is tested there (`tempRepo()` in `cli.test.mjs`), never in the real tree.
   <!-- rec:TR-4a808ff82551 -->
+- To prove a lock is not held during git's network steps, probe its lock file from the bare
+  remote's `hooks/pre-receive` (the push) and from `uploadpack.packObjectsHook` set in the test
+  HOME's global `~/.gitconfig` (the fetch; upload-pack runs it while packing, so put the remote
+  ahead first). Each probe appends "held" or "free" to a log the test asserts on
+  (`kit/setup/chainrepo.test.mjs`). <!-- rec:TR-03fde402b476 -->
 
-Related: [client-react](./client-react.md) · [build-and-verify](./build-and-verify.md)
+Related: [client-react](./client-react.md) · [build-and-verify](./build-and-verify.md) · [state-integrity](./state-integrity.md)

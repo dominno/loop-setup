@@ -441,3 +441,10 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
 
 ## [2026-11-22] lint | legacy pnpm gotcha rewritten (user confirmed)
 - topics/remote-env.md: the legacy pnpm bullet is rewritten (1e iii) with TR-05757f216432 (qualify, COMMIT_QUALIFIED): the default corepack pnpm is now 12.21.0, not 11; pnpm 11 fails on unapproved native builds; regenerating the lockfile needs `CI=true corepack pnpm@10 install --no-frozen-lockfile`, because CI=true alone implies --frozen-lockfile.
+
+## [2026-11-22] ingest | phase-C facts (kit main edb81bf)
+- New page topics/state-integrity.md (index row added): the state git dir outside the workspace (TR-790dd8d478f3), record chains and anchors, policy v4 (TR-747a45d0eb3b), an older kit rejects 1.1 lines, observed with 2dd64dd vs main (TR-85aff7cd2be3), the store lock's scope since 74a9b73 (TR-bc3bcd80c361), done means landed, policy v5 (TR-4b94a2d88dbc).
+- topics/testing.md: lock probes in git's pre-receive hook and uploadpack.packObjectsHook (TR-03fde402b476, accept).
+- topics/workflow.md: neutral priorEvidence for critic rounds, one observation (TR-3059692c0712).
+- topics/trace.md: this copy is v3, the kit enforces kit/rules/trace-policy.md at v5 (TR-f6e6816043a8).
+- Tally: committed 1, qualified 7, quarantined 0, rejected 0.

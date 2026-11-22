@@ -192,3 +192,8 @@ for `loop-plan.md` and turned down. Each says what would reopen it, so this is n
 - **Bench re-run rule:** a `PLAN_COLUMNS` change alone needs no `/bench-checkers` re-run (it
   must update `PLAN_COLUMNS`, the Node schema table and the parser tests together); a change
   to the plan-items item shape, or to the text the loop verifier receives, does.
+- Give a critic round neutral `priorEvidence` (command results only) and name the seams to
+  check: in phase C's closing review, a round told the per-goal rounds had already accepted ran 4
+  shell commands over about 4,400 lines and found nothing; on the same tree, with command results
+  only and the cross-goal seams named, the next round confirmed a regression (TR-d3aba003bc20).
+  One observation; the focus text changed too. <!-- rec:TR-3059692c0712 -->
