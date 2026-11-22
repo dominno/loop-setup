@@ -17,7 +17,7 @@ revised with the pre-implementation round's five findings before any code).
 
 Pre-flight: `loop-setup doctor` exit 0 (10 ok, 0 fail).
 
-Commits: ea055dd (S01–S05), 81b72fc (S03.1: `core.autocrlf=false`).
+Commits: ea055dd (S01–S05), 81b72fc (S03.1: `core.autocrlf=false`), 7f9ba0a (S06.1/S06.2: post-round fixes).
 
 Success criteria and evidence:
 1. **Layout and migration.** New and restored workspaces keep their GIT_DIR at
@@ -57,3 +57,43 @@ Commands (HEAD 81b72fc unless noted):
 | `loop-setup doctor` | 0 | 9 ok, 1 warn (workspace has 1 changed file before sync) |
 | `loop-setup verify-kit` | 2 | waived (see Pre-flight) |
 | `node kit/bin/loop-setup.mjs doctor` (the new code, on the live old-layout workspace) | 0 | `warn state repo outside the workspace — …/workspaces/loop-setup-e3ed255a/.git — it moves to …/state/loop-setup-e3ed255a.git at the next sync or restore`; nothing moved |
+
+Critic rounds (code-only, single-pass reviewer; `priorRecords` = the brief minus records already
+CLEARed, which can be neither open nor reused):
+
+Pre-implementation (tree bd8432437f21a69e, the design only): `completion` reject → every finding
+taken into the design before code (details in `steps.md`).
+
+| Critic | Severity | Verdict | Finding | Evidence | Recommended action |
+|---|---|---|---|---|---|
+| security | blocker | accept (TR-73f53598baa2) | renaming the old git dir carries a planted `commondir`/`config.worktree`/alternates past a config-only guard | skeptic reproduced on git 2.43 | rebuild a fresh git dir; guard git dir entries → done, CLEARed |
+| frontend-arch | important | accept (TR-713d6c46b885) | init/clone/first checkout contradict rule 1 | scratch clone: empty tree | bootstrap path guarded by the incoming-tree rule → done, CLEARed |
+| regression | important | qualify (TR-6d66091dd044) | a failed init/restore leaves an orphan `state/<id>.git` that wedges restore | reproduced ENOTEMPTY | temp names renamed last; init refuses; orphan moved aside → done, CLEARed |
+| regression | important | qualify, not live (TR-09d6d62c3dc9) | rule 1 pinned to the current template refuses after a template edit; CRLF via autocrlf | template history | released-digest list, recovery text, `core.autocrlf=false` (81b72fc) → done, CLEARed |
+| regression | blocker → important | revise (TR-e8de2cbc87d7) | the `existsSync(<ws>/.git)` gates are not named | scratch simulation | gates replaced, hook tests added → HOLD (CLEAR is not allowed on a revise); re-adjudicated below |
+
+Post-implementation (tree 8072ee5bd85748a2, HEAD 81b72fc): `completion` accept, no reviewer
+failed, `notRechecked` = TR-67a4bf436ad6, TR-ba38c0ce4290 (2026-10-31 completeness-lens records,
+unrelated; the completeness critic was off).
+
+| Critic | Severity | Verdict | Finding | Evidence | Recommended action |
+|---|---|---|---|---|---|
+| security | important | qualify (TR-972c44ec1b85) | `.gitattributes`/`.gitmodules` matched case-sensitively; a nested or modules case variant passes on APFS/NTFS | code + case-folding LD_PRELOAD shim (not a real volume) | compare lowercased → fixed in 7f9ba0a (S06.1), RED then GREEN |
+| security | important | qualify (TR-18b8caf62785) | migration carried the old config's `remote.origin.url` into the trusted git dir | reproduced: pull/push followed it | take the project's origin; `remote add --` → fixed in 7f9ba0a (S06.2), RED then GREEN |
+| regression | important | reject (TR-c2e1780acd08) | SessionStart no longer swallows non-refusal errors | refuted by code and a run | none |
+
+Nice-to-have, left as a risk: before migration, the hooks and doctor run `git status` in the old
+`<ws>/.git` behind a check-then-use guard.
+
+Re-check round (tree 2aa733bcad5b9159, HEAD 7f9ba0a; a separate checker): `completion` accept, no
+findings, `notRechecked` empty. TR-972c44ec1b85 and TR-18b8caf62785 CLEARed. TR-e8de2cbc87d7 (a
+revise, which CLEAR does not allow) was re-adjudicated by this round against the code, not
+re-raised, and is HELD with that note. Full chain at 7f9ba0a: typecheck 0, lint 0, test 0 (946/946),
+build 0, test:e2e 0 (16/16); `loop-setup lint` 0 (175 records), `wiki-check` 0, `doctor` 0.
+
+Remaining risks: listed in `docs/plans/state-gitdir/steps.md` (the pre-migration status race, an
+unserialized concurrent migration, the per-call guard cost, no real APFS/NTFS run, the live kit still
+2dd64dd).
+
+**C3 status: done** (green checkpoint: tests and chain pass, the last round accepts with no open
+blocker, records written, sync done, commits pushed).

@@ -204,15 +204,15 @@ strong rule) and concurrent migration by two processes (under Remaining risks).
 
 | id | description | scope | check | after | status | commit |
 |---|---|---|---|---|---|---|
-| S01 | Tests first: the guard and location unit tests, the real-git state-repo tests (RED); the pre-round findings' cases | kit/setup/stateguard.test.mjs, kit/setup/layout.test.mjs, kit/setup/staterepo.test.mjs, kit/setup/lifecycle.test.mjs | `pnpm exec vitest run kit/setup/stateguard.test.mjs kit/setup/layout.test.mjs kit/setup/staterepo.test.mjs kit/setup/lifecycle.test.mjs` | — | done | — |
-| S02 | Core: `stateRoot`, `stateGitDir`, `stateRepoLocation`; the guard (`stateRepoRefusal`, `incomingTreeRefusal`) | kit/setup/layout.mjs, kit/setup/stateguard.mjs | same | S01 | done | — |
-| S03 | Adapter: `stateRepo`, `stateGit` (explicit dirs + guard), `migrate`, init/restore/pull/sync/syncStatus, `lintGate` ceiling | kit/setup/workspace.mjs | same | S02 | done | — |
-| S04 | Driving adapters: exit 2 on refusal, hook lines, the doctor check | kit/setup/commands.mjs, kit/setup/hooks.mjs | same | S03 | done | — |
-| S05 | Docs: where the state repo lives, the refusals and the migration (adoption guide; KIT.md needed no change) | kit/docs/adoption-guide.md | `pnpm exec vitest run scripts/template-docs.test.mjs` | S04 | done | — |
-| S03.1 | Pre-round qualifier TR-09d6d62c3dc9: a global `core.autocrlf=true` turned the template `.gitattributes` into CRLF at restore's checkout, so the guard refused a clean workspace (RED in the restore test); `HARDEN` pins `core.autocrlf=false` | kit/setup/workspace.mjs, kit/setup/staterepo.test.mjs | `pnpm exec vitest run kit/setup/staterepo.test.mjs -t "init puts it"` | S03 | done | — |
-| S06 | Self-verify chain and the post-implementation critic round | — | `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | S05 | done | — |
-| S06.1 | Post-round TR-972c44ec1b85 (qualify): the guard matched `.gitattributes`/`.gitmodules` case-sensitively, so a nested or `.gitmodules` case variant passed on a case-insensitive file system; names now compare lowercased (work-tree walk and both pure rules), only the exact root `.gitattributes` is the template | kit/setup/stateguard.mjs, kit/setup/workspace.mjs, kit/setup/stateguard.test.mjs | `pnpm exec vitest run kit/setup/stateguard.test.mjs -t case-insensitively` | S06 | done | — |
-| S06.2 | Post-round TR-18b8caf62785 (qualify): migration carried `remote.origin.url` from the untrusted old config into the new git dir; it now takes the project's origin (as init does), and `remote add` passes `--` | kit/setup/workspace.mjs, kit/setup/staterepo.test.mjs | `pnpm exec vitest run kit/setup/staterepo.test.mjs -t poisoned` | S06 | done | — |
+| S01 | Tests first: the guard and location unit tests, the real-git state-repo tests (RED); the pre-round findings' cases | kit/setup/stateguard.test.mjs, kit/setup/layout.test.mjs, kit/setup/staterepo.test.mjs, kit/setup/lifecycle.test.mjs | `pnpm exec vitest run kit/setup/stateguard.test.mjs kit/setup/layout.test.mjs kit/setup/staterepo.test.mjs kit/setup/lifecycle.test.mjs` | — | done | ea055dd |
+| S02 | Core: `stateRoot`, `stateGitDir`, `stateRepoLocation`; the guard (`stateRepoRefusal`, `incomingTreeRefusal`) | kit/setup/layout.mjs, kit/setup/stateguard.mjs | same | S01 | done | ea055dd |
+| S03 | Adapter: `stateRepo`, `stateGit` (explicit dirs + guard), `migrate`, init/restore/pull/sync/syncStatus, `lintGate` ceiling | kit/setup/workspace.mjs | same | S02 | done | ea055dd |
+| S04 | Driving adapters: exit 2 on refusal, hook lines, the doctor check | kit/setup/commands.mjs, kit/setup/hooks.mjs | same | S03 | done | ea055dd |
+| S05 | Docs: where the state repo lives, the refusals and the migration (adoption guide; KIT.md needed no change) | kit/docs/adoption-guide.md | `pnpm exec vitest run scripts/template-docs.test.mjs` | S04 | done | ea055dd |
+| S03.1 | Pre-round qualifier TR-09d6d62c3dc9: a global `core.autocrlf=true` turned the template `.gitattributes` into CRLF at restore's checkout, so the guard refused a clean workspace (RED in the restore test); `HARDEN` pins `core.autocrlf=false` | kit/setup/workspace.mjs, kit/setup/staterepo.test.mjs | `pnpm exec vitest run kit/setup/staterepo.test.mjs -t "init puts it"` | S03 | done | 81b72fc |
+| S06 | Self-verify chain and the post-implementation critic round | — | `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | S05 | done | 7f9ba0a |
+| S06.1 | Post-round TR-972c44ec1b85 (qualify): the guard matched `.gitattributes`/`.gitmodules` case-sensitively, so a nested or `.gitmodules` case variant passed on a case-insensitive file system; names now compare lowercased (work-tree walk and both pure rules), only the exact root `.gitattributes` is the template | kit/setup/stateguard.mjs, kit/setup/workspace.mjs, kit/setup/stateguard.test.mjs | `pnpm exec vitest run kit/setup/stateguard.test.mjs -t case-insensitively` | S06 | done | 7f9ba0a |
+| S06.2 | Post-round TR-18b8caf62785 (qualify): migration carried `remote.origin.url` from the untrusted old config into the new git dir; it now takes the project's origin (as init does), and `remote add` passes `--` | kit/setup/workspace.mjs, kit/setup/staterepo.test.mjs | `pnpm exec vitest run kit/setup/staterepo.test.mjs -t poisoned` | S06 | done | 7f9ba0a |
 
 RED → GREEN:
 - Before S02, `pnpm exec vitest run kit/setup/stateguard.test.mjs kit/setup/layout.test.mjs
@@ -249,3 +249,27 @@ Post-implementation critic round (tree 8072ee5bd85748a2, HEAD 81b72fc; single-pa
 - Refuted: TR-c2e1780acd08 (SessionStart swallowing non-refusal errors) — not actioned.
 - Nice-to-have, left as a risk: before migration, the hooks and doctor run `git status` in the old
   `<ws>/.git` behind a check-then-use guard (a write between the guard and git is a race).
+
+Re-check round (tree 2aa733bcad5b9159, HEAD 7f9ba0a; single-pass reviewer, a separate checker):
+- `completion` accept, no findings, no reviewer failed, `notRechecked` empty.
+- TR-972c44ec1b85 and TR-18b8caf62785 not re-raised: CLEARed (`multi-agent-dev`, ref 7f9ba0a).
+- TR-e8de2cbc87d7 (the revise): asked to re-adjudicate its restated claim against the code, the
+  round found no `existsSync(<ws>/.git)` gate left and raised nothing. CLEAR is not allowed on a
+  revise record, so the resolution is recorded as HOLD with that note. No other critic-panel blocker
+  is open (`query --latest --writer critic-panel --severity blocker`: TR-73f53598baa2, CLEARed, and
+  this one).
+
+Remaining risks:
+- Before migration (old layout), the hooks and doctor run `git status` in `<ws>/.git` behind a
+  check-then-use guard: a write between the guard and git is a race. The window closes at the first
+  sync with a kit that has this change.
+- Two processes migrating the same workspace at once are not serialized; the second fails on the
+  rename (`state/<id>.git` exists) and the old dir is removed only by the winner, so the loser sees a
+  conflict until the next call.
+- The guard runs before each state git call (a walk of the workspace and one `git config --file`
+  read each time). A workspace is tens of files, so the cost is small, but it grows with topics.
+- Case-insensitive file systems are covered by lowercase name matching, tested through the pure
+  functions and a Linux run; no test ran on a real APFS or NTFS volume. NTFS 8.3 short names
+  (`GITATT~1`) are not matched.
+- The live kit in this container is still 2dd64dd, so the live workspace keeps `<ws>/.git` until a
+  kit with this change is installed (a human's step, or a fresh container after the merge).
