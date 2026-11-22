@@ -95,6 +95,24 @@ Wiki (`/dream`, `topics/remote-env.md`): TR-ec03808b5b04 revises TR-1a2a7cac54bb
 TR-1ff807be9596 revises TR-e7829fbc9fc1 (the 2026-11-22 observation and the fallback shim). Both are
 `COMMIT_QUALIFIED`.
 
+Follow-up evidence (after the goal's Stop-hook check):
+- Criterion 2, the literal command on the committed lockfile: `CI=true corepack pnpm@10 install`
+  exits 0 ("Already up to date", pnpm 10.34.9) and leaves `pnpm-lock.yaml` unchanged. Before the
+  regeneration, on the changed manifest, the same command exited 1, because `CI=true` means
+  `--frozen-lockfile`.
+- Criterion 3, CI's install step reproduced locally for `ubuntu26.04-x64` (today's
+  `ubuntu-latest`) with `PLAYWRIGHT_HOST_PLATFORM_OVERRIDE` into a scratch
+  `PLAYWRIGHT_BROWSERS_PATH`. Both tarballs match their lockfile `sha512`.
+  - 1.56.0: `playwright install chromium` exits 1 with "ERROR: Playwright does not support chromium
+    on ubuntu26.04-x64" (the CI error the old pin comment quoted). `install-deps --dry-run` prints
+    "Cannot install dependencies for ubuntu26.04-x64 with Playwright 1.56.0!".
+  - 1.63.0: `playwright install chromium` exits 0 and downloads Chrome for Testing 153.0.8010.12
+    (chromium v1243), Chrome Headless Shell 153.0.8010.12 (v1243) and FFmpeg v1011. Their URLs
+    answer HTTP 200, and `install-deps --dry-run` resolves a dependency list for
+    ubuntu26.04-x64.
+  - Not covered locally: the apt step of `--with-deps` on a real 26.04 runner. That comes with
+    the first CI run (a PR, which this goal does not open).
+
 ## Remaining risks
 
 - The fit to the image is exact: the next image Chromium bump breaks shim-less E2E here again,
