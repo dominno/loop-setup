@@ -44,7 +44,22 @@ tests), `pnpm build` 0. (The CI edit is a manual job deletion; it was not run.)
 
 | id | description | scope | check | after | status | commit |
 |---|---|---|---|---|---|---|
-| S01 | Tests first: no `pnpm trace`/copy in the SVGs; every CLI subcommand documented; Path A both ways + README link (RED) | scripts/template-docs.test.mjs | `pnpm exec vitest run scripts/template-docs.test.mjs` | — | done | — |
-| S02 | The five SVGs at the installed-kit model; PNGs regenerated (Playwright, DSF 2) | docs/infographic-*.svg, docs/infographic-*.png | same | S01 | done | — |
-| S03 | Path A both options with exact commands; Command reference; README quickstart link | kit/docs/adoption-guide.md, README.md | same | S01 | done | — |
-| S04 | Self-verify chain and the post-implementation critic round | — | `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | S02, S03 | planned | — |
+| S01 | Tests first: no `pnpm trace`/copy in the SVGs; every CLI subcommand documented; Path A both ways + README link (RED) | scripts/template-docs.test.mjs | `pnpm exec vitest run scripts/template-docs.test.mjs` | — | done | da592aa |
+| S02 | The five SVGs at the installed-kit model; PNGs regenerated (Playwright, DSF 2) | docs/infographic-*.svg, docs/infographic-*.png | same | S01 | done | da592aa |
+| S03 | Path A both options with exact commands; Command reference; README quickstart link | kit/docs/adoption-guide.md, README.md | same | S01 | done | da592aa |
+| S04 | Self-verify chain and the post-implementation critic round | — | `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | S02, S03 | done | da592aa |
+| S04.1 | Post-round nice-to-have: Path A option 1 names the kit leftovers (the vitest `env` block, the CI `with:` lines, the kit section of CLAUDE.md) | kit/docs/adoption-guide.md | `pnpm exec vitest run scripts/template-docs.test.mjs` | S04 | done | — |
+
+Post-implementation round (tree 4e0ffa36d3966212, HEAD da592aa; single-pass reviewer, code-only):
+`completion` accept, no finding confirmed, deferred or revised, no reviewer failed, `notRechecked`
+empty; no records. Three nice-to-haves:
+- Option 1's kit leftovers (the vitest `env` block, the CI `with:` lines, CLAUDE.md's kit section):
+  taken as one sentence in Path A (S04.1).
+- The Path A test checks the commands as text; it does not run the `sed` on `vitest.config.ts` (left:
+  the command was run for real once, in a scratch clone).
+- Infographic 4's footer names `kit/docs/adoption-guide.md`, a path of the kit's repo, not of an
+  adopter's (left: the README with these infographics lives in the kit's repo).
+
+Remaining risks: the infographics were edited as text on the old layout (no new drawing), and their
+truth beyond the pinned counts, command names and banned phrases is checked by eye; the Path A CI
+edit is manual.

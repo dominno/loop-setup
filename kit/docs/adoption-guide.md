@@ -140,8 +140,11 @@ clone the public repo at a pinned tag or commit) and install from that checkout.
      ```
      In `.github/workflows/verify.yml`, delete the `provenance` job (it runs
      `node kit/trace/cli.mjs`; add it back later with an installed kit if you want its
-     warnings), and drop the `fetch-depth` lines of the `checks` job (only the kit's history tests
-     needed full history). Then install the kit from upstream, once per machine:
+     warnings), and drop the `with:`/`fetch-depth` lines and their comment from the `checks` job's
+     checkout (only the kit's history tests needed full history). Three leftovers are harmless but
+     belong to the kit too: the `env` block of `vitest.config.ts` (`LOOP_SETUP_WORKSPACE` points at a
+     kit test fixture), and the *Loop-setup kit* section and the `kit/trace/cli.test.mjs` example in
+     `CLAUDE.md`; delete or reword them. Then install the kit from upstream, once per machine:
      ```bash
      git clone https://github.com/dominno/loop-setup ~/src/loop-setup
      node ~/src/loop-setup/kit/bin/loop-setup.mjs install --from ~/src/loop-setup --link-bin ~/.local/bin
