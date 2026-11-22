@@ -2,7 +2,7 @@
 // TRACE-lite CLI — the only sanctioned writer of the workspace's trace/records.jsonl
 // (run as `loop-setup <command>`; kit/bin/loop-setup.mjs dispatches here).
 // Usage: loop-setup <command> [...]   (see `loop-setup help`)
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { readdirSync, statSync, writeFileSync } from "node:fs";
@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { claudeHomeOf, layoutError } from "../setup/facts.mjs";
 import { postureSummary, sandboxPosture, withSandbox } from "../setup/sandbox.mjs";
 import { settingsSources } from "../setup/settings.mjs";
-import { legacyTarget } from "../setup/layout.mjs";
+import { evidenceHome } from "../setup/layout.mjs";
 import { verifiedKitFile } from "../setup/kitfiles.mjs";
 import { kitGate, parseLevel } from "../setup/integrity.mjs";
 import { verifyKit } from "../setup/verifykit.mjs";
@@ -44,6 +44,7 @@ import {
   manifestViolations,
   readPolicyVersion,
   reauditCandidates,
+  splitAckRef,
   replay,
   KIT_ROOT,
   LAYOUT,
@@ -130,6 +131,10 @@ const HELP = `TRACE-lite — typed, append-only records for adjudicated claims (
   loop-setup reaudit [--claim-prefix P] [--unreachable] [--act | --annotate]
                                        licensing records whose file evidence changed since their commit; one whose
                                        commit the repo no longer has (squashed away) is listed apart, as unreachable;
+                                       a path from before the kit moved is read where it lives now (a file-level map
+                                       of the move, absolute /home/user/loop-setup refs made repo-relative), and a file
+                                       split in two since (CLAUDE.md, topics/trace.md, loop-plan.md) is listed once,
+                                       under split ("split at <commit> — re-verify"), until --act acknowledges it;
                                        --claim-prefix keeps the claims starting with P (story: = story statuses);
                                        --unreachable keeps only the unreachable ones; --annotate prints one GitHub
                                        ::warning:: line per record instead of JSON (CI's provenance job; exit 0)
@@ -239,24 +244,36 @@ function currentBlockHashes() {
   }
 }
 
-function changedSince(commit, path) {
-  // Compare the record's commit to the working tree; a diff that fails counts as
-  // changed (fail closed: re-audit rather than trust stale evidence). A path the kit moved
-  // (scripts/trace/… → kit/trace/…, .claude/memory/… → the workspace) is compared by content:
-  // the file at the record's commit against its current home.
-  const moved = !existsSync(join(PROJECT_ROOT, path)) ? legacyTarget(path) : null;
-  if (moved) {
+// Is a record older than a split? Iff its commit is an ancestor of the split's parent: merge-base
+// --is-ancestor exits 0 (yes) or 1 (no). Any other exit (the split commit is not in this repository, a
+// shallow clone) leaves the order unknown: null, which evidenceHome treats as older (re-verify).
+function predatesSplit(commit, at) {
+  const { status } = spawnSync("git", ["merge-base", "--is-ancestor", commit, `${at}^`], { cwd: PROJECT_ROOT, stdio: "ignore" });
+  return status === 0 ? true : status === 1 ? false : null;
+}
+
+function changedSince(commit, cited) {
+  // Where to look is decided by the pure evidenceHome (kit/setup/layout.mjs): an absolute ref under
+  // this or the legacy checkout is read repo-relative, a file the kit moved is compared by content with
+  // its current home (scripts/trace/… → kit/trace/…, .claude/memory/… → the workspace), and a record
+  // older than a split gets { split } (re-verify; reaudit lists it once). This adapter only asks git
+  // and the filesystem. An unmapped path or a failing git call counts as changed (fail closed:
+  // re-audit rather than trust stale evidence).
+  const home = evidenceHome(cited, { roots: [PROJECT_ROOT], predates: (at) => predatesSplit(commit, at) });
+  if (home.split) return { split: home.split };
+  if (!home.target) return true;
+  if (home.target.root === "project" && home.target.path === home.path) {
     try {
-      const then = execFileSync("git", ["show", `${commit}:${path}`], { cwd: PROJECT_ROOT, maxBuffer: 1 << 28, stdio: ["ignore", "pipe", "ignore"] });
-      const now = readFileSync(join(moved.root === "workspace" ? WORKSPACE : PROJECT_ROOT, moved.path));
-      return !then.equals(now);
+      execFileSync("git", ["diff", "--quiet", commit, "--", home.path], { cwd: PROJECT_ROOT, stdio: "ignore" });
+      return false;
     } catch {
       return true;
     }
   }
   try {
-    execFileSync("git", ["diff", "--quiet", commit, "--", path], { cwd: PROJECT_ROOT, stdio: "ignore" });
-    return false;
+    const then = execFileSync("git", ["show", `${commit}:${home.path}`], { cwd: PROJECT_ROOT, maxBuffer: 1 << 28, stdio: ["ignore", "pipe", "ignore"] });
+    const now = readFileSync(join(home.target.root === "workspace" ? WORKSPACE : PROJECT_ROOT, home.target.path));
+    return !then.equals(now);
   } catch {
     return true;
   }
@@ -761,21 +778,30 @@ export async function main(argv = process.argv.slice(2)) {
       return 2;
     }
     const prefix = typeof flags["claim-prefix"] === "string" ? flags["claim-prefix"] : "";
-    const cands = reauditCandidates(state.records, state.superseded, changedSince, reachable)
+    const cands = reauditCandidates(state.records, state.superseded, changedSince, reachable, state.actions)
       .filter((c) => String(c.claim_id).startsWith(prefix))
       .filter((c) => !flags.unreachable || c.unreachable);
     // M6, the CI provenance job: one GitHub warning annotation per record whose commit was squashed away. Never fails.
     if (flags.annotate) {
       for (const c of cands) {
-        const what = c.unreachable ? `provenance commit ${c.unreachable} is unreachable (squash-merged or rebased away) — re-verify ${c.paths.join(", ")}` : `evidence changed: ${c.changed.join(", ")}`;
+        const what = c.unreachable
+          ? `provenance commit ${c.unreachable} is unreachable (squash-merged or rebased away) — re-verify ${c.paths.join(", ")}`
+          : [c.changed && `evidence changed: ${c.changed.join(", ")}`, ...(c.split || []).map((s) => `${s.path}: ${s.note}`)].filter(Boolean).join("; ");
         process.stdout.write(`::warning title=TRACE provenance${c.unreachable ? " unreachable" : ""}::${c.claim_id} ${c.record_id}: ${what}\n`);
       }
       return 0;
     }
     if (flags.act && cands.length) {
-      const note = (c) => (c.unreachable ? `provenance commit ${c.unreachable} is unreachable — re-verify: ${c.paths.join(", ")}` : `evidence changed: ${c.changed.join(", ")}`);
+      // One REAUDIT per record that is unreachable or changed (it stays listed until re-verified), and one
+      // per split path, whose ref acknowledges that split: the next run no longer lists it.
+      const acts = cands.flatMap((c) => [
+        ...(c.unreachable || c.changed
+          ? [{ record_id: c.record_id, consumer: "dream", action: "REAUDIT", note: c.unreachable ? `provenance commit ${c.unreachable} is unreachable — re-verify: ${c.paths.join(", ")}` : `evidence changed: ${c.changed.join(", ")}` }]
+          : []),
+        ...(c.split || []).map((s) => ({ record_id: c.record_id, consumer: "dream", action: "REAUDIT", ref: splitAckRef(s.at, s.path), note: `${s.note}: ${s.path}` })),
+      ]);
       const res = appendActions(
-        cands.map((c) => ({ record_id: c.record_id, consumer: "dream", action: "REAUDIT", note: note(c) })),
+        acts,
         { storePath, now, policyVersion, schema, forbidden: benchForbidden() },
       );
       out(res, true);

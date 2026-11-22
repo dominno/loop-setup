@@ -100,36 +100,135 @@ export function resolveLayout(facts) {
 }
 
 /**
- * Where the kit moved things when it left the project tree (one source of truth for every
- * rename): [legacy prefix, new prefix]. A prefix ending in "/" maps a directory, otherwise a file.
+ * Evidence refs written before the kit left the project tree. reaudit compares a record's cited file
+ * at the record's commit with where that file lives now; the facts below say where. They are history,
+ * checked against it (layout.test.mjs), and the functions after them are pure.
  */
-export const LEGACY_REF_MAP = [
-  [".claude/workflows/", "kit/workflows/"],
-  [".claude/commands/", "kit/commands/"],
-  [".claude/hooks/", "kit/hooks/"],
-  [".claude/trace/bench/", "kit/bench/"],
-  [".claude/trace/schema-v1.json", "kit/schema/schema-v1.json"],
-  [".claude/loop.md", "kit/loop.md"],
-  [".claude/loop-checklist.md", "kit/loop-checklist.md"],
-  [".claude/skills-index.md", "kit/skills-index.md"],
-  ["scripts/trace/", "kit/trace/"],
-  ["scripts/hooks/", "kit/hooks/"],
-  ["docs/planning-guide.md", "kit/docs/planning-guide.md"],
-  ["docs/workflow-graphs.md", "kit/docs/workflow-graphs.md"],
-  ["docs/adoption-guide.md", "kit/docs/adoption-guide.md"],
-  ["docs/loop-integration-guide.md", "kit/docs/loop-integration-guide.md"],
-];
+/** The project root that old records' absolute refs name: they were written in that checkout. */
+export const LEGACY_PROJECT_ROOTS = ["/home/user/loop-setup"];
+
+/** The commit that moved the loop machinery into kit/. */
+export const LEGACY_MOVE_COMMIT = "ec6d24b";
 
 /**
- * The current home of a path an old record cites: { root: "project", path } for moved machinery
- * (in the kit source repo), { root: "workspace", path } for the legacy .claude/memory state,
- * null for a path that did not move.
+ * Where the move put each file (one source of truth for every rename): [old path, new path], exactly
+ * the renames from outside kit/ into kit/ of `git diff -M --name-status ec6d24b^ ec6d24b`.
+ */
+export const LEGACY_REF_MAP = [
+  [".claude/trace/bench/README.md", "kit/bench/README.md"],
+  [".claude/trace/bench/fixtures.bundle", "kit/bench/fixtures.bundle"],
+  [".claude/commands/bench-checkers.md", "kit/commands/bench-checkers.md"],
+  [".claude/commands/critic-round.md", "kit/commands/critic-round.md"],
+  [".claude/commands/dream.md", "kit/commands/dream.md"],
+  [".claude/commands/fix-localhost.md", "kit/commands/fix-localhost.md"],
+  [".claude/commands/improve-skills.md", "kit/commands/improve-skills.md"],
+  [".claude/commands/memory-audit.md", "kit/commands/memory-audit.md"],
+  [".claude/commands/multi-agent-dev.md", "kit/commands/multi-agent-dev.md"],
+  [".claude/commands/multi-agent-e2e.md", "kit/commands/multi-agent-e2e.md"],
+  [".claude/commands/plan-nodes.md", "kit/commands/plan-nodes.md"],
+  [".claude/commands/qa-pass.md", "kit/commands/qa-pass.md"],
+  [".claude/commands/scan-project-docs.md", "kit/commands/scan-project-docs.md"],
+  [".claude/commands/story-gap-analysis.md", "kit/commands/story-gap-analysis.md"],
+  [".claude/commands/sync-story-status.md", "kit/commands/sync-story-status.md"],
+  [".claude/commands/write-goal.md", "kit/commands/write-goal.md"],
+  ["docs/adoption-guide.md", "kit/docs/adoption-guide.md"],
+  ["docs/loop-integration-guide.md", "kit/docs/loop-integration-guide.md"],
+  ["docs/planning-guide.md", "kit/docs/planning-guide.md"],
+  ["docs/workflow-graphs.md", "kit/docs/workflow-graphs.md"],
+  [".claude/hooks/stop-gate.mjs", "kit/hooks/stop-gate.mjs"],
+  ["scripts/hooks/stop-gate.test.mjs", "kit/hooks/stop-gate.test.mjs"],
+  [".claude/loop-checklist.md", "kit/loop-checklist.md"],
+  [".claude/loop.md", "kit/loop.md"],
+  [".claude/trace/schema-v1.json", "kit/schema/schema-v1.json"],
+  [".claude/skills-index.md", "kit/skills-index.md"],
+  ["scripts/trace/bench-judge.mjs", "kit/trace/bench-judge.mjs"],
+  ["scripts/trace/cli.mjs", "kit/trace/cli.mjs"],
+  ["scripts/trace/cli.test.mjs", "kit/trace/cli.test.mjs"],
+  ["scripts/trace/config.test.mjs", "kit/trace/config.test.mjs"],
+  ["scripts/trace/contracts.test.mjs", "kit/trace/contracts.test.mjs"],
+  ["scripts/trace/lib.mjs", "kit/trace/lib.mjs"],
+  ["scripts/trace/lib.test.mjs", "kit/trace/lib.test.mjs"],
+  ["scripts/trace/plan.mjs", "kit/trace/plan.mjs"],
+  ["scripts/trace/plan.test.mjs", "kit/trace/plan.test.mjs"],
+  ["scripts/trace/story-map.mjs", "kit/trace/story-map.mjs"],
+  ["scripts/trace/story-map.test.mjs", "kit/trace/story-map.test.mjs"],
+  ["scripts/trace/wiki.test.mjs", "kit/trace/wiki.test.mjs"],
+  ["scripts/trace/workflows.test.mjs", "kit/trace/workflows.test.mjs"],
+  [".claude/workflows/critic-panel.js", "kit/workflows/critic-panel.js"],
+  [".claude/workflows/e2e-design.js", "kit/workflows/e2e-design.js"],
+  [".claude/workflows/gap-analysis.js", "kit/workflows/gap-analysis.js"],
+  [".claude/workflows/improve-skills.js", "kit/workflows/improve-skills.js"],
+  [".claude/workflows/loop-iteration.js", "kit/workflows/loop-iteration.js"],
+  [".claude/workflows/scan-docs.js", "kit/workflows/scan-docs.js"],
+  [".claude/workflows/trace-bench.js", "kit/workflows/trace-bench.js"],
+];
+
+/** Directories the move emptied: a file under one that has no rename above is unmapped, never guessed. */
+export const LEGACY_VACATED_DIRS = [".claude/commands/", ".claude/hooks/", ".claude/trace/", ".claude/workflows/", "scripts/hooks/", "scripts/trace/"];
+
+/**
+ * Files split in two. Their text before the split matches neither half, so a record older than the
+ * split commit is told to re-verify instead of being compared (evidenceHome). `into` names the halves.
+ */
+export const LEGACY_SPLITS = [
+  { from: "CLAUDE.md", at: "4ccf257", into: [{ root: "project", path: "CLAUDE.md" }, { root: "project", path: "kit/rules/KIT.md" }] },
+  { from: ".claude/memory/topics/trace.md", at: "ec6d24b", into: [{ root: "workspace", path: "topics/trace.md" }, { root: "project", path: "kit/rules/trace-policy.md" }] },
+  { from: ".claude/memory/loop-plan.md", at: "9654bfb", into: [{ root: "workspace", path: "loop-plan.md" }, { root: "project", path: "kit/templates/workspace/loop-plan.md" }] },
+];
+
+/** An absolute ref under the project root (`roots`) or a legacy root, made repo-relative; "./x" is "x"; any other path as it is. */
+export function normalizeRefPath(path, roots = []) {
+  const p = String(path || "");
+  for (const root of [...roots, ...LEGACY_PROJECT_ROOTS].map((r) => String(r || "").replace(/\/+$/, "")).filter(Boolean)) {
+    if (p.startsWith(`${root}/`)) return p.slice(root.length + 1);
+  }
+  return p.startsWith("./") ? p.slice(2) : p;
+}
+
+/** A normalized path's home, splits aside: { kind, target? }. */
+function homeOf(p) {
+  if (p.startsWith(`${LEGACY_DIR}/`)) return { kind: "workspace", target: { root: "workspace", path: p.slice(LEGACY_DIR.length + 1) } };
+  const entry = LEGACY_REF_MAP.find(([from]) => from === p);
+  if (entry) return { kind: "moved", target: { root: "project", path: entry[1] } };
+  if (p.startsWith("/") || LEGACY_VACATED_DIRS.some((d) => p.startsWith(d))) return { kind: "unmapped" };
+  return { kind: "unchanged", target: { root: "project", path: p } };
+}
+
+/**
+ * The one resolution of a path an old record cites (normalized first), exactly one kind: unchanged
+ * (the path did not move), moved (a LEGACY_REF_MAP rename), workspace (legacy .claude/memory state),
+ * split (LEGACY_SPLITS; `after` is its home when no split applies) or unmapped (an absolute path
+ * outside every root, or a file in a vacated directory with no rename).
+ */
+export function resolveLegacyRef(path, { roots = [] } = {}) {
+  const p = normalizeRefPath(path, roots);
+  const home = homeOf(p);
+  const split = LEGACY_SPLITS.find((s) => s.from === p);
+  if (split) return { kind: "split", path: p, at: split.at, into: split.into, after: home };
+  return { kind: home.kind, path: p, ...(home.target ? { target: home.target } : {}) };
+}
+
+/**
+ * What reaudit compares a cited path with: { path, split: at } when the record predates that file's
+ * split, else { path, target }: the file's current home, or null when unmapped (the caller fails
+ * closed). `predates(at)` is a fact about the record's commit the caller supplies: true, false, or
+ * null when the order cannot be known (the split commit is not in the repository), which counts as
+ * older: re-verify rather than compare with a half.
+ */
+export function evidenceHome(cited, { roots = [], predates = () => true } = {}) {
+  const ref = resolveLegacyRef(cited, { roots });
+  if (ref.kind === "split" && predates(ref.at) !== false) return { path: ref.path, split: ref.at };
+  const home = ref.kind === "split" ? ref.after : ref;
+  return { path: ref.path, target: home.target || null };
+}
+
+/**
+ * The current home of a path an old record cites, splits aside: { root: "project", path } for moved
+ * machinery (in the kit source repo), { root: "workspace", path } for the legacy .claude/memory state,
+ * null for a path that did not move (or that no rename covers).
  */
 export function legacyTarget(path) {
-  const p = String(path || "");
-  if (p.startsWith(`${LEGACY_DIR}/`)) return { root: "workspace", path: p.slice(LEGACY_DIR.length + 1) };
-  for (const [from, to] of LEGACY_REF_MAP) {
-    if (from.endsWith("/") ? p.startsWith(from) : p === from) return { root: "project", path: to + p.slice(from.length) };
-  }
-  return null;
+  const ref = resolveLegacyRef(path);
+  const home = ref.kind === "split" ? ref.after : ref;
+  return home.kind === "moved" || home.kind === "workspace" ? home.target : null;
 }

@@ -3,7 +3,7 @@
 import { describe, it, expect, beforeEach, afterEach, afterAll } from "vitest";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DEFAULT_STORE, encodeBench, latestByClaim, loadEntries, loadSchema, opaqueFixtureId, readBench, readPolicyVersion, replay, ROOT, WORKSPACE } from "./lib.mjs";
@@ -11,6 +11,7 @@ import { appliedFixtures, benchPreconditionStep, benchPreflight, judgeEnv, runBe
 import { DEFAULT_PLAN, parsePlan, readyIds } from "./plan.mjs";
 import { STORY_MAP_PATHS } from "./story-map.mjs";
 import { MODE_PATCHES } from "../test/denylist-modes.mjs";
+import { resolveLegacyRef } from "../setup/layout.mjs";
 
 const CLI = join(ROOT, "kit/trace/cli.mjs");
 let dir;
@@ -1460,4 +1461,81 @@ describe("CLI wiring, end to end in a throwaway repo", () => {
       r.cleanup();
     }
   });
+});
+
+// The adapter end to end where a split commit is NOT in the repository (a throwaway repo, as in a shallow
+// clone): merge-base exits 128, the order is unknown, and the record is told to re-verify rather than
+// being compared with one half of the split file.
+describe("reaudit where the split commit is not in the repository", () => {
+  it("lists a CLAUDE.md citation as split at 4ccf257 (unknown order counts as older), and --act clears it", () => {
+    const r = tempRepo();
+    try {
+      writeFileSync(join(r.d, "CLAUDE.md"), "# rules\n");
+      r.git("add", "CLAUDE.md");
+      r.git("commit", "-qm", "rules");
+      expect(r.git("cat-file", "-e", "4ccf257^{commit}").status).not.toBe(0);
+      const d = join(r.d, "d.json");
+      writeFileSync(d, draft({ claim_id: "c:rules", evidence: [{ kind: "file_line", ref: "CLAUDE.md:1", result: "x" }] }));
+      expect(r.cli(["write", d]).status).toBe(0);
+      const first = r.cli(["reaudit"]);
+      expect(first.status, first.stderr).toBe(0);
+      expect(JSON.parse(first.stdout)).toEqual([expect.objectContaining({ claim_id: "c:rules", split: [{ path: "CLAUDE.md", at: "4ccf257", note: "split at 4ccf257 — re-verify" }] })]);
+      expect(r.cli(["reaudit", "--act"]).status).toBe(0);
+      expect(JSON.parse(r.cli(["reaudit"]).stdout)).toEqual([]);
+    } finally {
+      r.cleanup();
+    }
+  });
+});
+
+// reaudit over the frozen pre-move store (kit/test/fixtures/legacy-v1) in a full-history clone of this
+// repository, the code under test being this working tree's CLI. No "evidence changed" entry may be one
+// whose content did not change: an independent oracle (git show at the record's commit against the
+// file's current home) checks each. The split topics/trace.md (its policy half went to
+// kit/rules/trace-policy.md at ec6d24b) is listed once as split, never as changed, and --act clears it.
+describe("reaudit over the legacy-v1 fixture store in a full-history clone", () => {
+  it("reports no unchanged file as changed, lists the split topics/trace.md once as split at ec6d24b, and a REAUDIT from --act clears it", () => {
+    expect(spawnSync("git", ["rev-parse", "--is-shallow-repository"], { cwd: ROOT, encoding: "utf8" }).stdout.trim(), "this test needs full git history (git fetch --unshallow)").toBe("false");
+    const d = mkdtempSync(join(tmpdir(), "trace-reaudit-"));
+    const home = mkdtempSync(join(tmpdir(), "trace-reaudit-home-"));
+    try {
+      const clone = join(d, "repo");
+      expect(spawnSync("git", ["clone", "-q", "--no-local", ROOT, clone]).status).toBe(0);
+      const ws = join(clone, "kit/test/fixtures/legacy-v1");
+      const storeCopy = join(d, "records.jsonl");
+      copyFileSync(join(ws, "trace/records.jsonl"), storeCopy);
+      const run = (...args) =>
+        spawnSync(process.execPath, [CLI, "reaudit", "--store", storeCopy, ...args], { cwd: clone, encoding: "utf8", env: { ...process.env, LOOP_SETUP_WORKSPACE: ws, CLAUDE_CONFIG_DIR: home, TRACE_STORE: storeCopy } });
+      const first = run();
+      expect(first.status, first.stderr).toBe(0);
+      const cands = JSON.parse(first.stdout);
+      const records = Object.fromEntries(
+        readFileSync(storeCopy, "utf8").trim().split("\n").map((l) => JSON.parse(l)).filter((e) => e.kind === "record").map((r) => [r.record_id, r]),
+      );
+      const changed = cands.filter((c) => c.changed).flatMap((c) => c.changed.map((p) => [c.record_id, p]));
+      expect(changed.length).toBeGreaterThan(0);
+      const unchangedButReported = changed.filter(([id, p]) => {
+        const ref = resolveLegacyRef(p, { roots: [clone] });
+        const then = spawnSync("git", ["show", `${records[id].provenance.commit}:${ref.path}`], { cwd: clone }).stdout;
+        const file = ref.target && (ref.target.root === "workspace" ? join(ws, ref.target.path) : join(clone, ref.target.path));
+        return !!file && existsSync(file) && then.length > 0 && Buffer.compare(then, readFileSync(file)) === 0;
+      });
+      expect(unchangedButReported).toEqual([]);
+      // Positive side: an absolute ref whose content did change is read repo-relative and listed as changed.
+      expect(changed).toContainEqual(["TR-cb3baca81e27", "/home/user/loop-setup/scripts/trace/lib.mjs"]);
+      // The split file, cited by absolute path from a record older than the split.
+      const splits = cands.filter((c) => c.split).flatMap((c) => c.split.map((s) => `${c.record_id} ${s.path} ${s.at} ${s.note}`));
+      expect(splits).toContain("TR-cb3baca81e27 /home/user/loop-setup/.claude/memory/topics/trace.md ec6d24b split at ec6d24b — re-verify");
+      expect(changed.filter(([, p]) => p.endsWith(".claude/memory/topics/trace.md"))).toEqual([]);
+      // --act records a REAUDIT per split path; the next run lists no split, and the real changes stay.
+      const acted = run("--act");
+      expect(acted.status, acted.stderr).toBe(0);
+      const second = JSON.parse(run().stdout);
+      expect(second.filter((c) => c.split)).toEqual([]);
+      expect(second.filter((c) => c.changed).flatMap((c) => c.changed.map((p) => [c.record_id, p]))).toEqual(changed);
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 120_000);
 });

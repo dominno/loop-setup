@@ -171,7 +171,11 @@ clone the public repo at a pinned tag or commit) and install from that checkout.
 
 Old records keep citing their commits. `loop-setup reaudit` compares a moved file (for example
 `scripts/trace/lib.mjs`, now `kit/trace/lib.mjs`) by content, and a legacy `.claude/memory/…`
-reference against its workspace copy.
+reference against its workspace copy. An absolute `/home/user/loop-setup/…` ref is read
+repo-relative. A file that was split in two (`CLAUDE.md` into `kit/rules/KIT.md`, the trace
+topic into `kit/rules/trace-policy.md`, the `loop-plan.md` schema into the workspace template) is
+not compared. A record older than the split is listed once as "split at <commit> — re-verify",
+and `reaudit --act` acknowledges it.
 
 ---
 

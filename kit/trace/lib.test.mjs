@@ -35,6 +35,7 @@ import {
   pathFromRef,
   readPolicyVersion,
   reauditCandidates,
+  splitAckRef,
   replay,
   ROOT,
   rotateStore,
@@ -236,6 +237,30 @@ describe("re-audit, rotation, metrics", () => {
     const cands = reauditCandidates(state.records, state.superseded, (commit, path) => commit === COMMIT && path === "e2e/remember-me.spec.ts");
     expect(cands).toHaveLength(1);
     expect(reauditCandidates(state.records, state.superseded, () => false)).toHaveLength(0);
+  });
+
+  // A cited file that was split in two (CLAUDE.md → kit/rules/KIT.md, topics/trace.md → kit/rules/trace-policy.md)
+  // cannot be compared: changedSince answers { split: <commit> }, and the record is listed once under `split`
+  // ("split at <commit> — re-verify"), never as changed, until a REAUDIT action with ref split:<commit>:<path>
+  // acknowledges it. A path that really changed stays listed.
+  it("lists a split evidence file once under `split`, never as changed, and a REAUDIT action acknowledging it clears it", () => {
+    writeRecords([draft({ evidence: [{ kind: "file_line", ref: "CLAUDE.md:12", result: "x" }, { kind: "file_line", ref: "src/a.ts:3", result: "y" }] })], ctx());
+    const state = replay(loadEntries(store), schema, POLICY);
+    const [id] = [...state.records.keys()];
+    const answer = (commit, path) => (path === "CLAUDE.md" ? { split: "4ccf257" } : false);
+    expect(reauditCandidates(state.records, state.superseded, answer)).toEqual([
+      expect.objectContaining({ record_id: id, split: [{ path: "CLAUDE.md", at: "4ccf257", note: "split at 4ccf257 — re-verify" }] }),
+    ]);
+    expect(reauditCandidates(state.records, state.superseded, answer)[0].changed).toBeUndefined();
+    expect(splitAckRef("4ccf257", "CLAUDE.md")).toBe("split:4ccf257:CLAUDE.md");
+    const acked = new Map([[id, [{ action: "REAUDIT", ref: splitAckRef("4ccf257", "CLAUDE.md") }]]]);
+    expect(reauditCandidates(state.records, state.superseded, answer, () => true, acked)).toEqual([]);
+    // Another split commit, or another action, does not acknowledge it; a changed path is never cleared by it.
+    const other = new Map([[id, [{ action: "REAUDIT", ref: splitAckRef("ec6d24b", "CLAUDE.md") }, { action: "HOLD", ref: splitAckRef("4ccf257", "CLAUDE.md") }]]]);
+    expect(reauditCandidates(state.records, state.superseded, answer, () => true, other)).toHaveLength(1);
+    const both = (commit, path) => (path === "CLAUDE.md" ? { split: "4ccf257" } : true);
+    expect(reauditCandidates(state.records, state.superseded, both, () => true, acked)).toEqual([expect.objectContaining({ record_id: id, changed: ["src/a.ts"] })]);
+    expect(reauditCandidates(state.records, state.superseded, both, () => true, acked)[0].split).toBeUndefined();
   });
 
   it("rotates losslessly into yearly archives", () => {

@@ -18,6 +18,10 @@ jobs:
         script: [typecheck, lint, test, build]
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The test leg reads git history (the legacy-ref map against the kit move, reaudit in a
+          # full-history clone); the other legs need only the tip.
+          fetch-depth: ${{ matrix.script == 'test' && '0' || '1' }}
       - uses: pnpm/action-setup@v4
         with:
           version: 10
