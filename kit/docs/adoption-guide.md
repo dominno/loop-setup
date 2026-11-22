@@ -330,7 +330,7 @@ personal), next to its `permissions`:
 The wiki (`.claude/loop-workspace/`) follows the Karpathy “LLM wiki” pattern: only
 `index.md` is imported by `CLAUDE.md`; topic pages are read on demand. Keep the
 **structure**, replace the **facts** — the seeded topic pages describe *this*
-template’s stack (Next.js 16 / React 19 / Playwright 1.56) and won’t all apply to
+template’s stack (Next.js 16 / React 19 / Playwright 1.63) and won’t all apply to
 you.
 
 > ⚠️ **Clear the seeded facts FIRST — before your first real task.** The

@@ -199,6 +199,24 @@ describe("M6: merge commits keep TRACE provenance reachable", () => {
   });
 });
 
+// Playwright launches exactly the Chromium build its own browsers.json names, so the pin is exact
+// (a range would move the build without a deliberate bump), and a Playwright that cannot install
+// Chromium on the CI runner is upgraded rather than worked around with a runner pin: the e2e job
+// runs on ubuntu-latest like the other jobs (docs/plans/playwright-upgrade/steps.md).
+describe("E2E toolchain: an exact Playwright pin, and the e2e job on ubuntu-latest", () => {
+  it("@playwright/test is pinned to an exact version, and CI's e2e job runs on ubuntu-latest and installs Chromium with its system deps", () => {
+    expect(JSON.parse(read("package.json")).devDependencies["@playwright/test"]).toMatch(/^\d+\.\d+\.\d+$/);
+    const ci = read(".github/workflows/verify.yml");
+    const start = ci.indexOf("\n  e2e:\n");
+    expect(start).toBeGreaterThan(-1);
+    const rest = ci.slice(start + 1);
+    const next = rest.slice(1).search(/\n {2}[a-z][\w-]*:\n/);
+    const job = next === -1 ? rest : rest.slice(0, next + 1);
+    expect(job).toMatch(/\n {4}runs-on: ubuntu-latest\n/);
+    expect(job).toContain("pnpm exec playwright install --with-deps chromium");
+  });
+});
+
 describe("M7-M10: two developers on one project", () => {
   it("the adoption guide has a 'Working as a team' section covering ids, claims, the lease, union logs, merge commits, shared plans, story sync and /dream, and what stays personal", () => {
     const team = section(read("kit/docs/adoption-guide.md"), "## Working as a team").replace(/\s+/g, " ");

@@ -342,7 +342,7 @@ pnpm dev            # http://localhost:3000
 ```
 
 Toolchain: Next 16, React 19, TypeScript 6, ESLint 9 (flat config via
-`eslint-config-next`), Vitest 4, Playwright 1.56.
+`eslint-config-next`), Vitest 4, Playwright 1.63.
 
 ### package.json scripts
 
