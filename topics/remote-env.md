@@ -18,12 +18,16 @@
   (`typecheck`/`lint`/`test`/`build` matrix + separate `e2e`); `process.env.CI`
   makes Playwright start a fresh server instead of reusing one.
 
-- **pnpm version gotcha:** CI pins **pnpm 10** (`pnpm/action-setup@v4`, `version: 10`),
-  but the web/remote-env `corepack pnpm` is **11**, which errors `ERR_PNPM_IGNORED_BUILDS`
-  on native deps (sharp, unrs-resolver) that pnpm 10 tolerates. When adding a dependency:
-  approve builds in `pnpm-workspace.yaml` (`onlyBuiltDependencies:`), and regenerate the
-  lockfile with `CI=true corepack pnpm@10 install` so it matches CI's `--frozen-lockfile`.
-  Run local checks with `CI=true corepack pnpm@10 …` to avoid the pnpm-11 strictness.
+- **pnpm version gotcha:** CI pins **pnpm 10** (`pnpm/action-setup@v4`, `version: 10`), but
+  the web env's default `corepack pnpm` is newer (12.21.0 on 2026-11-22).
+  - pnpm 11 fails `install --frozen-lockfile` with `ERR_PNPM_IGNORED_BUILDS` on unapproved native
+    builds (sharp, unrs-resolver). pnpm 10 only lists them as "Ignored build scripts".
+  - When adding a dependency, approve its builds in `pnpm-workspace.yaml`
+    (`onlyBuiltDependencies:`).
+  - Regenerate the lockfile with `CI=true corepack pnpm@10 install --no-frozen-lockfile`.
+    `CI=true` alone means `--frozen-lockfile`, so after a manifest change it refuses with
+    "specifiers in the lockfile don't match".
+  - Run local checks with `CI=true corepack pnpm@10 …`. <!-- rec:TR-05757f216432 -->
 - Subagent test runs in scratch copies can outlive their agent: after heavy workflow runs,
   orphaned vitest workers (PPID 1, cwd a deleted scratch directory) kept 2 of this
   container's 4 CPUs at ~99% for hours (observed once, 2026-10-31). Find them with

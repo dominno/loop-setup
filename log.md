@@ -438,3 +438,6 @@ change), `rotate` (archived old entries). Format: `## [YYYY-MM-DD] <op> | <summa
 - Admission tally: 0 committed / 2 qualified / 0 quarantined / 0 rejected (both revisions, criterion 4 of the goal).
 - Qualified: TR-ec03808b5b04 revises TR-1a2a7cac54bb (wiki:remote-env:playwright-pin: the pin is 1.63.0, build 1243; the pin follows the image, read off browsers.json) and TR-1ff807be9596 revises TR-e7829fbc9fc1 (wiki:remote-env:pw-browser-build-1243: 2026-11-22 observation, shim only while pin and image disagree) → topics/remote-env.md.
 - Not filed (needs your confirmation, a legacy bullet): the pnpm gotcha says to regenerate the lockfile with `CI=true corepack pnpm@10 install`, but CI=true defaults to --frozen-lockfile, so a changed manifest needs `--no-frozen-lockfile`.
+
+## [2026-11-22] lint | legacy pnpm gotcha rewritten (user confirmed)
+- topics/remote-env.md: the legacy pnpm bullet is rewritten (1e iii) with TR-05757f216432 (qualify, COMMIT_QUALIFIED): the default corepack pnpm is now 12.21.0, not 11; pnpm 11 fails on unapproved native builds; regenerating the lockfile needs `CI=true corepack pnpm@10 install --no-frozen-lockfile`, because CI=true alone implies --frozen-lockfile.
