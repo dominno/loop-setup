@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1368 768" width="1368" height="768" font-family="DejaVu Sans, Arial, Helvetica, sans-serif">
   <title>A session and the state across machines</title>
-  <desc>What happens to the loop state in a session and across machines. SessionStart restores an opted-in project's workspace when it is missing (cloned into a temporary git dir and checked by the guard first), heals the link, puts loop-setup on PATH, verifies the record chains and this machine's anchors and anchors what advanced, and injects the rules digest and the wiki catalog with any warning. Each loop-setup write or act takes the store lock, validates, chains and appends the record, and anchors its writer's checkpoint. loop-setup sync locks only its local steps (a one-time migration of an old in-workspace .git; lint, commit, merge of the fetched branch with a union for append-only files, lint) and fetches and pushes outside the lock. The Stop hook anchors what the turn appended and blocks once when the state is unsynced or the state repo is refused. The workspace's files travel on the claude/loop-state branch of the project's remote; each machine keeps its own git dir (state/) and anchors (anchors/). Sharing a workspace needs a policy v4 kit on every machine, one machine for rotation, a sync before a cloud machine ends, and a human for anchors reset.</desc>
+  <desc>What happens to the loop state in a session and across machines. SessionStart restores an opted-in project's workspace when it is missing (cloned into a temporary git dir and checked by the guard first), heals the link, puts loop-setup on PATH, verifies the record chains and this machine's anchors and anchors what advanced, and injects the rules digest and the wiki catalog with any warning. Each loop-setup write or act takes the store lock, validates, chains and appends the record, and anchors its writer's checkpoint. loop-setup sync locks only its local steps (a one-time migration of an old in-workspace .git; lint, commit, merge of the fetched branch with a union for append-only files, lint) and fetches and pushes outside the lock. The Stop hook anchors what the turn appended and blocks once when the state is unsynced (and the state repo has an origin) or the state repo is refused. The workspace's files travel on the claude/loop-state branch of the project's remote; each machine keeps its own git dir (state/) and anchors (anchors/). Sharing a workspace needs a policy v4 kit on every machine, one machine for rotation, a sync before a cloud machine ends, and a human for anchors reset.</desc>
   <defs>
     <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
       <path d="M24 0H0V24" fill="none" stroke="#e3eaf3" stroke-width="1"/>
@@ -117,7 +117,7 @@
     <text x="1046" y="222">• a refused state repo: block, with</text>
     <text x="1058" y="238">its cause</text>
     <text x="1046" y="264">• changed files or unpushed commits:</text>
-    <text x="1058" y="280">block once with</text>
+    <text x="1058" y="280">and an origin: block once with</text>
     <text x="1058" y="298" class="m" font-size="11.5" style="fill:#0f2347" font-weight="700">"Run loop-setup sync"</text>
     <text x="1046" y="324">• at most once per stop</text>
     <text x="1058" y="340">(stop_hook_active)</text>

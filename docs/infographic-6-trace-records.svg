@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1368 768" width="1368" height="768" font-family="DejaVu Sans, Arial, Helvetica, sans-serif">
   <title>TRACE records from claim to durable change</title>
-  <desc>How a claim becomes a durable change. A maker types a claim (factual, measured, causal, predictive, normative, practical); a separate checker gives it a verdict (accept, qualify, revise, defer, reject, each with its required field; no readable verdict is a defer); the evidence gate caps an accept whose evidence is weaker than its claim type demands (reading never counts); loop-setup write appends the record to the append-only store, hash-chained per writer; a consumer action on the latest record (CLEAR, COMMIT, COMMIT_QUALIFIED, QUARANTINE, HOLD, REJECT, REUSE, REAUDIT, and the human-only LAND) makes the durable change. Fail-closed rules: actions are refused on a non-licensing verdict or a record that is not the newest for its claim; a defer is settled only by a separate checker; unattended only accept is applied; LAND and anchors reset are human steps refused inside Claude Code.</desc>
+  <desc>How a claim becomes a durable change. A maker types a claim (factual, measured, causal, predictive, normative, practical); a separate checker gives it a verdict (accept, qualify, revise, defer, reject, each with its required field; no readable verdict is a defer); the evidence gate caps an accept or qualify whose evidence is weaker than its claim type demands (reading never counts); loop-setup write appends the record to the append-only store, hash-chained per writer; a consumer action on the latest record (CLEAR, COMMIT, COMMIT_QUALIFIED, QUARANTINE, HOLD, REJECT, REUSE, REAUDIT, and the human-only LAND) makes the durable change. Fail-closed rules: actions are refused on a non-licensing verdict or a record that is not the newest for its claim; a defer is settled only by a separate checker; unattended only accept is applied; LAND and anchors reset are human steps refused inside Claude Code.</desc>
   <defs>
     <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
       <path d="M24 0H0V24" fill="none" stroke="#e3eaf3" stroke-width="1"/>
@@ -70,7 +70,7 @@
     <rect x="372" y="322" width="96" height="28" rx="14" fill="#d23b3b"/><text x="420" y="341" text-anchor="middle" fill="#fff" font-weight="700" font-size="13">reject</text>
     <text x="478" y="341" class="b" font-size="12">refuted</text><text x="646" y="341" class="s m">reason</text>
   </g>
-  <text x="374" y="378" class="s">only accept and qualify license CLEAR or COMMIT</text>
+  <text x="374" y="378" class="s">which verdicts each action takes: the table in 5</text>
   <text x="374" y="396" class="s">no readable verdict, or a checker that died, is a defer —</text>
   <text x="374" y="411" class="s">never accept, never reject</text>
 
@@ -81,7 +81,7 @@
   <circle cx="830" cy="128" r="14" fill="#c48a0e"/><text x="830" y="134" text-anchor="middle" fill="#fff" font-weight="800" font-size="15">3</text>
   <text x="852" y="135" class="h" style="fill:#8a5f00">EVIDENCE GATE</text>
   <text x="1322" y="134" class="s" text-anchor="end">no claim stronger than its evidence</text>
-  <text x="822" y="160" class="s">an accept is capped when its evidence is weaker than its type demands</text>
+  <text x="822" y="160" class="s">an accept or qualify is capped when its evidence is below its type's floor</text>
   <g>
     <text x="822" y="186" class="s" font-weight="700">claim type</text><text x="928" y="186" class="s" font-weight="700">accept needs one of</text><text x="1272" y="186" class="s" font-weight="700">else</text>
     <line x1="822" y1="194" x2="1322" y2="194" stroke="#e5d3a6" stroke-width="1.5"/>
@@ -111,7 +111,7 @@
     <text x="58" y="576"><tspan fill="#9fc3ff">evidence[]</tspan>    kind · ref · result</text>
     <text x="58" y="594"><tspan fill="#9fc3ff">missing</tspan> · <tspan fill="#9fc3ff">repair</tspan> · <tspan fill="#9fc3ff">failed_gates</tspan></text>
     <text x="58" y="612"><tspan fill="#9fc3ff">provenance</tspan>    commit · tree · workflow</text>
-    <text x="58" y="630"><tspan fill="#ffd27a">chain</tspan>         { w, prev }   policy v4</text>
+    <text x="58" y="630"><tspan fill="#ffd27a">chain</tspan>         { w, prev }   since policy v4</text>
   </g>
   <text x="44" y="676" class="s">trace/records.jsonl: append-only, never hand-edited</text>
   <text x="44" y="694" class="s">a correction is a new record that <tspan class="m" font-size="11">revises</tspan> the old one</text>

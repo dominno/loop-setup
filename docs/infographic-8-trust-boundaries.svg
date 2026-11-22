@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1368 768" width="1368" height="768" font-family="DejaVu Sans, Arial, Helvetica, sans-serif">
   <title>Trust boundaries and what enforces them</title>
-  <desc>What enforces each trust boundary (the trust levels and the denylist itself are on the /loop infographic). Every loop diff: a maker in its own worktree and a separate verifier; the denylist checked on the diff's paths and the maker's list, then again with git's own parser by loop-setup denylist-check; a symlink, gitlink or mode change escalates on any path; an unparsable diff escalates; exit 1 or 2 means hold and escalate; git apply --check first. The kit itself: verify-kit rebuilds the install from a commit on the remote's main or a kit-v* tag; at L2 and L3 plan-items and denylist-check refuse when it fails and an unreachable remote counts as a failure; a loop never edits kit/, .claude/ or CLAUDE.md; the installer owns deny rules against editing the installed kit and against install, uninstall and running the kit's CLI by node path; install and uninstall into the session's own home are refused inside Claude Code. L3: l3-check needs the sandbox on, allowUnsandboxedCommands false at user scope, no excludedCommands, and a bench record for the current verifier and denylist; only accept is applied, a node has at most one scope path, and a failing node escalates instead of splitting. State and records: state git runs hardened after a guard that refuses planted config; records only via loop-setup, append-only, chained and anchored; external content never licenses a wiki fact. Human-only steps: anchors reset, LAND, installing into this session's home, releasing an escalated node, CLAUDE.md edits and merges. The CLAUDECODE checks stop accidents and do not authenticate a human; the sandbox is the boundary.</desc>
+  <desc>What enforces each trust boundary (the trust levels and the denylist itself are on the /loop infographic). Every loop diff: a maker in its own worktree and a separate verifier; the denylist checked on the diff's paths and the maker's list, then again with git's own parser by loop-setup denylist-check; a symlink, gitlink or mode change escalates on any path; an unparsable diff escalates; exit 1 or 2 means hold and escalate; git apply --check first. The kit itself: verify-kit rebuilds the install from a commit on the remote's main or a kit-v* tag; at L2 and L3 plan-items and denylist-check refuse when it fails and an unreachable remote counts as a failure; a loop never edits kit/, .claude/ or CLAUDE.md; the installer owns deny rules against editing the installed kit and against install, uninstall and running the kit's CLI by node path; install and uninstall into the session's own home are refused inside Claude Code. L3: l3-check needs the sandbox on, allowUnsandboxedCommands held false at user scope or by managed policy, no excludedCommands, and a latest bench record that is an accept at repeat 2 or more over every fixture with no F0, F3 or F4 flag, for the current verifier and denylist; only accept is applied, a node has at most one scope path, and a failing node escalates instead of splitting. State and records: state git runs hardened after a guard that refuses planted config; records only via loop-setup, append-only, chained and anchored; a wiki fact backed only by reading or citing a URL is refused, though a copy saved in the repo or a human or rule citation still passes. Human-only steps: anchors reset, LAND, installing into this session's home, releasing an escalated node, CLAUDE.md edits and merges. The CLAUDECODE checks stop accidents and do not authenticate a human; the sandbox is the boundary.</desc>
   <defs>
     <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
       <path d="M24 0H0V24" fill="none" stroke="#e3eaf3" stroke-width="1"/>
@@ -87,20 +87,21 @@
   <g class="s">
     <text x="712" y="204">✓ the Claude Code sandbox is on</text>
     <text x="712" y="228">✓ <tspan class="m" font-size="10.5">allowUnsandboxedCommands: false</tspan></text>
-    <text x="728" y="244">held at user scope</text>
+    <text x="728" y="244">at user scope (or by managed policy)</text>
     <text x="712" y="268">✓ no <tspan class="m" font-size="10.5">sandbox.excludedCommands</tspan></text>
     <text x="728" y="284">in any scope</text>
-    <text x="712" y="308">✓ a bench record measured the current</text>
-    <text x="728" y="324">verifier and denylist (/bench-checkers);</text>
-    <text x="728" y="340">a change to either after it: not met</text>
+    <text x="712" y="308">✓ the latest bench record is an accept:</text>
+    <text x="728" y="324">repeat ≥ 2, every fixture each time, no</text>
+    <text x="728" y="340">F0/F3/F4, for the current verifier and</text>
+    <text x="728" y="356">denylist (/bench-checkers)</text>
   </g>
-  <line x1="712" y1="358" x2="990" y2="358" stroke="#ecdcb0" stroke-width="1.5"/>
-  <text x="712" y="380" class="s" font-weight="700">and while running at L3:</text>
+  <line x1="712" y1="370" x2="990" y2="370" stroke="#ecdcb0" stroke-width="1.5"/>
+  <text x="712" y="390" class="s" font-weight="700">and while running at L3:</text>
   <g class="s">
-    <text x="712" y="404">• only accept is applied; a qualify is held</text>
-    <text x="712" y="428">• a node has at most one scope path</text>
-    <text x="724" y="444">(<tspan class="m" font-size="10.5">plan-lint --max-scope 1</tspan>)</text>
-    <text x="712" y="468">• a failing node escalates, never splits</text>
+    <text x="712" y="412">• only accept is applied; a qualify is held</text>
+    <text x="712" y="434">• a node has at most one scope path</text>
+    <text x="724" y="450">(<tspan class="m" font-size="10.5">plan-lint --max-scope 1</tspan>)</text>
+    <text x="712" y="472">• a failing node escalates, never splits</text>
   </g>
   <rect x="712" y="488" width="278" height="52" rx="10" fill="#fff3d6" stroke="#c48a0e" stroke-width="1.2"/>
   <text x="724" y="510" class="s" font-weight="700" style="fill:#8a5f00">sandbox-off L2 has no local tamper</text>
@@ -124,8 +125,9 @@
     <text x="1046" y="362">• chained per writer, anchored outside</text>
     <text x="1058" y="378">the workspace: an edit or a deletion</text>
     <text x="1058" y="394">of an anchored line is caught (v4)</text>
-    <text x="1046" y="422">• external content (a web page, a PR</text>
-    <text x="1058" y="438">comment) never licenses a wiki fact (v3)</text>
+    <text x="1046" y="422">• a wiki fact backed only by reading, or</text>
+    <text x="1058" y="438">citing a URL, is refused (v3); a copy saved</text>
+    <text x="1058" y="454">in the repo or a human/rule citation passes</text>
   </g>
   <rect x="1046" y="488" width="278" height="52" rx="10" fill="#eef1f6" stroke="#1b2f52" stroke-width="1.2"/>
   <text x="1058" y="510" class="s" font-weight="700" style="fill:#0f2347">so a write into the workspace cannot</text>
