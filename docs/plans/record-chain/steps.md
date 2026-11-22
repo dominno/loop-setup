@@ -104,6 +104,71 @@ after chaining began, a forged or reordered line in the unchained prefix (its ro
 - `<trace-evidence-gate>` (lib.mjs + 7 workflow copies) and `<loop-verifier>` are untouched; their
   parity tests stay green.
 
+## Revisions from the pre-implementation round (taken before any code)
+
+The design above was approved at the checkpoint; the pre-implementation round (tree
+e99b66087f42e547, single-pass reviewer, code-only) then found gaps, all taken here. A first run of
+that round could not be recorded: the writer refused one draft for a bench ground-truth token in its
+`counter_reasons`, so per the consumer protocol nothing from that batch was acted on, and the round
+was run again; the second run's records are TR-9b325336d7bf … TR-05e230f34069.
+
+1. **Every CLI writer chains** (TR-9b325336d7bf): one `chainedWriter()` composition in `cli.mjs` is
+   used by all five store writers — `write`, `write --then-act`, `act`, `reaudit --act`,
+   `bench-score --record` — and by `rotate`. Library callers without a writer still write 1.0 lines.
+2. **Chain after dedupe** (TR-6d5893f4387f, TR-4c861a3d01be): `chain` is assigned only to the lines
+   that will actually be appended (after no-op dedupe and screening), through a pure
+   `chainBatch(entries, w, lines)` that starts from `nextChain` and threads `prev` through the batch;
+   the id is computed after `chain` is set. Every dedupe key stays chain-free: `contentKey` drops
+   `chain`, and the in-batch event dedupe uses `contentKey` + `created_at`, not the chained id.
+3. **The writer owns `chain` and `provenance.workspace`**: `finalizeRecord`/`finalizeAction` refuse a
+   draft that carries `chain`, and set `provenance.workspace` after the draft is merged.
+4. **Chains are checked in `replay`** (pure; `parseLines` keeps each line's `raw`), so every reader —
+   lint, the contracts test, wiki-check — fails closed on a broken chain; only the anchor comparison,
+   which needs machine-local files, is in the adapters.
+5. **The legacy prefix is a set, and a late unchained line is a warning** (TR-ea1382b09a25,
+   TR-05e230f34069): a merge with a machine still on an older kit can place 1.0 lines after chained
+   ones, and union order depends on which side merges. So:
+   - an unchained line (schema 1.0, policy ≤ 3) after the first chained line is a **warning**
+     ("written by a kit older than policy v4 — upgrade every machine that shares this workspace"),
+     never an error, and belongs to no chain;
+   - the legacy checkpoint is `{ w: null, n, ids }`: the sorted ids of every unchained line. It holds
+     while every anchored id is still in the store (order-independent); `n` never drops.
+6. **The writer anchors its own lines** (TR-2684185404a4): after a successful append, under the same
+   lock, the writer appends its stream's checkpoint, so a writer's tail is never unanchored on its
+   own machine. SessionStart still verifies everything and anchors every stream it sees (other
+   writers' lines arrive by merge). An anchors line is appended only when a checkpoint advanced.
+7. **One lock** (TR-177f4ecd5b23): `withStoreLock(key, fn)` in `anchors.mjs` covers load → chain →
+   append → anchor append in every writer, `rotate`, and `sync` (its commit and merge rewrite the
+   store). The lock file holds `{ pid, host, at }`; a lock whose process is gone on this host is broken
+   by an atomic rename, any other is waited for (10 s) and then refused with a clear message. The
+   `.writer` file is created with `O_EXCL`.
+8. **The key** (the first run's blocker, confirmed again by the code): `<key>` comes from `stateIdOf`
+   (layout.mjs), so a store inside a real workspace keeps its workspace id even under
+   `LOOP_SETUP_WORKSPACE` (sync's lint gate runs that way); `store-<hash>` is only for stores outside
+   `workspaces/`.
+9. **Missing anchors are visible** (TR-fbcce4b1397a): `.writer` exists ⇒ an anchors file must exist
+   (the writer creates both); otherwise lint and doctor fail. A chained store with no anchors at all on
+   this machine is a warning ("tamper evidence holds only where the anchors were kept"). An exception
+   or an unparsable anchors line inside the SessionStart integrity step becomes the failure line in the
+   injected context, never a silent skip.
+10. **Recovery**: a real count drop (a workspace restored from a remote that is behind lines this
+    machine anchored) keeps lint red until a human acknowledges it: `loop-setup anchors reset
+    --reason "<why>"` moves the anchors file aside (`<key>.jsonl.reset-<UTC>`) and starts a new one
+    whose first line records `{ reset: { at, reason, previous } }`. It is refused from inside Claude
+    Code for the session's own home, like `install` (a human's step); `doctor` shows the last reset.
+11. **Digest and eol** (nice-to-have taken): the digest is over the line with one trailing `\r`
+    stripped, so a CRLF checkout does not break chains.
+12. **The guarantee, stated precisely** (policy bullet): on a machine that kept its anchors, an edit or
+    deletion of an anchored line is detected; insertion of new lines, authorship (writer ids are not
+    secrets) and tampering with the machine-local anchors themselves are not. The workspace's own
+    `topics/trace.md` is a wiki page and is not rewritten by this change.
+13. **Tests added to S01** (TR-5a812bfd5cbe): the two-clone test asserts the merged line order and has
+    a 1.0 writer on one side; a no-op in the middle of an action batch; two identical REUSE drafts in
+    one batch; a draft carrying `chain`; rotation across a year boundary keeps every chain and
+    checkpoint; two concurrent `write` processes leave lint green; deleting `.writer`/the anchors file;
+    a corrupt anchors line; `anchors reset` (and its refusal under `CLAUDECODE`); sync stopping at
+    pre-lint on a dropped anchored count.
+
 ## Tests first
 
 - `kit/trace/chain.test.mjs` (pure): digests, `nextChain`, a batch chaining to itself, every
@@ -122,9 +187,28 @@ after chaining began, a forged or reordered line in the unchained prefix (its ro
 
 | id | description | scope | check | after | status | commit |
 |---|---|---|---|---|---|---|
-| S01 | Tests first (RED): chain core, writer and replay, real-git two-clone test, contracts | kit/trace/chain.test.mjs, kit/trace/lib.test.mjs, kit/setup/chainrepo.test.mjs, kit/trace/contracts.test.mjs | `pnpm exec vitest run kit/trace/chain.test.mjs kit/trace/lib.test.mjs kit/setup/chainrepo.test.mjs kit/trace/contracts.test.mjs` | — | planned | — |
-| S02 | Core: `chain.mjs` (digest, chainViolations, nextChain, checkpointsFor, anchorViolations); schema 1.1; replay rules for 1.0/1.1 | kit/trace/chain.mjs, kit/trace/lib.mjs, kit/schema/schema-v1.json | same | S01 | planned | — |
-| S03 | Adapters: anchors paths (layout.mjs), `anchors.mjs` (writer id, checkpoints, lock); the CLI writer and lint | kit/setup/layout.mjs, kit/setup/anchors.mjs, kit/trace/cli.mjs, kit/trace/lib.mjs | same | S02 | planned | — |
-| S04 | SessionStart anchoring and its failure line; the doctor check | kit/setup/hooks.mjs, kit/setup/commands.mjs | same | S03 | planned | — |
-| S05 | Policy v4: trace-policy.md marker, sentence and Record guarantees bullet | kit/rules/trace-policy.md | `pnpm exec vitest run kit/trace/contracts.test.mjs` | S04 | planned | — |
+| S01 | Tests first (RED): chain core, writer and replay, real-git two-clone test, contracts | kit/trace/chain.test.mjs, kit/trace/lib.test.mjs, kit/setup/chainrepo.test.mjs, kit/trace/contracts.test.mjs | `pnpm exec vitest run kit/trace/chain.test.mjs kit/trace/lib.test.mjs kit/setup/chainrepo.test.mjs kit/trace/contracts.test.mjs` | — | done | — |
+| S02 | Core: `chain.mjs` (digest, chainViolations, nextChain, checkpointsFor, anchorViolations); schema 1.1; replay rules for 1.0/1.1 | kit/trace/chain.mjs, kit/trace/lib.mjs, kit/schema/schema-v1.json | same | S01 | done | — |
+| S03 | Adapters: anchors paths (layout.mjs), `anchors.mjs` (writer id, checkpoints, lock, reset); `chainedWriter()` at all five CLI writers and rotate; lint; sync under the lock | kit/setup/layout.mjs, kit/setup/anchors.mjs, kit/trace/cli.mjs, kit/trace/lib.mjs, kit/setup/workspace.mjs, kit/setup/commands.mjs | same | S02 | done | — |
+| S04 | SessionStart anchoring and its failure line; the doctor check | kit/setup/hooks.mjs, kit/setup/commands.mjs | same | S03 | done | — |
+| S05 | Policy v4: trace-policy.md marker, sentence and Record guarantees bullet (the precise guarantee, the upgrade rule); `anchors reset` in the adoption guide | kit/rules/trace-policy.md, kit/docs/adoption-guide.md | `pnpm exec vitest run kit/trace/contracts.test.mjs` | S04 | done | — |
 | S06 | Self-verify chain and the post-implementation critic round | — | `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | S05 | planned | — |
+
+RED → GREEN:
+- Before S02: `chain.test.mjs` did not load (no `chain.mjs`); 4 chained-writer tests in `lib.test.mjs`
+  failed; the policy-v4 contract test failed; `chainrepo.test.mjs` could not pass (no writer).
+- On the way, two root causes, fixed in the code (no expectation changed):
+  - duplicate-draft detection compared a stored 1.1 line with its 1.0 candidate, so the same draft
+    was not a duplicate: `contentKey` now drops every chain-owned field (`chain`, `schema_version`,
+    `provenance.workspace`), so dedupe is chain-free;
+  - 16 `cli.test.mjs` tests failed with exit 1 because their throwaway-repo harness copies an explicit
+    list of kit modules and the CLI now imports `kit/trace/chain.mjs` and `kit/setup/anchors.mjs`;
+    both were added to that list (a harness file list, not an assertion).
+- After S02–S05: `pnpm exec vitest run kit/trace kit/setup` → 651 + 226 passed; full `pnpm test`
+  23 files, 979 tests.
+- Not taken: owned Edit-deny rules for `~/.claude/loop-setup/anchors/**` (raised only in the
+  unrecorded first run; `integrity.test.mjs` pins the exact owned deny list) — under Remaining risks.
+
+Live evidence (read-only, this machine): the new `lint` on the real store (184 lines, all 1.0) → ok,
+0 errors, 0 warnings; the new `doctor` → `ok record store chain and anchors — 0 checkpoint(s)
+anchored`; no anchors directory was created by either.

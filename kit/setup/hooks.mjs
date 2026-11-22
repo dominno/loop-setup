@@ -12,6 +12,7 @@ import { manifestPathFor } from "./kitfiles.mjs";
 import { shellArg } from "./kittree.mjs";
 import { normalizeRemote } from "./install.mjs";
 import { StateRepoRefused, ensureLink, restore, stateRepo, syncStatus } from "./workspace.mjs";
+import { storeIntegrity } from "./anchors.mjs";
 
 /** additionalContext is capped by Claude Code at 10,000 characters per hook output; stay under it. */
 export const CONTEXT_BUDGET = 9000;
@@ -40,7 +41,7 @@ export function wikiCatalog(ws) {
 }
 
 /** The SessionStart additionalContext for a resolved layout (pure but for reading the digest/catalog). */
-export function sessionContext(layout, { status = null, refusal = null, kitVersion = null, restored = null, kitRoot = KIT_ROOT } = {}) {
+export function sessionContext(layout, { status = null, refusal = null, integrity = null, kitVersion = null, restored = null, kitRoot = KIT_ROOT } = {}) {
   const head = [
     `# loop-setup kit${kitVersion ? ` ${kitVersion}` : ""} — workspace ${layout.workspaceId || "(legacy in-repo)"}`,
     `- Loop state (wiki, TRACE records, plan, run log) lives in ${layout.workspace}, reached from this project as \`.claude/loop-workspace/\` (git-ignored). Write records only with \`loop-setup\`.`,
@@ -48,6 +49,7 @@ export function sessionContext(layout, { status = null, refusal = null, kitVersi
   ];
   if (layout.mode === "legacy") head.push("- This project still keeps its state in .claude/memory (legacy). Migrate with `loop-setup init --from-legacy`.");
   if (restored) head.push(`- Restored this session from ${STATE_BRANCH}: ${restored}.`);
+  if (integrity) head.push(`- Record store integrity check FAILED: ${integrity} — not re-anchored; run \`loop-setup lint\` (a real drop is acknowledged by a human with \`loop-setup anchors reset --reason …\`).`);
   if (refusal) head.push(`- State repo refused: ${refusal} — run \`loop-setup doctor\`; nothing syncs until it is fixed.`);
   if (status && !status.synced) head.push(`- Workspace has unsynced state (${status.dirty} changed file(s), ${status.ahead} unpushed commit(s)) — run \`loop-setup sync\` before the session ends, or it is lost with this machine.`);
   for (const w of layout.warnings || []) head.push(`- warning: ${w}`);
@@ -82,6 +84,20 @@ function stateStatus(layout, claudeHome) {
     return { status: syncStatus(loc), refusal: null };
   } catch (e) {
     return { status: null, refusal: e instanceof StateRepoRefused ? e.refusal : null };
+  }
+}
+
+/**
+ * Policy v4: verify the store's chains and this machine's anchors, and anchor what advanced when
+ * nothing is wrong. → null when it holds, else the first problem. Any exception is a failure too:
+ * the check is never skipped silently.
+ */
+function integrityFailure(layout, claudeHome) {
+  try {
+    const r = storeIntegrity({ claudeHome, workspace: layout.workspace, workspaceId: layout.workspaceId, anchor: true });
+    return r.errors.length ? `${r.errors[0]}${r.errors.length > 1 ? ` (+${r.errors.length - 1} more)` : ""}` : null;
+  } catch (e) {
+    return `the integrity check could not run: ${e.message || e}`;
   }
 }
 
@@ -126,7 +142,8 @@ export function sessionStart(input, { env = process.env } = {}) {
     }
   }
   const { status, refusal } = stateStatus(layout, facts.claudeHome);
-  const additionalContext = sessionContext(layout, { status, refusal, kitVersion: manifest?.kit?.version, restored });
+  const integrity = layout.mode === "legacy" ? null : integrityFailure(layout, facts.claudeHome);
+  const additionalContext = sessionContext(layout, { status, refusal, integrity, kitVersion: manifest?.kit?.version, restored });
   return { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext } };
 }
 

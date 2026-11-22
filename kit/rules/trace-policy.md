@@ -13,11 +13,12 @@ repair; consumers act only on records. We adopt that **contract** for our own ma
 declared policy, **not** objective truth: gates verify field consistency, not field
 truth (paper §7.2).
 
-<!-- trace-policy-version: 3 -->
+<!-- trace-policy-version: 4 -->
 (machine-readable; `kit/trace/lib.mjs` stamps it on every record and refuses records
 written under a newer policy — bump it whenever a table below or a record rule changes.)
-v3 adds the memory write boundary for `wiki:` records (**Record guarantees**); records
-written under v1/v2 replay unchanged.
+v3 adds the memory write boundary for `wiki:` records; v4 adds the per-writer hash chain (schema
+`trace-lite/1.1`) and machine-local anchors (both under **Record guarantees**); records written
+under v1–v3 replay unchanged.
 
 - Schema: `kit/schema/schema-v1.json` · Store: `.claude/loop-workspace/trace/records.jsonl`
   (append-only JSONL, archives `<YYYY>.jsonl`) · Writer/linter: `loop-setup …`
@@ -204,7 +205,22 @@ implementation, gaps into the synthesized order), and no durable state changes o
   unreachable commit and the paths to re-verify), so re-auditing an unchanged queue is a no-op
   rather than a line per stale record per pass. Action notes/refs are screened for secrets
   and bench ground truth exactly like records.
-- **Version legibility** — `schema_version` const + `policy_version` stamp; a reader refuses
+- **Tamper evidence (policy v4)** — every line the CLI appends is `trace-lite/1.1` and carries
+  `chain: { w, prev }` (`w`: this machine's writer id for the store, kept with the anchors; `prev`:
+  the sha256 of that writer's previous line as stored, one trailing `\r` ignored, or `null`) and
+  `provenance.workspace`; the writer fills both and refuses a draft that carries either.
+  `loop-setup lint` (every replay) checks each writer's chain. Checkpoints — per writer `{ w, n, sha }`
+  and the legacy 1.0 lines as an id set — are anchored outside the workspace in
+  `~/.claude/loop-setup/anchors/<id>.jsonl` by the writer (its own line) and the SessionStart hook
+  (every stream); lint, `doctor` and the hook fail when one is no longer a prefix or a count dropped,
+  and the hook never re-anchors over a failure. Union merges and rebases keep each writer's order,
+  so they stay green. The guarantee: **on a machine that kept its anchors, an edit or a deletion of an
+  anchored line is detected**. Not covered: new lines (insertion, a fresh writer id), authorship
+  (writer ids are not secrets) and tampering with the machine-local anchors. A 1.0 line after the
+  first chained one is a warning (a kit older than v4 wrote it): every machine sharing a workspace
+  upgrades before its first v4 write. A real count drop (a restore from a remote that is behind) is
+  acknowledged by a human: `loop-setup anchors reset --reason "…"` (refused from inside Claude Code).
+- **Version legibility** — `schema_version` (1.0 or 1.1) + `policy_version` stamp; a reader refuses
   records from a newer policy (`loop-setup lint`).
 - **Self-containment** — verdict, failed gates, missing, repair live in the record.
 - **Provenance** — `writer_id` + `provenance.commit/workflow` (+ `provenance.tree`, the

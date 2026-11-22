@@ -81,6 +81,21 @@ export function stateRepoLocation({ claudeHome, workspace, id = null, outside = 
   return { kind: "none", gitDir: null };
 }
 
+/**
+ * Machine-local anchors of a record store (phase C, goal C4): this machine's writer id, the
+ * checkpoints and the store lock, outside every workspace, the state branch and the per-project
+ * grant. A key is a workspace id, or store-<16 hex> for a store that is no workspace's own.
+ */
+export const anchorsRoot = (claudeHome) => join(loopHome(claudeHome), "anchors");
+export const isAnchorKey = (key) => isValidId(key) || /^store-[0-9a-f]{16}$/.test(String(key));
+export function anchorPaths(claudeHome, key) {
+  if (!isAnchorKey(key)) throw new Error(`not an anchor key: ${key}`);
+  const root = anchorsRoot(claudeHome);
+  return { anchors: join(root, `${key}.jsonl`), writer: join(root, `${key}.writer`), lock: join(root, `${key}.lock`) };
+}
+/** The anchor key: the workspace id when the store is that workspace's own store, else store-<the first 16 hex of its path digest>. */
+export const anchorKey = ({ workspaceId = null, ownStore = false, pathDigest }) => (workspaceId && ownStore ? workspaceId : `store-${String(pathDigest).slice(0, 16)}`);
+
 const RESTORE = "run `loop-setup restore` (it clones the state branch), or `loop-setup init` for a new workspace";
 
 /**

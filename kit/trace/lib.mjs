@@ -19,6 +19,7 @@ import {
 } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { KIT_ROOT, currentLayout } from "../setup/facts.mjs";
+import { chainBatch, nextChain, walkChains } from "./chain.mjs";
 import { LINK_NAME } from "../setup/layout.mjs";
 
 // Three roots (kit/setup/layout.mjs): the KIT (this code, its schema, policy, workflows), the
@@ -37,6 +38,8 @@ export const SCHEMA_PATH = join(KIT_ROOT, "schema/schema-v1.json");
 export const POLICY_PATH = join(KIT_ROOT, "rules/trace-policy.md");
 export const DEFAULT_STORE = join(WORKSPACE, "trace/records.jsonl");
 export const SCHEMA_VERSION = "trace-lite/1.0";
+/** The schema of a chained line (policy v4): chain { w, prev } and provenance.workspace, filled by the writer only. */
+export const SCHEMA_VERSION_CHAINED = "trace-lite/1.1";
 
 // ---------------------------------------------------------------------------
 // Evidence gate (TRACE "rung discipline" / overclaim control, generalized).
@@ -335,11 +338,19 @@ export function expectedId(entry) {
 export function contentKey(entry) {
   const rest = withoutOwnId(entry);
   delete rest.created_at;
+  // The chain fields are writer-owned and change with position: a re-run write of the same draft
+  // is a duplicate though its prev would differ, and a 1.1 line equals its 1.0 candidate.
+  delete rest.chain;
+  delete rest.schema_version;
+  if (isPlainObject(rest.provenance) && "workspace" in rest.provenance) {
+    const { workspace, ...prov } = rest.provenance;
+    rest.provenance = prov;
+  }
   return JSON.stringify(rest);
 }
 
 /** Fill the writer-owned fields of a record draft. Writer stamps kind, versions, and time. */
-export function finalizeRecord(draft, { now, policyVersion, commit, branch }) {
+export function finalizeRecord(draft, { now, policyVersion, commit, branch, chain = null, workspace = null }) {
   const d = draft || {};
   const prov = isPlainObject(d.provenance) ? d.provenance : {};
   const provCommit = prov.commit && prov.commit !== "unknown" ? prov.commit : commit;
@@ -366,22 +377,32 @@ export function finalizeRecord(draft, { now, policyVersion, commit, branch }) {
     if (rec[k] === "" || rec[k] == null) delete rec[k];
   }
   if (Array.isArray(rec.counter_reasons) && rec.counter_reasons.length === 0) delete rec.counter_reasons;
+  // The chain and the workspace are writer-owned too: never taken from the draft (writeRecords
+  // refuses a draft that carries either), set only on a chained (1.1) line.
+  delete rec.chain;
+  delete rec.provenance.workspace;
+  if (chain) {
+    rec.schema_version = SCHEMA_VERSION_CHAINED;
+    rec.provenance.workspace = workspace ?? null;
+    rec.chain = { w: chain.w, prev: chain.prev ?? null };
+  }
   // The id is writer-owned and content-addressed: never taken from the draft, so lint can
   // detect any in-place rewrite of a stored line.
   rec.record_id = expectedId(rec);
   return rec;
 }
 
-export function finalizeAction(draft, { now }) {
+export function finalizeAction(draft, { now, chain = null }) {
   const a = {
     kind: "action",
-    schema_version: SCHEMA_VERSION,
+    schema_version: chain ? SCHEMA_VERSION_CHAINED : SCHEMA_VERSION,
     created_at: now,
     record_id: draft.record_id,
     consumer: draft.consumer,
     action: draft.action,
     ...(draft.ref ? { ref: String(draft.ref) } : {}),
     ...(draft.note ? { note: String(draft.note) } : {}),
+    ...(chain ? { chain: { w: chain.w, prev: chain.prev ?? null } } : {}),
   };
   a.action_id = expectedId(a);
   return a;
@@ -397,9 +418,9 @@ export function parseLines(text, source) {
     .forEach((raw, i) => {
       if (!raw.trim()) return;
       try {
-        entries.push({ source, line: i + 1, value: JSON.parse(raw) });
+        entries.push({ source, line: i + 1, raw, value: JSON.parse(raw) });
       } catch (e) {
-        entries.push({ source, line: i + 1, parseError: String(e.message || e) });
+        entries.push({ source, line: i + 1, raw, parseError: String(e.message || e) });
       }
     });
   return entries;
@@ -445,6 +466,7 @@ export function replay(entries, schema, readerPolicyVersion) {
       continue;
     }
     seen.add(id);
+    errors.push(...versionViolations(v).map((s) => `${at}: ${id}: ${s}`));
     if (v.kind === "record") {
       const sem = semanticViolations(v);
       errors.push(...sem.map((s) => `${at}: ${v.record_id}: ${s}`));
@@ -483,7 +505,25 @@ export function replay(entries, schema, readerPolicyVersion) {
       actions.get(v.record_id).push(v);
     }
   }
+  // The per-writer hash chains (policy v4), over the whole stream: every reader fails closed on a
+  // broken chain. A late unchained line (an older kit's) is only a warning.
+  const chains = walkChains(entries);
+  errors.push(...chains.errors);
+  warnings.push(...chains.warnings);
   return { errors, warnings, records, actions, superseded, latestOfClaim, contentKeys };
+}
+
+/** What a line's schema version requires of it (policy v4): a 1.1 line is chained, a 1.0 line is not. */
+export function versionViolations(v) {
+  const out = [];
+  if (v.schema_version === SCHEMA_VERSION_CHAINED) {
+    if (!v.chain) out.push("a trace-lite/1.1 line needs chain (the writer fills it)");
+    if (v.kind === "record" && Number(v.policy_version) < 4) out.push("a trace-lite/1.1 record needs policy 4 or later");
+  } else {
+    if (v.chain !== undefined) out.push("a trace-lite/1.0 line carries no chain");
+    if (v.kind === "record" && v.provenance && v.provenance.workspace !== undefined) out.push("a trace-lite/1.0 line carries no provenance.workspace");
+  }
+  return out;
 }
 
 /** Why a consumer action on `rec` is not allowed (fail closed), or null if it is. */
@@ -1167,16 +1207,30 @@ function screenText(text, forbidden) {
   return v;
 }
 
-export function writeRecords(drafts, { storePath, now, policyVersion, commit, branch, schema, forbidden = [] }) {
+/** A draft never carries the writer-owned chain fields: refusing them keeps a forged chain or workspace out of the store. */
+function writerOwnedViolations(d) {
+  const v = [];
+  if (d && typeof d === "object" && "chain" in d) v.push("the draft carries chain — the writer fills chain, never a draft");
+  if (d && isPlainObject(d.provenance) && "workspace" in d.provenance) v.push("the draft carries provenance.workspace — the writer fills provenance.workspace, never a draft");
+  return v;
+}
+
+/**
+ * opts.chain: the writer id (16 hex) of a chained writer (policy v4), or null for a 1.0 line.
+ * opts.workspace: the workspace id a chained writer stamps in provenance.workspace (or null).
+ * The chain is assigned after validation and dedupe, to the lines actually appended.
+ */
+export function writeRecords(drafts, { storePath, now, policyVersion, commit, branch, schema, forbidden = [], chain = null, workspace = null }) {
   const sch = schema || loadSchema();
-  const prior = replay(loadEntries(storePath), sch, policyVersion);
+  const entries = loadEntries(storePath);
+  const prior = replay(entries, sch, policyVersion);
   const known = new Map(prior.records);
   const contents = new Map(prior.contentKeys);
   const unsafe = drafts.map((d) => dangerousKeys(d));
   const batch = drafts.map((d, i) => (unsafe[i].length ? { kind: "record", record_id: "(refused)" } : finalizeRecord(d, { now, policyVersion, commit, branch })));
   const results = batch.map((rec, i) => {
     if (unsafe[i].length) return { rec, violations: [`draft carries prototype-polluting key(s): ${unsafe[i].join(", ")}`] };
-    const violations = [...validate(sch.$defs.record, rec, sch), ...semanticViolations(rec)];
+    const violations = [...writerOwnedViolations(drafts[i]), ...validate(sch.$defs.record, rec, sch), ...semanticViolations(rec)];
     if (known.has(rec.record_id)) violations.push(`duplicate record_id ${rec.record_id}`);
     const ck = contentKey(rec);
     if (contents.has(ck)) violations.push(`duplicate content — this exact record is already stored as ${contents.get(ck)} (re-running a write is not a new verdict)`);
@@ -1188,14 +1242,20 @@ export function writeRecords(drafts, { storePath, now, policyVersion, commit, br
     known.set(rec.record_id, rec);
     return { rec, violations };
   });
-  const ok = results.every((r) => r.violations.length === 0);
-  if (ok && batch.length) {
-    mkdirSync(dirname(storePath), { recursive: true });
-    appendFileSync(storePath, batch.map((r) => JSON.stringify(r)).join("\n") + "\n");
+  let ok = results.every((r) => r.violations.length === 0);
+  let lines = batch;
+  if (ok && chain && batch.length) {
+    lines = chainBatch(nextChain(entries, chain), drafts.map((_, i) => ({ i })), ({ i, chain: link }) => finalizeRecord(drafts[i], { now, policyVersion, commit, branch, chain: link, workspace }));
+    lines.forEach((rec, i) => results[i].violations.push(...validate(sch.$defs.record, rec, sch), ...versionViolations(rec)));
+    ok = results.every((r) => r.violations.length === 0);
   }
-  return results.map(({ rec, violations }) => ({
-    record_id: rec.record_id,
-    schema_version: rec.schema_version,
+  if (ok && lines.length) {
+    mkdirSync(dirname(storePath), { recursive: true });
+    appendFileSync(storePath, lines.map((r) => JSON.stringify(r)).join("\n") + "\n");
+  }
+  return results.map(({ rec, violations }, i) => ({
+    record_id: ok ? lines[i].record_id : rec.record_id,
+    schema_version: ok ? lines[i].schema_version : rec.schema_version,
     policy_version: rec.policy_version,
     validation: violations.length ? { fail: violations } : "pass",
     stored: ok,
@@ -1227,24 +1287,30 @@ function wikiActionViolation(rec, action, ref) {
   return null;
 }
 
-/** Append consumer actions all-or-nothing, enforcing the action matrix and the memory write boundary (fail closed). */
-export function appendActions(drafts, { storePath, now, policyVersion, schema, forbidden = [] }) {
+/**
+ * Append consumer actions all-or-nothing, enforcing the action matrix and the memory write boundary
+ * (fail closed). opts.chain: a chained writer's id (policy v4) — the chain is assigned after
+ * dedupe, to the actions actually appended (a no-op in the batch is skipped by the chain).
+ */
+export function appendActions(drafts, { storePath, now, policyVersion, schema, forbidden = [], chain = null }) {
   const sch = schema || loadSchema();
-  const prior = replay(loadEntries(storePath), sch, policyVersion);
+  const entries = loadEntries(storePath);
+  const prior = replay(entries, sch, policyVersion);
   const batch = drafts.map((d) => finalizeAction(d, { now }));
   const contents = new Map(prior.contentKeys);
   const seenIds = new Set();
-  const results = batch.map((a) => {
+  const results = batch.map((a, i) => {
     // Idempotency without poisoning: an identical decision that is already recorded (or
     // repeated in this batch) is a no-op, not a batch-failing error. Event actions are
-    // de-duplicated only against an identical id (same content AND same time).
+    // de-duplicated only against an identical id (same content AND same time). Both keys are
+    // chain-free (the chain is assigned below, to what is appended).
     const ck = contentKey(a);
     if (seenIds.has(a.action_id) || (!EVENT_ACTIONS.includes(a.action) && contents.has(ck))) {
-      return { a, violations: [], noop: contents.get(ck) || a.action_id };
+      return { a, i, violations: [], noop: contents.get(ck) || a.action_id };
     }
     seenIds.add(a.action_id);
     contents.set(ck, a.action_id);
-    const violations = validate(sch.$defs.action, a, sch);
+    const violations = [...writerOwnedViolations(drafts[i]), ...validate(sch.$defs.action, a, sch)];
     violations.push(...screenText(JSON.stringify(a), forbidden));
     const rec = prior.records.get(a.record_id);
     if (!rec) violations.push(`unknown record ${a.record_id} — a consumer cannot act on a record that does not exist`);
@@ -1254,13 +1320,20 @@ export function appendActions(drafts, { storePath, now, policyVersion, schema, f
       const boundary = wikiActionViolation(rec, a.action, a.ref);
       if (boundary) violations.push(boundary);
     }
-    return { a, violations };
+    return { a, i, violations };
   });
-  const ok = results.every((r) => r.violations.length === 0);
-  const toWrite = results.filter((r) => !r.noop).map((r) => r.a);
-  if (ok && toWrite.length) {
+  let ok = results.every((r) => r.violations.length === 0);
+  const appended = results.filter((r) => !r.noop);
+  let lines = appended.map((r) => r.a);
+  if (ok && chain && appended.length) {
+    lines = chainBatch(nextChain(entries, chain), appended.map((r) => ({ i: r.i })), ({ i, chain: link }) => finalizeAction(drafts[i], { now, chain: link }));
+    lines.forEach((a, k) => appended[k].violations.push(...validate(sch.$defs.action, a, sch), ...versionViolations(a)));
+    ok = results.every((r) => r.violations.length === 0);
+    if (ok) lines.forEach((a, k) => (appended[k].a = a));
+  }
+  if (ok && lines.length) {
     mkdirSync(dirname(storePath), { recursive: true });
-    appendFileSync(storePath, toWrite.map((x) => JSON.stringify(x)).join("\n") + "\n");
+    appendFileSync(storePath, lines.map((x) => JSON.stringify(x)).join("\n") + "\n");
   }
   return results.map(({ a, violations, noop }) => ({
     action_id: noop || a.action_id,

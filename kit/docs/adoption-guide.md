@@ -36,6 +36,8 @@ There are three paths:
                                                  quarantine.md; the work tree of the branch claude/loop-state
 ~/.claude/loop-setup/state/<slug>-<hex8>.git     that work tree's git dir, kept outside it (and outside the
                                                  project's read/write grant)
+~/.claude/loop-setup/anchors/<slug>-<hex8>.*     this machine's record-store anchors: its writer id (.writer),
+                                                 the checkpoints (.jsonl) and the store lock (.lock)
 <project>/.claude/loop-workspace                 the git-ignored link to that directory
 <project>/.git/config  [loop-setup] workspace    the clone marker (shared by every worktree of the clone)
 ```
@@ -48,6 +50,15 @@ make git run a command at sync time. `doctor` names the cause; fix it (put the t
 `.gitattributes` back, remove the planted file or key) and sync again. A workspace made by an older
 kit, with its git dir still at `<workspace>/.git`, moves to `state/` at its next `loop-setup sync` or
 `restore` (a fresh git dir with the same HEAD, refs and history; `doctor` warns until then).
+
+The record store is tamper-evident (policy v4): every line `loop-setup` appends carries a per-writer
+hash chain, and this machine anchors checkpoints in `~/.claude/loop-setup/anchors/`. `loop-setup
+lint`, `doctor` and the SessionStart hook then catch an edited or deleted line that was anchored here.
+Every machine that shares a workspace should run a kit with policy v4 before its first v4 write (an
+older kit's lines are only warned about). If a count drops for a real reason (you restored the
+workspace from a remote that is behind lines this machine had anchored), acknowledge it in a terminal
+outside Claude Code: `loop-setup anchors reset --reason "restored from the remote after a disk loss"`.
+The old anchors file is kept beside the new one, and `doctor` shows the reason.
 
 **Portable — what your project carries (commit these):**
 

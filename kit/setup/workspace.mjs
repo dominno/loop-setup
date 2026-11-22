@@ -17,6 +17,7 @@ import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { KIT_ROOT, gatherFacts, gitOut } from "./facts.mjs";
 import { LEGACY_DIR, LINK_NAME, MARKER_KEY, STATE_BRANCH, isValidId, isWorkspacePath, resolveLayout, stateGitDir, stateIdOf, stateRepoLocation, stateRoot, workspaceDir, workspacesRoot } from "./layout.mjs";
 import { GITDIR_ENTRIES, incomingTreeRefusal, stateRepoRefusal } from "./stateguard.mjs";
+import { storeKey, withStoreLock } from "./anchors.mjs";
 
 /** Git for the STATE repository: hardened against the user's global config (hooks, signing, identity). */
 // core.autocrlf=false: a user's global autocrlf must not rewrite the template .gitattributes at checkout.
@@ -388,7 +389,7 @@ export function restore({ cwd = process.cwd(), env = process.env } = {}) {
   if (facts.marker?.exists) {
     const ws = workspaceDir(claudeHome, facts.marker.id);
     const loc = localRepo(claudeHome, ws, facts.marker.id, projectRoot);
-    const pulled = pull(openRepo(loc));
+    const pulled = lockedPull(claudeHome, ws, facts.marker.id, loc);
     return { id: facts.marker.id, workspace: ws, restored: false, pulled, ...(loc.migrated ? { migrated: loc.gitDir } : {}), ...bind(projectRoot, facts.marker.id, ws, claudeHome) };
   }
   const remote = originUrl(projectRoot);
@@ -423,7 +424,7 @@ export function restore({ cwd = process.cwd(), env = process.env } = {}) {
     if (existsSync(ws)) {
       cleanup();
       const loc = localRepo(claudeHome, ws, meta.id, projectRoot);
-      const pulled = pull(openRepo(loc));
+      const pulled = lockedPull(claudeHome, ws, meta.id, loc);
       return { id: meta.id, workspace: ws, restored: false, pulled, ...(loc.migrated ? { migrated: loc.gitDir } : {}), ...bind(projectRoot, meta.id, ws, claudeHome) };
     }
     // Bootstrap checkout of the tree the guard just passed, then the work-tree rules on the result.
@@ -448,6 +449,9 @@ export function restore({ cwd = process.cwd(), env = process.env } = {}) {
     throw e;
   }
 }
+
+/** pull() under the record store's lock (the merge rewrites the store). */
+const lockedPull = (claudeHome, ws, workspaceId, loc) => withStoreLock(claudeHome, storeKey({ claudeHome, storePath: join(ws, "trace/records.jsonl"), workspace: ws, workspaceId }), () => pull(openRepo(loc)));
 
 /** Fetch the remote state branch, check its tree, and merge it (union for append-only files). Returns a short status. */
 export function pull(repo) {
@@ -508,8 +512,15 @@ export function boundWorkspace({ cwd = process.cwd(), env = process.env } = {}) 
  * old-layout workspace is migrated out of the workspace first.
  * opts: { cwd, env, message?, force? (push even when the gate fails), push? (default true) }
  */
-export function sync({ cwd = process.cwd(), env = process.env, message, force = false, push = true, now = new Date().toISOString() } = {}) {
-  const layout = boundWorkspace({ cwd, env });
+export function sync(opts = {}) {
+  const layout = boundWorkspace({ cwd: opts.cwd || process.cwd(), env: opts.env || process.env });
+  const ws = layout.workspace;
+  // The commit and the merge rewrite the record store: hold its lock, as every writer does (policy v4).
+  const key = storeKey({ claudeHome: layout.claudeHome, storePath: join(ws, "trace/records.jsonl"), workspace: ws, workspaceId: layout.workspaceId });
+  return withStoreLock(layout.claudeHome, key, () => syncLocked(layout, opts));
+}
+
+function syncLocked(layout, { message, force = false, push = true, now = new Date().toISOString() } = {}) {
   const ws = layout.workspace;
   const loc = localRepo(layout.claudeHome, ws, layout.workspaceId, layout.projectRoot);
   const repo = openRepo(loc);

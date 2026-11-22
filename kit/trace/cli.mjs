@@ -12,6 +12,7 @@ import { claudeHomeOf, layoutError } from "../setup/facts.mjs";
 import { postureSummary, sandboxPosture, withSandbox } from "../setup/sandbox.mjs";
 import { settingsSources } from "../setup/settings.mjs";
 import { evidenceHome } from "../setup/layout.mjs";
+import { anchorAdvanced, anchorReport, storeKey, withStoreLock, writerId } from "../setup/anchors.mjs";
 import { verifiedKitFile } from "../setup/kitfiles.mjs";
 import { kitGate, parseLevel } from "../setup/integrity.mjs";
 import { verifyKit } from "../setup/verifykit.mjs";
@@ -314,6 +315,19 @@ export async function main(argv = process.argv.slice(2)) {
   const { pos, flags } = parseArgs(rest);
   const explicitStore = flags.store || process.env.TRACE_STORE;
   const storePath = explicitStore || DEFAULT_STORE;
+  // The store's machine-local anchors (policy v4): its key, and the composition every writer uses —
+  // under the store lock, with this machine's writer id, then the writer's own checkpoint.
+  const claudeHome = claudeHomeOf();
+  const anchorKeyOf = () => storeKey({ claudeHome, storePath, workspace: LAYOUT.ok ? LAYOUT.workspace : null, workspaceId: LAYOUT.workspaceId });
+  const chainedWrite = (fn) => {
+    const key = anchorKeyOf();
+    return withStoreLock(claudeHome, key, () => {
+      const w = writerId(claudeHome, key, { create: true });
+      const res = fn({ chain: w, workspace: key.startsWith("store-") ? null : key });
+      anchorAdvanced({ claudeHome, key, entries: loadEntries(storePath), only: w });
+      return res;
+    });
+  };
   const now = new Date().toISOString();
 
   if (!cmd || cmd === "help" || cmd === "--help") return out(HELP);
@@ -452,22 +466,24 @@ export async function main(argv = process.argv.slice(2)) {
     // Leak guard: the store is in the tree bench agents grep, so a draft naming a bench
     // fixture or its defect is refused (fail closed) — redact it and write again.
     const forbidden = benchForbidden();
-    const results = writeRecords(drafts, { storePath, now, policyVersion, commit, branch, schema, forbidden });
-    out(results, true);
-    if (!results.every((r) => r.stored)) return 1;
-    if (flags["then-act"]) {
-      if (!flags.consumer) {
-        out("--then-act needs --consumer <name>");
-        return 2;
-      }
-      const acts = appendActions(
-        results.map((r) => ({ record_id: r.record_id, consumer: flags.consumer, action: String(flags["then-act"]).toUpperCase(), note: flags.note })),
-        { storePath, now: new Date().toISOString(), policyVersion, schema, forbidden },
-      );
-      out(acts, true);
-      return acts.every((a) => a.stored) ? 0 : 1;
+    if (flags["then-act"] && !flags.consumer) {
+      out("--then-act needs --consumer <name>");
+      return 2;
     }
-    return 0;
+    return chainedWrite((writer) => {
+      const results = writeRecords(drafts, { storePath, now, policyVersion, commit, branch, schema, forbidden, ...writer });
+      out(results, true);
+      if (!results.every((r) => r.stored)) return 1;
+      if (flags["then-act"]) {
+        const acts = appendActions(
+          results.map((r) => ({ record_id: r.record_id, consumer: flags.consumer, action: String(flags["then-act"]).toUpperCase(), note: flags.note })),
+          { storePath, now: new Date().toISOString(), policyVersion, schema, forbidden, chain: writer.chain },
+        );
+        out(acts, true);
+        return acts.every((a) => a.stored) ? 0 : 1;
+      }
+      return 0;
+    });
   }
 
   if (cmd === "act") {
@@ -493,19 +509,25 @@ export async function main(argv = process.argv.slice(2)) {
       }
       drafts = [{ record_id, consumer, action: String(action).toUpperCase(), ref: flags.ref, note: flags.note }];
     }
-    const results = appendActions(drafts, { storePath, now, policyVersion, schema, forbidden: benchForbidden() });
-    out(results, true);
-    return results.every((r) => r.stored) ? 0 : 1;
+    return chainedWrite((writer) => {
+      const results = appendActions(drafts, { storePath, now, policyVersion, schema, forbidden: benchForbidden(), chain: writer.chain });
+      out(results, true);
+      return results.every((r) => r.stored) ? 0 : 1;
+    });
   }
 
   const state = replay(loadEntries(storePath), schema, policyVersion);
 
   if (cmd === "lint") {
     const m = storeMetrics(state);
-    for (const w of state.warnings) process.stderr.write(`warn: ${w}\n`);
-    for (const e of state.errors) process.stderr.write(`error: ${e}\n`);
-    out({ ok: state.errors.length === 0, errors: state.errors.length, warnings: state.warnings.length, records: m.records, store: storePath });
-    return state.errors.length ? 1 : 0;
+    // Policy v4: every checkpoint this machine anchored must still be a prefix of its stream.
+    const anchors = anchorReport({ claudeHome, key: anchorKeyOf(), entries: loadEntries(storePath) });
+    const errors = [...state.errors, ...anchors.errors];
+    const warnings = [...state.warnings, ...anchors.warnings];
+    for (const w of warnings) process.stderr.write(`warn: ${w}\n`);
+    for (const e of errors) process.stderr.write(`error: ${e}\n`);
+    out({ ok: errors.length === 0, errors: errors.length, warnings: warnings.length, records: m.records, store: storePath });
+    return errors.length ? 1 : 0;
   }
 
   if (cmd === "plan-ready") {
@@ -816,10 +838,7 @@ export async function main(argv = process.argv.slice(2)) {
           : []),
         ...(c.split || []).map((s) => ({ record_id: c.record_id, consumer: "dream", action: "REAUDIT", ref: splitAckRef(s.at, s.path), note: `${s.note}: ${s.path}` })),
       ]);
-      const res = appendActions(
-        acts,
-        { storePath, now, policyVersion, schema, forbidden: benchForbidden() },
-      );
+      const res = chainedWrite((writer) => appendActions(acts, { storePath, now, policyVersion, schema, forbidden: benchForbidden(), chain: writer.chain }));
       out(res, true);
       if (!res.every((r) => r.stored)) return 1;
     }
@@ -834,7 +853,7 @@ export async function main(argv = process.argv.slice(2)) {
   }
 
   if (cmd === "rotate") {
-    const res = rotateStore(storePath, { max: Number(flags.max || 500), keep: Number(flags.keep || 200) });
+    const res = withStoreLock(claudeHome, anchorKeyOf(), () => rotateStore(storePath, { max: Number(flags.max || 500), keep: Number(flags.keep || 200) }));
     out(res, true);
     return 0;
   }
@@ -975,7 +994,7 @@ export async function main(argv = process.argv.slice(2)) {
       const commit = git(["rev-parse", "--short=12", "HEAD"]) || undefined;
       const branch = git(["rev-parse", "--abbrev-ref", "HEAD"]) || undefined;
       const hashes = currentBlockHashes();
-      const res = writeRecords([benchRecordDraft(score, { resultsRef, priorRecordId: prior && prior.record_id, runIds, verifierHash: hashes.verifier, denylistHash: hashes.denylist })], { storePath, now, policyVersion, commit, branch, schema, forbidden: benchForbidden() });
+      const res = chainedWrite((writer) => writeRecords([benchRecordDraft(score, { resultsRef, priorRecordId: prior && prior.record_id, runIds, verifierHash: hashes.verifier, denylistHash: hashes.denylist })], { storePath, now, policyVersion, commit, branch, schema, forbidden: benchForbidden(), ...writer }));
       out(res, true);
       return res.every((r) => r.stored) ? 0 : 1;
     }
