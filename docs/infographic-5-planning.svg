@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1368 768" width="1368" height="768" font-family="DejaVu Sans, Arial, Helvetica, sans-serif">
   <title>Planning and task status in the loop</title>
-  <desc>Three panels: plan the work (sources, /plan-nodes, the node row), the status lifecycle (blocked, ready, in-progress, done, deferred, escalated, split on failure, attempt budget), and safe dispatch (pre-dispatch gates, conflict-free batch, two-developer rules, commands).</desc>
+  <desc>Three panels: plan the work (sources, /plan-nodes, the node row), the status lifecycle (blocked, ready once every dependency is done and its change has landed in HEAD, in-progress, done, deferred, escalated, split on failure, attempt budget; a done dependency not yet in HEAD is a [done-unlanded] warning until it lands or a human records LAND), and safe dispatch (pre-dispatch gates, conflict-free batch, two-developer rules, commands).</desc>
   <defs>
     <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
       <path d="M24 0H0V24" fill="none" stroke="#e3eaf3" stroke-width="1"/>
@@ -32,7 +32,7 @@
   <rect width="1368" height="768" fill="url(#grid)"/>
 
   <text x="28" y="56" class="t" font-size="38">PLANNING &amp; TASK STATUS IN THE LOOP</text>
-  <text x="30" y="80" class="s" font-size="13">loop-plan.md (workspace, claude/loop-state) · every L2/L3 action traces to a ready node · no status change without a TRACE record</text>
+  <text x="30" y="80" class="s" font-size="13">loop-plan.md (workspace, claude/loop-state) · every L2/L3 action traces to a ready node · no status change without a TRACE record · a done dependency counts once its change is in HEAD</text>
 
   <line x1="452" y1="100" x2="452" y2="748" stroke="#1b2f52" stroke-width="1.5" stroke-dasharray="6 6"/>
   <line x1="918" y1="100" x2="918" y2="748" stroke="#1b2f52" stroke-width="1.5" stroke-dasharray="6 6"/>
@@ -90,7 +90,7 @@
 
   <rect x="478" y="152" width="140" height="44" rx="22" class="box"/><text x="548" y="179" text-anchor="middle" class="b" font-weight="700">blocked</text>
   <rect x="736" y="152" width="140" height="44" rx="22" class="teal"/><text x="806" y="179" text-anchor="middle" fill="#11807a" font-weight="800" font-size="14">ready</text>
-  <path class="ln" d="M620 174H732" marker-end="url(#a)"/><text x="676" y="166" text-anchor="middle" class="s">deps landed</text>
+  <path class="ln" d="M620 174H732" marker-end="url(#a)"/><text x="676" y="152" text-anchor="middle" class="s">deps done +</text><text x="676" y="166" text-anchor="middle" class="s">landed in HEAD</text>
 
   <rect x="676" y="262" width="200" height="52" rx="14" class="purp"/>
   <text x="776" y="285" text-anchor="middle" fill="#5b3fb5" font-weight="800" font-size="14">in-progress</text>

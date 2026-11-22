@@ -286,8 +286,8 @@ deterministically by the `loop-iteration.js` denylist regex; the sanctioned path
 change the prompt surface is the manual, confirmation-gated `/improve-skills`). A diff
 that writes a symlink, a gitlink (submodule) or a file-mode change escalates on any path,
 `src/` and `e2e/` included: a symlink can aim a later read or write at a protected file. The
-loop's state files (`loop-plan.md`, `loop-run-log.md`, the record store via `pnpm
-trace`) are the exception: the Lead writes them as part of every iteration.
+loop's state files (`loop-plan.md`, `loop-run-log.md`, the record store via
+`loop-setup`) are the exception: the Lead writes them as part of every iteration.
 
 ## Escalate to a human (pause and ask) when
 - A fix would touch a denylist path.

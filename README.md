@@ -36,6 +36,18 @@ Every infographic is drawn as an SVG next to its PNG (`docs/infographic-*.svg`);
 
 ![Planning and task status: /plan-nodes and the node row, the status lifecycle with split on failure and the attempt budget, and safe dispatch with plan-lint --pre-dispatch, plan-ready --batch, the two-developer rules and the commands](docs/infographic-5-planning.png)
 
+**6. TRACE records** — how a claim becomes a durable change: typed claim, verdict from a separate checker, the evidence gate, the append-only record, and the consumer action. The policy: [`kit/rules/trace-policy.md`](kit/rules/trace-policy.md).
+
+![TRACE records from claim to durable change: six claim types, five verdicts with their required fields, the evidence gate per claim type, the record's fields and its hash chain, the consumer actions with what each changes (LAND is human-only), and the fail-closed rules](docs/infographic-6-trace-records.png)
+
+**7. One session, many machines** — what SessionStart, every write, `loop-setup sync` and the Stop hook do with the loop state, and how the workspace travels between machines while its git dir and anchors stay on each.
+
+![One session, many machines: SessionStart restores and verifies, every write takes the store lock and chains its record, sync locks only its local steps, the Stop hook asks for a sync; the workspace travels on claude/loop-state while state/ and anchors/ stay on each machine; the rules for sharing one workspace](docs/infographic-7-session-and-state.png)
+
+**8. Trust boundaries** — what enforces each boundary (every loop diff, the kit itself, L3, the state and the records) and the steps only you take.
+
+![Trust boundaries: the gates on every loop diff, verify-kit and the installer's deny rules, the L3 sandbox conditions, the state guard and the record writer, and the human-only steps with the CLAUDECODE caveat](docs/infographic-8-trust-boundaries.png)
+
 ## What's in this setup
 
 The loop-setup kit is **installed into `~/.claude`**, not copied into a project. A project
@@ -275,6 +287,13 @@ status, a fact headed for the wiki — gets a typed verdict and an append-only r
 - **No durable state change without a record:** a loop node becomes `done`, a fact enters
   the wiki, a story changes status — only with a licensing record and a consumer action
   (`CLEAR`, `COMMIT`, …), enforced fail-closed by `loop-setup` and checked in CI.
+- **Tamper-evident store (policy v4):** each machine's writer hash-chains its records
+  (`trace-lite/1.1`) and anchors checkpoints in `~/.claude/loop-setup/anchors/`, outside the
+  workspace; `loop-setup lint`, `doctor` and the SessionStart hook report a deleted or rewritten
+  line. The evidence is local: it holds on a machine that kept its anchors.
+- **Done means landed (policy v5):** a `done` plan node unblocks the nodes after it only once
+  its change is in HEAD (an ancestor commit, the same `patch-id`, or a `Plan:` trailer);
+  until then `plan-lint` warns `[done-unlanded]`, and a human can record `LAND`.
 - **Consensus is not evidence:** critics share a model, so agreement doesn't upgrade a
   finding — only *different* evidence corroborates.
 - **Measured, not assumed:** `/bench-checkers` runs the production checkers on seeded

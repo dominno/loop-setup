@@ -248,7 +248,7 @@ describe("planning guide (kit/docs/planning-guide.md)", () => {
 
 describe("README infographics stay true to the repo", () => {
   const svg = (n) => read(`docs/${n}.svg`);
-  const NAMES = ["infographic-1-task-cycle", "infographic-2-multi-agent-workflows", "infographic-3-components", "infographic-4-loop-and-adoption", "infographic-5-planning"];
+  const NAMES = ["infographic-1-task-cycle", "infographic-2-multi-agent-workflows", "infographic-3-components", "infographic-4-loop-and-adoption", "infographic-5-planning", "infographic-6-trace-records", "infographic-7-session-and-state", "infographic-8-trust-boundaries"];
 
   it("each README infographic has its SVG source next to the PNG", () => {
     for (const n of NAMES) {
@@ -279,6 +279,14 @@ describe("README infographics stay true to the repo", () => {
       expect(svg(n), n).toMatch(/claude\/loop-state/);
     }
     for (const cmd of ["loop-setup install", "loop-setup init", "loop-setup sync"]) expect(svg("infographic-4-loop-and-adoption"), cmd).toContain(cmd);
+  });
+
+  it("the TRACE infographic draws every claim type, verdict and consumer action the record contract knows", async () => {
+    const { ACTION_ALLOWED, EVIDENCE_POLICY, VERDICTS } = await import("../kit/trace/lib.mjs");
+    const text = svg("infographic-6-trace-records");
+    for (const t of Object.keys(EVIDENCE_POLICY)) expect(text, t).toContain(`>${t}<`);
+    for (const v of VERDICTS) expect(text, v).toContain(`>${v}<`);
+    for (const a of Object.keys(ACTION_ALLOWED)) expect(text, a).toMatch(new RegExp(`>(?:[A-Z_]+ · )?${a}(?: · [A-Z_]+)?<`));
   });
 
   it("the story-map files drawn on infographic 3 exist", () => {
