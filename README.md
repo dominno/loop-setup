@@ -275,6 +275,13 @@ status, a fact headed for the wiki — gets a typed verdict and an append-only r
 - **No durable state change without a record:** a loop node becomes `done`, a fact enters
   the wiki, a story changes status — only with a licensing record and a consumer action
   (`CLEAR`, `COMMIT`, …), enforced fail-closed by `loop-setup` and checked in CI.
+- **Tamper-evident store (policy v4):** each machine's writer hash-chains its records
+  (`trace-lite/1.1`) and anchors checkpoints in `~/.claude/loop-setup/anchors/`, outside the
+  workspace; `loop-setup lint`, `doctor` and the SessionStart hook report a deleted or rewritten
+  line. The evidence is local: it holds on a machine that kept its anchors.
+- **Done means landed (policy v5):** a `done` plan node unblocks the nodes after it only once
+  its change is in HEAD (an ancestor commit, the same `patch-id`, or a `Plan:` trailer);
+  until then `plan-lint` warns `[done-unlanded]`, and a human can record `LAND`.
 - **Consensus is not evidence:** critics share a model, so agreement doesn't upgrade a
   finding — only *different* evidence corroborates.
 - **Measured, not assumed:** `/bench-checkers` runs the production checkers on seeded
