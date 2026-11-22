@@ -254,3 +254,37 @@ Remaining risks: listed in `docs/plans/landed-nodes/steps.md`.
 
 **C5 status: done** (green checkpoint: tests and chain pass, the round accepts with no open blocker,
 records written, sync done, commits pushed).
+
+## C6 — the docs at the installed-kit model (infographics, Path A from the template)
+
+Steps: `docs/plans/docs-refresh/steps.md`. Docs only: no kit behaviour change.
+
+Pre-flight: `loop-setup doctor` exit 0 (no fail).
+
+Commits: da592aa.
+
+Success criteria and evidence:
+1. **Infographics.** The five `docs/infographic-*.svg` show install/init/sync/restore, the kit in
+   `~/.claude` and the workspace on `claude/loop-state`, `loop-setup` commands; no `pnpm trace`, no
+   "copy". Counts match `kit/commands` (14) and `kit/workflows` (7). PNGs regenerated from the SVGs
+   with Playwright at `deviceScaleFactor: 2` (2736×1536), checked by eye.
+2. **The doc test** (`scripts/template-docs.test.mjs`) is green and fails if an SVG says `pnpm trace`,
+   "copy" or `.claude/memory` (RED on the old SVGs).
+3. **Path A** (`kit/docs/adoption-guide.md`) covers a repo created from the template both ways with
+   exact commands (remove `kit/` plus its test include, dev script, doc test and kit-only CI job, then
+   install from upstream; or keep `kit/` and install from `.`); option 1 was run in a scratch clone
+   (install, typecheck, lint, test, build all exit 0). The README quickstart links Path A.
+4. **Every `loop-setup` subcommand** in the CLI help (35) appears in the adoption or planning guide
+   (a doc test; 13 were missing, now in a *Command reference*).
+
+Commands (HEAD da592aa):
+
+| command | exit | summary |
+|---|---|---|
+| `pnpm exec vitest run scripts/template-docs.test.mjs` | 0 | 33 tests |
+| `pnpm typecheck` | 0 | `tsc --noEmit` |
+| `pnpm lint` | 0 | `eslint .`, 0 warnings |
+| `pnpm test` | 0 | 26 files, 1015 tests |
+| `pnpm build` | 0 | Compiled successfully |
+| `pnpm test:e2e` | 0 | 16 passed |
+| `loop-setup verify-kit` | 2 | waived (see Pre-flight) |
