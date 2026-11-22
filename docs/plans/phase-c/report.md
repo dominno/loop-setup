@@ -147,3 +147,29 @@ Commands (HEAD 6269bf0):
 Pre-implementation round (tree e99b66087f42e547): the first run could not be recorded (the writer
 refused one draft for a bench ground-truth token, so nothing from it was acted on); the second run's
 nine records were all taken into the design (`steps.md`, *Revisions*).
+
+Pre-implementation (second run, tree e99b66087f42e547): `completion` defer (one blocker revised) →
+every finding taken into the design before code (`steps.md`, *Revisions*).
+
+| Critic | Severity | Verdict | Finding | Recommended action → done |
+|---|---|---|---|---|
+| frontend-arch | important | qualify (TR-9b325336d7bf) | the writer was wired at 3 of 5 CLI write sites; rotation not covered | one `chainedWrite` for all five, rotate under the lock → CLEARed |
+| qa-e2e | important | qualify (TR-5a812bfd5cbe) | the planned tests missed the deciding cases | merged order with a 1.0 writer, rebase, lock, no-op, REUSE … → CLEARed |
+| security | important | qualify (TR-ea1382b09a25) | the rolling legacy checkpoint is not merge-stable | legacy checkpoint as an id set → CLEARed |
+| security | important | accept (TR-fbcce4b1397a) | absent anchors silently disable the checks | missing-with-writer is an error, none is a warning, guarantee stated → re-checked below |
+| security | important | revise (TR-2684185404a4) | anchors only at SessionStart leave a window | writer + Stop hook anchor too → HELD (revise) |
+| security | important | qualify (TR-177f4ecd5b23) | lock scope and writer-id race unspecified | one lock over load→append→anchor, O_EXCL writer → CLEARed |
+| regression | blocker → design gap | revise (TR-6d5893f4387f) | batch chaining breaks on a no-op action | chain after dedupe, to appended lines → HELD (revise) |
+| regression | important | qualify (TR-4c861a3d01be) | chain in the id breaks same-batch REUSE dedupe | chain-free dedupe → CLEARed |
+| regression | important | revise (TR-05e230f34069) | an older kit's late 1.0 line is unrepairable red | a warning, not an error → HELD (revise) |
+
+Post-implementation (tree 8434d9952a1217b0, HEAD 6269bf0): `completion` accept, no reviewer
+failed, `notRechecked` empty.
+
+| Critic | Severity | Verdict | Finding | Evidence | Recommended action |
+|---|---|---|---|---|---|
+| security | important | qualify (TR-eac079ab5043) | a CLI write re-created a deleted anchors file without verifying (unsandboxed writers) | reproduced on the real stack | anchor only into an existing file → fixed in c03a9da (S06.1), RED then GREEN |
+| regression | important | accept (TR-cc11d9353dc3) | stale-lock takeover could rename away a live lock | code + reproduction | nonce, checked takeover, release only own → fixed in c03a9da (S06.2), RED then GREEN |
+
+Nice-to-haves: stale-takeover tests (taken); sync holds the lock across fetch and push (left, a
+risk).
