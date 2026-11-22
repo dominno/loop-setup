@@ -45,6 +45,12 @@ Pre-implementation critic round (tree 3059bfdbf0fcbf12; single-pass reviewer + s
 - reject — "an unattributed mode hit is dropped": refuted (an unattributed hit is listed under its
   raw header and still escalates).
 
+Post-implementation round (tree 42b7a605cb7990ee, commits 467c178 + d044c0e): accept — nothing
+confirmed, deferred or revised; the reviewer verified the S03.1 fix. Two nice-to-haves, not acted on
+(scope): the tree check reads HEAD, not the index (below, Remaining risks), and other root files that
+run code at build or install time (`next.config.*`, `pnpm-workspace.yaml`) stay open — a follow-up
+for the same block, with one re-bench for all denylist changes.
+
 This changes the `<loop-denylist>` block, so its sha256 changes: an L3 bench record no longer
 matches (`l3-check` unmet, "the denylist changed after the bench") — L3 needs a re-bench
 (`/bench-checkers`). The `<loop-verifier>` block stays byte-identical.
@@ -54,8 +60,8 @@ matches (`l3-check` unmet, "the denylist changed after the bench") — L3 needs 
 | S01 | Tests first: HIT/CLEAR lists gain the four root config files (and nested near-misses under src/ and e2e/ in CLEAR); mode-gate tests for the workflow, the bench mirror and the CLI, with a parity test over one corpus | kit/test/denylist-modes.mjs, kit/trace/workflows.test.mjs, kit/trace/cli.test.mjs, kit/trace/contracts.test.mjs | `pnpm exec vitest run kit/trace/workflows.test.mjs kit/trace/cli.test.mjs kit/trace/contracts.test.mjs` | — | done | 467c178 |
 | S02 | `<loop-denylist>` block: the four rules, `DIFF_GIT`, `diffModeHits`; byte-identical in both workflows | kit/workflows/loop-iteration.js, kit/workflows/trace-bench.js | same | S01 | done | 467c178 |
 | S03 | Gates: loop-iteration escalation (`denylist:mode:`), trace-bench `denylistHit`, `denylist-check` hits/modeHits; implementer prompt and loop docs name the new entries | kit/workflows/loop-iteration.js, kit/workflows/trace-bench.js, kit/trace/cli.mjs, kit/loop.md, kit/docs/workflow-graphs.md, kit/rules/trace-policy.md | same | S02 | done | 467c178 |
-| S03.1 | Pre-round finding: `treeModeHits` in the block; `denylist-check` reads HEAD's modes of the touched paths (rename/copy/retarget of an existing symlink or gitlink) | kit/workflows/loop-iteration.js, kit/workflows/trace-bench.js, kit/trace/lib.mjs, kit/trace/cli.mjs, kit/trace/cli.test.mjs, kit/trace/lib.test.mjs, kit/trace/workflows.test.mjs, kit/loop.md, kit/rules/trace-policy.md | `pnpm exec vitest run kit/trace/cli.test.mjs -t "existing symlink"` | S03 | done | — |
-| S04 | Self-verify chain and the post-implementation critic round | — | `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | S03 | pending | — |
+| S03.1 | Pre-round finding: `treeModeHits` in the block; `denylist-check` reads HEAD's modes of the touched paths (rename/copy/retarget of an existing symlink or gitlink) | kit/workflows/loop-iteration.js, kit/workflows/trace-bench.js, kit/trace/lib.mjs, kit/trace/cli.mjs, kit/trace/cli.test.mjs, kit/trace/lib.test.mjs, kit/trace/workflows.test.mjs, kit/loop.md, kit/rules/trace-policy.md | `pnpm exec vitest run kit/trace/cli.test.mjs -t "existing symlink"` | S03 | done | d044c0e |
+| S04 | Self-verify chain and the post-implementation critic round | — | `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | S03 | done | — |
 
 Tests first: every new test failed against the old behaviour before its code landed — the HIT
 entries and the gate run (the four paths cleared), the corpus tests (no `diffModeHits`; the CLI
@@ -76,7 +82,8 @@ committed: before that, the CLI fails closed (exit 2), as designed.
   the root; the pre-round's qualify asks whether to widen them — a human decision).
 - The workflow gate sees only the patch text; a rename, copy or retarget of an existing symlink or
   gitlink is caught by `denylist-check` (HEAD's modes), which the loop runs before every apply.
-- `denylist-check` reads HEAD's modes, not the working tree's: an untracked symlink in the working
-  tree is not known to it (`git apply` writes through no symlink, but would retarget one).
+- `denylist-check` reads HEAD's modes, not the index's or the working tree's: a symlink applied
+  earlier but not yet committed, or an untracked one, is not known to it, so a later rename, copy or
+  retarget of it passes (`git apply` writes through no symlink, but would move or retarget one).
 - Touching an existing symlink or gitlink escalates even when the patch deletes it (numstat does not
   say which); a new executable file (`new file mode 100755`) is a create, not a mode change, and passes.
