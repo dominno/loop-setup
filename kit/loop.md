@@ -208,7 +208,9 @@ instructions — the self-modification guard below still applies to everything e
         **before applying it**, run `loop-setup denylist-check --patch <file> --level <L2|L3>` (the
         production denylist, read from HEAD, over every path git's own parser finds in the
         patch — catches anything the patch-text parser missed — plus its symlink, gitlink and
-        mode-change rule over the patch text (listed in `hits` and `modeHits`), from a kit that passes
+        mode-change rule over the patch text and over HEAD's modes of the paths it touches (a
+        rename, copy or retarget of an existing symlink shows no mode line; listed in `hits` and
+        `modeHits`), from a kit that passes
         `verify-kit`); exit 1 (a hit) or 2 (could not verify, the kit included) → do not
         apply, `HOLD`, escalate. Exit 0 → `git apply --check <file>`;
         if it fails (the patch does not apply to the current tree), do not apply: `HOLD`

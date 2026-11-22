@@ -3,7 +3,7 @@
 import { describe, it, expect, beforeEach, afterEach, afterAll } from "vitest";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DEFAULT_STORE, encodeBench, latestByClaim, loadEntries, loadSchema, opaqueFixtureId, readBench, readPolicyVersion, replay, ROOT, WORKSPACE } from "./lib.mjs";
@@ -1111,6 +1111,52 @@ describe("CLI wiring, end to end in a throwaway repo", () => {
         return [c.name, out.status, body.hits, body.modeHits];
       });
       expect(got).toEqual(MODE_PATCHES.map((c) => [c.name, c.hits.length ? 1 : 0, c.hits, c.hits]));
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  // A rename, a copy or a retarget of an EXISTING symlink or gitlink carries no mode line (git takes the
+  // mode from the preimage), so the patch text cannot show it: denylist-check reads HEAD's mode of every
+  // path git finds in the patch (both sides). The workflow gate has no tree; this check is the CLI's.
+  it("denylist-check escalates a patch that touches an existing symlink or gitlink in HEAD: a rename, a copy or a retarget with no mode line", () => {
+    const r = tempRepo();
+    try {
+      mkdirSync(join(r.d, "src"), { recursive: true });
+      symlinkSync("../kit/loop.md", join(r.d, "src/link"));
+      writeFileSync(join(r.d, "src/a.ts"), "a\n");
+      r.git("add", "-A");
+      r.git("update-index", "--add", "--cacheinfo", `160000,${r.git("rev-parse", "HEAD").stdout.trim()},src/vendor`);
+      r.git("commit", "-qm", "a symlink, a gitlink and a regular file");
+      const staged = (prep, ...diffArgs) => {
+        prep();
+        const out = r.git("diff", "--cached", "--src-prefix=a/", "--dst-prefix=b/", ...diffArgs).stdout;
+        r.git("reset", "-q", "--hard", "HEAD");
+        return out;
+      };
+      const rename = staged(() => r.git("mv", "src/link", "src/moved"), "-M");
+      const copy = staged(() => {
+        symlinkSync("../kit/loop.md", join(r.d, "src/copy"));
+        r.git("add", "src/copy");
+      }, "-C", "--find-copies-harder");
+      const retarget = "diff --git a/src/link b/src/link\n--- a/src/link\n+++ b/src/link\n@@ -1 +1 @@\n-../kit/loop.md\n\\ No newline at end of file\n+../../outside\n\\ No newline at end of file\n";
+      const gitlink = "diff --git a/src/vendor b/src/vendor2\nsimilarity index 100%\nrename from src/vendor\nrename to src/vendor2\n";
+      const plain = staged(() => r.git("mv", "src/a.ts", "src/b.ts"), "-M");
+      for (const [name, patch] of [["rename", rename], ["copy", copy]]) expect(patch, name).not.toMatch(/^(new file|old|new) mode|^index /m); // no mode line: only the tree can tell
+      const p = join(r.d, "x.patch");
+      const check = (name, patch) => {
+        writeFileSync(p, patch);
+        const out = r.cli(["denylist-check", "--patch", p]);
+        const body = JSON.parse(out.stdout);
+        return [name, out.status, body.hits, body.modeHits];
+      };
+      expect([check("rename", rename), check("copy", copy), check("retarget", retarget), check("gitlink", gitlink), check("plain", plain)]).toEqual([
+        ["rename", 1, ["src/link"], ["src/link"]],
+        ["copy", 1, ["src/link"], ["src/link"]],
+        ["retarget", 1, ["src/link"], ["src/link"]],
+        ["gitlink", 1, ["src/vendor"], ["src/vendor"]],
+        ["plain", 0, [], []],
+      ]);
     } finally {
       r.cleanup();
     }

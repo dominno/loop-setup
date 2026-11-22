@@ -29,6 +29,7 @@ import {
   markUnscanned,
   unmatchedLeaks,
   insideRepo,
+  lsTreeModes,
   numstatPaths,
   CODE_PATHS,
   readBench,
@@ -373,10 +374,14 @@ export async function main(argv = process.argv.slice(2)) {
       const source = kitInProject() ? sh(["show", `HEAD:${kitRel}/workflows/loop-iteration.js`]) : verifiedKitFile(KIT_ROOT, "workflows/loop-iteration.js");
       // A trusted copy without the mode rule (older than it) cannot vouch for the patch: it throws here.
       let diffModeHits;
-      ({ hitsDenylist, diffModeHits } = loadWorkflowBlock("loop-iteration.js", "loop-denylist", ["hitsDenylist", "diffModeHits"], { source }));
+      let treeModeHits;
+      ({ hitsDenylist, diffModeHits, treeModeHits } = loadWorkflowBlock("loop-iteration.js", "loop-denylist", ["hitsDenylist", "diffModeHits", "treeModeHits"], { source }));
       // What the patch writes — a symlink, a gitlink, a mode change — escalates on any path: the same
-      // trusted rule the workflow gate runs, over the patch text (it reads every mode line git reads).
-      modeHits = diffModeHits(readFileSync(patch, "utf8"));
+      // trusted rule the workflow gate runs, over the patch text (it reads every mode line git reads),
+      // and over HEAD's modes of the paths it touches: a rename, a copy or a retarget of an existing
+      // symlink or gitlink shows no mode line (deleting one escalates too: numstat cannot tell).
+      const tree = paths.length ? lsTreeModes(sh(["--literal-pathspecs", "ls-tree", "-z", "HEAD", "--", ...paths])) : [];
+      modeHits = [...new Set([...diffModeHits(readFileSync(patch, "utf8")), ...treeModeHits(tree)])];
     } catch (e) {
       out({ ok: false, error: `could not verify the patch: ${String(e.stderr || e.message || e).trim().split("\n")[0]}` }, true);
       return 2;

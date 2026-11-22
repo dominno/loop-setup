@@ -1483,6 +1483,15 @@ export function loadWorkflowBlock(file, tag, names, { source } = {}) {
   return new Function(`${block}\nreturn { ${names.join(", ")} };`)();
 }
 
+/** Entries ({ mode, path }) from `git ls-tree -z <tree> -- <paths>`: rows are `mode type oid\tpath\0`. */
+export function lsTreeModes(z) {
+  return String(z || "")
+    .split("\0")
+    .map((row) => /^(\d+) \S+ \S+\t([\s\S]+)$/.exec(row))
+    .filter(Boolean)
+    .map((m) => ({ mode: m[1], path: m[2] }));
+}
+
 /**
  * Paths from `git apply --numstat -z <patch>` — git's OWN parse of a patch, so every
  * format git apply accepts (mixed prefixes, traditional diffs, timestamps, binary) is

@@ -1907,6 +1907,13 @@ describe("loop denylist: symlinks, gitlinks and mode changes escalate wherever t
     expect(MODE_PATCHES.map((c) => [c.name, diffModeHits(c.patch)])).toEqual(MODE_PATCHES.map((c) => [c.name, c.hits]));
   });
 
+  it.each(["loop-iteration.js", "trace-bench.js"])("%s: treeModeHits names the existing paths whose mode is not exactly 100644 or 100755 (denylist-check's tree check)", (file) => {
+    const { treeModeHits } = loadWorkflowBlock(file, "loop-denylist", ["treeModeHits"]);
+    const tree = [["120000", "src/link"], ["100644", "src/a.ts"], ["160000", "src/vendor"], ["100755", "src/run.sh"], ["040000", "src/dir"], ["120000", "src/link"]];
+    expect(treeModeHits(tree.map(([mode, path]) => ({ mode, path })))).toEqual(["src/link", "src/vendor", "src/dir"]);
+    expect(treeModeHits([])).toEqual([]);
+  });
+
   const run = (patch) =>
     runWorkflow("loop-iteration.js", { items: [{ id: "LP-090", description: "x" }], level: "L2", headSha: HEAD_SHA }, (label) =>
       label.startsWith("impl:") ? { baseSha: HEAD_SHA, changedFiles: [], diff: patch, checksPassed: true, notes: "" } : verdict({ evidenceChecked: [{ kind: "diff", ref: "src/a.ts" }] }),

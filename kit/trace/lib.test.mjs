@@ -22,6 +22,7 @@ import {
   loadWorkflowBlock,
   markUnscanned,
   opaqueFixtureId,
+  lsTreeModes,
   numstatPaths,
   runKeyFromLabel,
   unmatchedLeaks,
@@ -712,6 +713,15 @@ describe("round-3 fixes", () => {
     expect(brief[0]).toMatchObject({ claim_id: `c${BRIEF_WINDOW + 2}`, qualifier: `holds only for case ${BRIEF_WINDOW + 2}`, failed_gates: ["g"], provenance: { tree: "0123456789abcdef" } });
     expect(brief[0].reason.length).toBe(200);
     expect(brief.some((r) => r.claim_id === "c0")).toBe(false); // the oldest fall out of the window
+  });
+
+  it("lsTreeModes reads git ls-tree -z rows as { mode, path }, a path with a space or a tab included", () => {
+    expect(lsTreeModes("120000 blob 3594e94\tsrc/link\x00160000 commit 1234567\tsrc/ven dor\x00100644 blob 7898192\tsrc/a\tb.ts\x00")).toEqual([
+      { mode: "120000", path: "src/link" },
+      { mode: "160000", path: "src/ven dor" },
+      { mode: "100644", path: "src/a\tb.ts" },
+    ]);
+    expect(lsTreeModes("")).toEqual([]);
   });
 
   it("numstatPaths reads git's -z listing (plain and rename forms)", () => {

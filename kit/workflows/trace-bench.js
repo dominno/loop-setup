@@ -210,6 +210,12 @@ function diffModeHits(diff) {
   }
   return [...new Set(hits)]
 }
+// The text cannot show a rename, a copy or a retarget of a symlink or gitlink that already exists: such
+// a section carries no mode line (git takes the mode from the preimage). The tree can: treeModeHits
+// names the paths whose existing mode ({ mode, path }, as `git ls-tree` lists them) is not regular.
+// Only `loop-setup denylist-check` has a tree (HEAD's modes for every path git finds in the patch);
+// this workflow gate sees the text alone.
+const treeModeHits = (entries) => [...new Set((entries || []).filter((e) => !REGULAR_MODE.test(e.mode)).map((e) => e.path))]
 // </loop-denylist>
 // <loop-verifier>
 const EVIDENCE_KINDS = ['file_line', 'command', 'browser', 'measurement', 'rule', 'diff', 'reading', 'record', 'human']
