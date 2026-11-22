@@ -165,6 +165,15 @@ describe("legacy evidence refs: one pure resolution for every path an old record
     // A file under a directory the move emptied, with no rename of its own, and an absolute path outside every root.
     expect(resolveLegacyRef(".claude/workflows/gone.js")).toMatchObject({ kind: "unmapped", path: ".claude/workflows/gone.js" });
     expect(resolveLegacyRef("/etc/hosts")).toMatchObject({ kind: "unmapped", path: "/etc/hosts" });
+    // Outside the kit's own repo (an adopter) the kit move's facts do not apply: its CLAUDE.md, its own
+    // .claude/commands/ or scripts/hooks/ files and a /home/user/loop-setup path are not the kit's history.
+    expect(resolveLegacyRef("CLAUDE.md", { kitRepo: false }).kind).toBe("unchanged");
+    expect(resolveLegacyRef(".claude/commands/own.md", { kitRepo: false }).kind).toBe("unchanged");
+    expect(resolveLegacyRef("scripts/hooks/own.mjs", { kitRepo: false }).kind).toBe("unchanged");
+    expect(resolveLegacyRef("scripts/trace/lib.mjs", { kitRepo: false }).kind).toBe("unchanged");
+    expect(resolveLegacyRef("/home/user/loop-setup/src/a.ts", { kitRepo: false })).toMatchObject({ kind: "unmapped", path: "/home/user/loop-setup/src/a.ts" });
+    expect(resolveLegacyRef("/tmp/proj/src/a.ts", { roots: ["/tmp/proj"], kitRepo: false })).toMatchObject({ kind: "unchanged", path: "src/a.ts" });
+    expect(resolveLegacyRef(".claude/memory/topics/a.md", { kitRepo: false })).toMatchObject({ kind: "workspace", target: { root: "workspace", path: "topics/a.md" } });
     // Near misses of the map stay unchanged: a sibling directory, a project script that never moved.
     expect(resolveLegacyRef(".claude/workflowsX/a.js").kind).toBe("unchanged");
     expect(resolveLegacyRef("scripts/check-bundle-size.mjs").kind).toBe("unchanged");
@@ -178,6 +187,11 @@ describe("legacy evidence refs: one pure resolution for every path an old record
     expect(evidenceHome(".claude/memory/topics/trace.md", { predates: () => false })).toEqual({ path: ".claude/memory/topics/trace.md", target: { root: "workspace", path: "topics/trace.md" } });
     expect(evidenceHome("scripts/trace/lib.mjs")).toEqual({ path: "scripts/trace/lib.mjs", target: { root: "project", path: "kit/trace/lib.mjs" } });
     expect(evidenceHome(".claude/workflows/gone.js")).toEqual({ path: ".claude/workflows/gone.js", target: null });
+    // A file still where the record cited it is compared there, whatever the map says (a project that kept it).
+    expect(evidenceHome(".claude/memory/topics/a.md", { exists: () => true })).toEqual({ path: ".claude/memory/topics/a.md", target: { root: "project", path: ".claude/memory/topics/a.md" } });
+    expect(evidenceHome(".claude/commands/own.md", { exists: (p) => p === ".claude/commands/own.md" })).toEqual({ path: ".claude/commands/own.md", target: { root: "project", path: ".claude/commands/own.md" } });
+    expect(evidenceHome("scripts/trace/lib.mjs", { exists: () => false })).toEqual({ path: "scripts/trace/lib.mjs", target: { root: "project", path: "kit/trace/lib.mjs" } });
+    expect(evidenceHome("CLAUDE.md", { kitRepo: false, predates: () => null })).toEqual({ path: "CLAUDE.md", target: { root: "project", path: "CLAUDE.md" } });
     // The order cannot be known (the split commit is not in the repository): counts as older, re-verify.
     expect(evidenceHome("CLAUDE.md", { predates: () => null })).toEqual({ path: "CLAUDE.md", split: "4ccf257" });
     expect(evidenceHome(".claude/memory/topics/trace.md", { predates: () => null })).toEqual({ path: ".claude/memory/topics/trace.md", split: "ec6d24b" });

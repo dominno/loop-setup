@@ -252,14 +252,30 @@ function predatesSplit(commit, at) {
   return status === 0 ? true : status === 1 ? false : null;
 }
 
+// Is this the kit's own source repository (kit/kit.json names loop-setup)? Only there do the kit move's
+// facts (its renames, vacated dirs, splits, legacy root) describe the history old records cite.
+function isKitSourceRepo() {
+  try {
+    return JSON.parse(readFileSync(join(PROJECT_ROOT, "kit", "kit.json"), "utf8")).name === "loop-setup";
+  } catch {
+    return false;
+  }
+}
+
 function changedSince(commit, cited) {
   // Where to look is decided by the pure evidenceHome (kit/setup/layout.mjs): an absolute ref under
   // this or the legacy checkout is read repo-relative, a file the kit moved is compared by content with
   // its current home (scripts/trace/… → kit/trace/…, .claude/memory/… → the workspace), and a record
   // older than a split gets { split } (re-verify; reaudit lists it once). This adapter only asks git
-  // and the filesystem. An unmapped path or a failing git call counts as changed (fail closed:
+  // and the filesystem; a file still where the record cited it is diffed in place, and outside the kit's
+  // own repo only legacy .claude/memory state is mapped. An unmapped path or a failing git call counts as changed (fail closed:
   // re-audit rather than trust stale evidence).
-  const home = evidenceHome(cited, { roots: [PROJECT_ROOT], predates: (at) => predatesSplit(commit, at) });
+  const home = evidenceHome(cited, {
+    roots: [PROJECT_ROOT],
+    kitRepo: isKitSourceRepo(),
+    exists: (p) => existsSync(join(PROJECT_ROOT, p)),
+    predates: (at) => predatesSplit(commit, at),
+  });
   if (home.split) return { split: home.split };
   if (!home.target) return true;
   if (home.target.root === "project" && home.target.path === home.path) {

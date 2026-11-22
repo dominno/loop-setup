@@ -1470,8 +1470,10 @@ describe("reaudit where the split commit is not in the repository", () => {
   it("lists a CLAUDE.md citation as split at 4ccf257 (unknown order counts as older), and --act clears it", () => {
     const r = tempRepo();
     try {
+      // The kit's own source repo (kit/kit.json names loop-setup), shallow: the split commit is missing.
       writeFileSync(join(r.d, "CLAUDE.md"), "# rules\n");
-      r.git("add", "CLAUDE.md");
+      writeFileSync(join(r.d, "kit/kit.json"), JSON.stringify({ name: "loop-setup" }));
+      r.git("add", "CLAUDE.md", "kit/kit.json");
       r.git("commit", "-qm", "rules");
       expect(r.git("cat-file", "-e", "4ccf257^{commit}").status).not.toBe(0);
       const d = join(r.d, "d.json");
@@ -1482,6 +1484,35 @@ describe("reaudit where the split commit is not in the repository", () => {
       expect(JSON.parse(first.stdout)).toEqual([expect.objectContaining({ claim_id: "c:rules", split: [{ path: "CLAUDE.md", at: "4ccf257", note: "split at 4ccf257 — re-verify" }] })]);
       expect(r.cli(["reaudit", "--act"]).status).toBe(0);
       expect(JSON.parse(r.cli(["reaudit"]).stdout)).toEqual([]);
+    } finally {
+      r.cleanup();
+    }
+  });
+});
+
+// An adopter project (no kit/kit.json naming loop-setup) cites its own CLAUDE.md, .claude/commands/ and
+// scripts/hooks/ files: the kit move's facts are not its history, so each is diffed in place — no split,
+// no "unmapped → changed" — and a real edit is still listed as changed.
+describe("reaudit in an adopter project", () => {
+  it("diffs the project's own CLAUDE.md, .claude/commands/ and scripts/hooks/ files in place: unchanged ones are not listed, an edited one is changed", () => {
+    const r = tempRepo();
+    try {
+      for (const [f, text] of [["CLAUDE.md", "# rules\n"], [".claude/commands/own.md", "own\n"], ["scripts/hooks/own.mjs", "export {};\n"]]) {
+        mkdirSync(dirname(join(r.d, f)), { recursive: true });
+        writeFileSync(join(r.d, f), text);
+      }
+      r.git("add", "CLAUDE.md", ".claude/commands/own.md", "scripts/hooks/own.mjs");
+      r.git("commit", "-qm", "own files");
+      expect(existsSync(join(r.d, "kit/kit.json"))).toBe(false);
+      const d = join(r.d, "d.json");
+      const ev = ["CLAUDE.md:1", ".claude/commands/own.md:1", "scripts/hooks/own.mjs:1"].map((ref) => ({ kind: "file_line", ref, result: "x" }));
+      writeFileSync(d, draft({ claim_id: "c:own", evidence: ev }));
+      expect(r.cli(["write", d]).status).toBe(0);
+      const clean = r.cli(["reaudit"]);
+      expect(clean.status, clean.stderr).toBe(0);
+      expect(JSON.parse(clean.stdout)).toEqual([]);
+      writeFileSync(join(r.d, ".claude/commands/own.md"), "edited\n");
+      expect(JSON.parse(r.cli(["reaudit"]).stdout)).toEqual([expect.objectContaining({ claim_id: "c:own", changed: [".claude/commands/own.md"] })]);
     } finally {
       r.cleanup();
     }

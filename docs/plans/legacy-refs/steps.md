@@ -78,6 +78,7 @@ Tests first:
 | S03.1 | Pre-round finding TR-f950ffeb431f: tri-state `predates` (unknown counts as older) in the core; exit-status adapter; a unit case and a CLI test without the split commit | kit/setup/layout.mjs, kit/trace/cli.mjs, kit/setup/layout.test.mjs, kit/trace/cli.test.mjs | `pnpm exec vitest run kit/trace/cli.test.mjs -t "split commit is not"` | S03 | done | f6e0023 |
 | S04 | Self-verify chain and the post-implementation critic round | — | `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | S03.1 | done | f6e0023 |
 | S04.1 | Post-round nice-to-have: the reaudit consumers (`/dream` step 1c, `/sync-story-status` step 1) name the `split` result | kit/commands/dream.md, kit/commands/sync-story-status.md | `pnpm exec vitest run scripts/template-docs.test.mjs` | S04 | done | — |
+| S04.2 | Round over `main...HEAD`, finding TR-db5389d9e5e1: the kit move's facts apply only in the kit's source repo (`kitRepo`: kit/kit.json names loop-setup), and a cited file still in the project is compared in place. Unit cases and an adopter CLI test. | kit/setup/layout.mjs, kit/trace/cli.mjs, kit/setup/layout.test.mjs, kit/trace/cli.test.mjs | `pnpm exec vitest run kit/trace/cli.test.mjs -t adopter` | S04.1 | done | — |
 
 Pre-implementation critic round (tree e3187bb721700905; single-pass reviewer, code-only):
 - `completion` accept. One confirmed important finding, TR-f950ffeb431f (accept): the rule "an
@@ -122,6 +123,28 @@ the completeness critic, code-only):
     `split` result. Each now does, in one sentence (S04.1).
   - `legacyTarget` has no production caller left. It is kept as a tested public export, because
     removing it would drop its tests. Its contract is unchanged.
+
+Post-implementation round over the whole branch (`git diff main...HEAD`, tree 9b9a65e469a74c59, HEAD
+c2f1fe1; single-pass reviewer plus the completeness critic):
+- `completion` accept, with one confirmed important finding, TR-db5389d9e5e1 (accept). The old
+  `changedSince` consulted the legacy map only when the cited path was absent. The new code applied
+  the map, the vacated dirs and the splits in every project. An adopter's own CLAUDE.md therefore
+  became "split at 4ccf257", because that commit is missing there and an unknown order counts as
+  older. Its own `.claude/commands/*.md` or `scripts/hooks/*` became unmapped, so "changed" forever.
+  The skeptic reproduced this with a probe on a copy of HEAD.
+- Root cause: the kit move's facts describe the kit's own source repository, but nothing gated
+  them on it, and the existence guard was dropped.
+- Fixed (S04.2):
+  - `resolveLegacyRef`/`evidenceHome` take `kitRepo`. The adapter derives it from
+    `kit/kit.json` naming loop-setup. Outside the kit repo only legacy `.claude/memory` state maps.
+  - `evidenceHome` takes `exists`: a cited file still in the project is compared in place, as
+    before.
+  - RED: the new unit cases and the adopter CLI test fail on c2f1fe1 (3 failed). GREEN:
+    layout/lib/cli 235 passed, `pnpm test` 868 passed.
+  - The "split commit is not in the repository" test now builds a kit-source repo (kit/kit.json),
+    the scenario it means (a shallow clone of the kit). Its assertion is unchanged.
+- Nice-to-have: the hard-coded `/home/user/loop-setup` now applies only in the kit repo (`kitRepo`),
+  as the comment says.
 
 ## Remaining risks
 

@@ -104,7 +104,10 @@ export function resolveLayout(facts) {
  * at the record's commit with where that file lives now; the facts below say where. They are history,
  * checked against it (layout.test.mjs), and the functions after them are pure.
  */
-/** The project root that old records' absolute refs name: they were written in that checkout. */
+/**
+ * The project root that the kit repo's old records name in absolute refs (they were written in that
+ * checkout). Like every rule below it applies only in the kit's own source repository (\`kitRepo\`).
+ */
 export const LEGACY_PROJECT_ROOTS = ["/home/user/loop-setup"];
 
 /** The commit that moved the loop machinery into kit/. */
@@ -176,21 +179,24 @@ export const LEGACY_SPLITS = [
   { from: ".claude/memory/loop-plan.md", at: "9654bfb", into: [{ root: "workspace", path: "loop-plan.md" }, { root: "project", path: "kit/templates/workspace/loop-plan.md" }] },
 ];
 
-/** An absolute ref under the project root (`roots`) or a legacy root, made repo-relative; "./x" is "x"; any other path as it is. */
-export function normalizeRefPath(path, roots = []) {
+/**
+ * An absolute ref under the project root (`roots`), or in the kit repo (`kitRepo`) under a legacy
+ * root, made repo-relative; "./x" is "x"; any other path as it is.
+ */
+export function normalizeRefPath(path, roots = [], { kitRepo = true } = {}) {
   const p = String(path || "");
-  for (const root of [...roots, ...LEGACY_PROJECT_ROOTS].map((r) => String(r || "").replace(/\/+$/, "")).filter(Boolean)) {
+  for (const root of [...roots, ...(kitRepo ? LEGACY_PROJECT_ROOTS : [])].map((r) => String(r || "").replace(/\/+$/, "")).filter(Boolean)) {
     if (p.startsWith(`${root}/`)) return p.slice(root.length + 1);
   }
   return p.startsWith("./") ? p.slice(2) : p;
 }
 
-/** A normalized path's home, splits aside: { kind, target? }. */
-function homeOf(p) {
+/** A normalized path's home, splits aside: { kind, target? }. The kit move's map and vacated dirs apply in the kit repo only. */
+function homeOf(p, kitRepo) {
   if (p.startsWith(`${LEGACY_DIR}/`)) return { kind: "workspace", target: { root: "workspace", path: p.slice(LEGACY_DIR.length + 1) } };
-  const entry = LEGACY_REF_MAP.find(([from]) => from === p);
+  const entry = kitRepo && LEGACY_REF_MAP.find(([from]) => from === p);
   if (entry) return { kind: "moved", target: { root: "project", path: entry[1] } };
-  if (p.startsWith("/") || LEGACY_VACATED_DIRS.some((d) => p.startsWith(d))) return { kind: "unmapped" };
+  if (p.startsWith("/") || (kitRepo && LEGACY_VACATED_DIRS.some((d) => p.startsWith(d)))) return { kind: "unmapped" };
   return { kind: "unchanged", target: { root: "project", path: p } };
 }
 
@@ -198,12 +204,14 @@ function homeOf(p) {
  * The one resolution of a path an old record cites (normalized first), exactly one kind: unchanged
  * (the path did not move), moved (a LEGACY_REF_MAP rename), workspace (legacy .claude/memory state),
  * split (LEGACY_SPLITS; `after` is its home when no split applies) or unmapped (an absolute path
- * outside every root, or a file in a vacated directory with no rename).
+ * outside every root, or a file in a vacated directory with no rename). The kit move's facts (its
+ * renames, vacated dirs, splits and legacy root) describe the kit's own source repository: with
+ * `kitRepo: false` (any adopter project) only the legacy .claude/memory state maps, to the workspace.
  */
-export function resolveLegacyRef(path, { roots = [] } = {}) {
-  const p = normalizeRefPath(path, roots);
-  const home = homeOf(p);
-  const split = LEGACY_SPLITS.find((s) => s.from === p);
+export function resolveLegacyRef(path, { roots = [], kitRepo = true } = {}) {
+  const p = normalizeRefPath(path, roots, { kitRepo });
+  const home = homeOf(p, kitRepo);
+  const split = kitRepo && LEGACY_SPLITS.find((s) => s.from === p);
   if (split) return { kind: "split", path: p, at: split.at, into: split.into, after: home };
   return { kind: home.kind, path: p, ...(home.target ? { target: home.target } : {}) };
 }
@@ -213,12 +221,15 @@ export function resolveLegacyRef(path, { roots = [] } = {}) {
  * split, else { path, target }: the file's current home, or null when unmapped (the caller fails
  * closed). `predates(at)` is a fact about the record's commit the caller supplies: true, false, or
  * null when the order cannot be known (the split commit is not in the repository), which counts as
- * older: re-verify rather than compare with a half.
+ * older: re-verify rather than compare with a half. `exists(path)` says whether the cited path is
+ * still in the project: a file still where the record cited it is compared there, whatever the map
+ * says. `kitRepo` as in resolveLegacyRef.
  */
-export function evidenceHome(cited, { roots = [], predates = () => true } = {}) {
-  const ref = resolveLegacyRef(cited, { roots });
+export function evidenceHome(cited, { roots = [], predates = () => true, kitRepo = true, exists = () => false } = {}) {
+  const ref = resolveLegacyRef(cited, { roots, kitRepo });
   if (ref.kind === "split" && predates(ref.at) !== false) return { path: ref.path, split: ref.at };
   const home = ref.kind === "split" ? ref.after : ref;
+  if (home.kind !== "unchanged" && exists(ref.path)) return { path: ref.path, target: { root: "project", path: ref.path } };
   return { path: ref.path, target: home.target || null };
 }
 
