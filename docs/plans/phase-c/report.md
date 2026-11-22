@@ -261,7 +261,7 @@ Steps: `docs/plans/docs-refresh/steps.md`. Docs only: no kit behaviour change.
 
 Pre-flight: `loop-setup doctor` exit 0 (no fail).
 
-Commits: da592aa.
+Commits: da592aa, 4ac72c6 (S04.1: a post-round nice-to-have).
 
 Success criteria and evidence:
 1. **Infographics.** The five `docs/infographic-*.svg` show install/init/sync/restore, the kit in
@@ -288,3 +288,19 @@ Commands (HEAD da592aa):
 | `pnpm build` | 0 | Compiled successfully |
 | `pnpm test:e2e` | 0 | 16 passed |
 | `loop-setup verify-kit` | 2 | waived (see Pre-flight) |
+
+Post-implementation round (tree 4e0ffa36d3966212, HEAD da592aa): `completion` accept, no finding
+confirmed, deferred or revised, no reviewer failed, `notRechecked` empty; no records.
+
+| Critic | Severity | Verdict | Finding | Evidence | Recommended action |
+|---|---|---|---|---|---|
+| — | — | — | (none confirmed) | — | — |
+
+Nice-to-haves: Option 1's kit leftovers (taken, 4ac72c6); the Path A test checks text, not the `sed`
+run (left); infographic 4's footer names the kit repo's guide path (left). Full chain at 4ac72c6:
+typecheck 0, lint 0, test 0 (26 files, 1015), build 0, test:e2e 0 (16).
+
+Remaining risks: listed in `docs/plans/docs-refresh/steps.md`.
+
+**C6 status: done** (green checkpoint: tests and chain pass, the round accepts with no open blocker,
+no records to write, sync done, commits pushed).
