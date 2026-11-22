@@ -95,8 +95,8 @@ matches (`l3-check` unmet: "the denylist changed after the bench"), and L3 needs
 
 | id | description | scope | check | after | status | commit |
 |---|---|---|---|---|---|---|
-| S01 | Tests first. HIT/CLEAR lists: the nested `.gitignore`/`.gitattributes` move to HIT, `pnpm-workspace.yaml` and `next.config.*` join HIT, near-misses join CLEAR. CLI: the nested expectation changes, and a real-patch `denylist-check` test is added (add, edit, rename and delete of a nested file). Both fail before S02. | kit/trace/workflows.test.mjs, kit/trace/cli.test.mjs | `pnpm exec vitest run kit/trace/workflows.test.mjs kit/trace/cli.test.mjs` | — | done | — |
-| S02 | `<loop-denylist>` block: any-depth `.gitignore`/`.gitattributes`, root `pnpm-workspace.yaml` and `next.config.*`, comment. Byte-identical in both workflows. The implementer prompt and the loop docs name the entries. | kit/workflows/loop-iteration.js, kit/workflows/trace-bench.js, kit/loop.md, kit/docs/workflow-graphs.md | same | S01 | done | — |
+| S01 | Tests first. HIT/CLEAR lists: the nested `.gitignore`/`.gitattributes` move to HIT, `pnpm-workspace.yaml` and `next.config.*` join HIT, near-misses join CLEAR. CLI: the nested expectation changes, and a real-patch `denylist-check` test is added (add, edit, rename and delete of a nested file). Both fail before S02. | kit/trace/workflows.test.mjs, kit/trace/cli.test.mjs | `pnpm exec vitest run kit/trace/workflows.test.mjs kit/trace/cli.test.mjs` | — | done | a9e1ee3 |
+| S02 | `<loop-denylist>` block: any-depth `.gitignore`/`.gitattributes`, root `pnpm-workspace.yaml` and `next.config.*`, comment. Byte-identical in both workflows. The implementer prompt and the loop docs name the entries. | kit/workflows/loop-iteration.js, kit/workflows/trace-bench.js, kit/loop.md, kit/docs/workflow-graphs.md | same | S01 | done | a9e1ee3 |
 | S03 | Self-verify chain and the post-implementation critic round. CLEAR TR-7ceffeec49a1 citing the commit. | — | `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | S02 | planned | — |
 
 RED → GREEN (`pnpm exec vitest run kit/trace/workflows.test.mjs kit/trace/cli.test.mjs`):
@@ -114,9 +114,16 @@ CLEAR, and the root list gains `pnpm-workspace.yaml` and `next.config.mjs` (adde
 ## Remaining risks
 
 - The denylist hash changes, so L3 is unmet until a re-bench (`/bench-checkers`).
-- `loop-setup denylist-check` in this checkout reads the block from HEAD, so it answers with the new
-  rules only once S02 is committed. The CLI tests copy the working tree into a throwaway repo and
-  commit it there, so they see the new block at once.
+- Which copy of the block `denylist-check` trusts depends on which CLI runs.
+  - The kit's own CLI in this checkout (`kit/trace/cli.mjs`, as the tests run it) reads HEAD. On
+    real git patches against a9e1ee3 it reports `src/.gitignore`, `e2e/.gitattributes`,
+    `pnpm-workspace.yaml` and `next.config.mjs` in `hits` (exit 1), and passes
+    `src/lib/greeting.ts` and `src/app/.mcp.json` (exit 0).
+  - The installed shim `loop-setup` runs the installed kit, which is not inside the project, so it
+    reads its own verified copy. Until the kit is reinstalled from a `main` that contains this
+    change, the shim still answers with the old rules (exit 0 on the same patches). `verify-kit`
+    anchors an install to `main` or a `kit-v*` tag, so this lands after the merge, at the next fresh
+    container (setup script).
 - The implementer's capture (`git add -N .`, then `git diff`) drops a tracked file's deletion, and
   a rename keeps only its new side. A loop item cannot delete or rename a tracked file. This
   predates the goal and is out of its scope: a follow-up for the implementer prompt (for example
