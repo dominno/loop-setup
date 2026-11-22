@@ -72,11 +72,12 @@ Tests first:
 
 | id | description | scope | check | after | status | commit |
 |---|---|---|---|---|---|---|
-| S01 | Tests first: layout unit and golden tests, history tests, the reauditCandidates split test, the full-history CLI test (RED) | kit/setup/layout.test.mjs, kit/trace/lib.test.mjs, kit/trace/cli.test.mjs | `pnpm exec vitest run kit/setup/layout.test.mjs kit/trace/lib.test.mjs kit/trace/cli.test.mjs` | — | done | — |
-| S02 | Core: the file-level map, roots, emptied directories, splits, `normalizeRefPath`, `resolveLegacyRef`, `evidenceHome`, `legacyTarget` on top; `evidencePaths` and the split-aware `reauditCandidates` | kit/setup/layout.mjs, kit/trace/lib.mjs | same | S01 | done | — |
-| S03 | Adapter: `changedSince` through `evidenceHome` (ancestry, content compare), `reaudit --act`/`--annotate` for splits; CI `fetch-depth: 0` for the checks job | kit/trace/cli.mjs, .github/workflows/verify.yml, kit/docs/adoption-guide.md | same | S02 | done | — |
-| S03.1 | Pre-round finding TR-f950ffeb431f: tri-state `predates` (unknown counts as older) in the core; exit-status adapter; a unit case and a CLI test without the split commit | kit/setup/layout.mjs, kit/trace/cli.mjs, kit/setup/layout.test.mjs, kit/trace/cli.test.mjs | `pnpm exec vitest run kit/trace/cli.test.mjs -t "split commit is not"` | S03 | done | — |
-| S04 | Self-verify chain and the post-implementation critic round | — | `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | S03 | planned | — |
+| S01 | Tests first: layout unit and golden tests, history tests, the reauditCandidates split test, the full-history CLI test (RED) | kit/setup/layout.test.mjs, kit/trace/lib.test.mjs, kit/trace/cli.test.mjs | `pnpm exec vitest run kit/setup/layout.test.mjs kit/trace/lib.test.mjs kit/trace/cli.test.mjs` | — | done | f6e0023 |
+| S02 | Core: the file-level map, roots, emptied directories, splits, `normalizeRefPath`, `resolveLegacyRef`, `evidenceHome`, `legacyTarget` on top; `evidencePaths` and the split-aware `reauditCandidates` | kit/setup/layout.mjs, kit/trace/lib.mjs | same | S01 | done | f6e0023 |
+| S03 | Adapter: `changedSince` through `evidenceHome` (ancestry, content compare), `reaudit --act`/`--annotate` for splits; CI `fetch-depth: 0` for the checks job | kit/trace/cli.mjs, .github/workflows/verify.yml, kit/docs/adoption-guide.md | same | S02 | done | f6e0023 |
+| S03.1 | Pre-round finding TR-f950ffeb431f: tri-state `predates` (unknown counts as older) in the core; exit-status adapter; a unit case and a CLI test without the split commit | kit/setup/layout.mjs, kit/trace/cli.mjs, kit/setup/layout.test.mjs, kit/trace/cli.test.mjs | `pnpm exec vitest run kit/trace/cli.test.mjs -t "split commit is not"` | S03 | done | f6e0023 |
+| S04 | Self-verify chain and the post-implementation critic round | — | `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | S03.1 | done | f6e0023 |
+| S04.1 | Post-round nice-to-have: the reaudit consumers (`/dream` step 1c, `/sync-story-status` step 1) name the `split` result | kit/commands/dream.md, kit/commands/sync-story-status.md | `pnpm exec vitest run scripts/template-docs.test.mjs` | S04 | done | — |
 
 Pre-implementation critic round (tree e3187bb721700905; single-pass reviewer, code-only):
 - `completion` accept. One confirmed important finding, TR-f950ffeb431f (accept): the rule "an
@@ -110,6 +111,17 @@ RED → GREEN:
   `/home/user/loop-setup/.claude/memory/topics/trace.md`, split at ec6d24b) and 73 unreachable.
 - After `--act`: 0 split, and the same 20 changed.
 - Before (old code): the same 20 changed, and the split file was among them, as changed.
+
+Post-implementation critic round (tree 2fccd418c2881d5a, HEAD f6e0023; single-pass reviewer plus
+the completeness critic, code-only):
+- `completion` accept. Nothing confirmed, deferred or revised, no reviewer failed, `notRechecked`
+  empty, no records.
+- TR-f950ffeb431f was passed in and not re-raised. It is CLEARed (`multi-agent-dev`, ref f6e0023).
+- Two nice-to-haves:
+  - `kit/commands/dream.md` step 1c and `kit/commands/sync-story-status.md` did not mention the new
+    `split` result. Each now does, in one sentence (S04.1).
+  - `legacyTarget` has no production caller left. It is kept as a tested public export, because
+    removing it would drop its tests. Its contract is unchanged.
 
 ## Remaining risks
 

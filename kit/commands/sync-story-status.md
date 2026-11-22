@@ -17,7 +17,8 @@ $ARGUMENTS
 Procedure:
 
 1. **Stale evidence first:** run `loop-setup reaudit --claim-prefix story:` — the story-status
-   records whose cited evidence changed since their commit (or whose commit is unreachable).
+   records whose cited evidence changed since their commit (or whose commit is unreachable, or
+   whose cited file was split in two since: `split`).
    Re-verify those stories before any other; the list never downgrades a status by itself — a
    new scan-docs record is still the only way a story's status changes.
    Then read `docs/user-stories.md` (the index), then open only the per-story files
