@@ -16,6 +16,11 @@ scope can be removed between sessions. Repair applied as the residual-risk optio
 value stays the rule (it matches Claude Code's merge, and `/sandbox` writes `settings.local.json`),
 the checklist advises user scope, and it is listed below.
 
+Post-implementation rounds: round 1 (tree cbd766d006a5d615) confirmed TR-badc6d060f90 (a managed
+`allowUnsandboxedCommands: true` over a user `false` read as held), fixed in S04.1 and CLEARed; round 2
+(tree 83ecb6f04feaed9f) accept, nothing confirmed, deferred or revised. CLEARed: TR-badc6d060f90,
+TR-bb40873dca00; HOLD: TR-2e055785d661 (revise, repair applied).
+
 Layers: **core** = `kit/setup/sandbox.mjs` (`sandboxPosture`, `withSandbox`) and `kit/trace/lib.mjs`
 (`denylistBlockHash`, `benchRecordDraft`, `l3Check`); **driven adapter** = `kit/setup/settings.mjs`
 (`readSettingsFile`, `settingsSources`: managed drop-ins and `managed-settings.json`, the project's
@@ -27,8 +32,8 @@ local and shared settings, the user's), reused by `verifykit.mjs`; **driving ada
 | S01 | Bench records pin the `<loop-denylist>` block too; `l3Check(state, { verifier, denylist })` is unmet when it changed or is missing (re-bench) | kit/trace/lib.mjs, kit/trace/cli.mjs, kit/trace/lib.test.mjs, kit/trace/cli.test.mjs | `pnpm exec vitest run kit/trace/lib.test.mjs kit/trace/cli.test.mjs` | — | done | d4832c1 |
 | S02 | Sandbox posture: pure decision over the settings scopes, the settings adapter (fail closed), `l3-check` = bench AND sandbox, `doctor` reports it | kit/setup/sandbox.mjs, kit/setup/settings.mjs, kit/setup/verifykit.mjs, kit/setup/commands.mjs, kit/trace/cli.mjs, kit/setup/sandbox.test.mjs | `pnpm exec vitest run kit/setup/sandbox.test.mjs` | S01 | done | d4832c1 |
 | S03 | Docs: the checklist's Sandbox item and both pinned blocks, the kit rules' statement, trace-policy, README, command help; doc and parity tests | kit/loop-checklist.md, kit/rules/KIT.md, kit/rules/trace-policy.md, README.md, scripts/template-docs.test.mjs | `pnpm exec vitest run scripts/template-docs.test.mjs` | S02 | done | d4832c1 |
-| S04 | Self-verify chain and the post-implementation critic round | — | `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | S03 | in-progress | |
-| S04.1 | Post-implementation round TR-badc6d060f90 (accept): a managed `allowUnsandboxedCommands: true` over a user `false` was read as held — the first managed source that sets it now decides (managed outranks user), else a user `false` holds | kit/setup/sandbox.mjs, kit/setup/sandbox.test.mjs | `pnpm exec vitest run kit/setup/sandbox.test.mjs` | S04 | done | |
+| S04 | Self-verify chain and the post-implementation critic round | — | `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | S03 | done | 3e1f0ee |
+| S04.1 | Post-implementation round TR-badc6d060f90 (accept): a managed `allowUnsandboxedCommands: true` over a user `false` was read as held — the first managed source that sets it now decides (managed outranks user), else a user `false` holds | kit/setup/sandbox.mjs, kit/setup/sandbox.test.mjs | `pnpm exec vitest run kit/setup/sandbox.test.mjs` | S04 | done | 3e1f0ee |
 
 Existing tests changed their inputs only, no assertion: `lib.test.mjs` drafts and `l3Check` calls
 carry the denylist hash; `cli.test.mjs` runs the CLI with a hermetic Claude config dir whose user
