@@ -197,6 +197,7 @@ was run again; the second run's records are TR-9b325336d7bf … TR-05e230f34069.
 | S06.3 | Re-check round TR-9d0a9461d049 (accept): after S06.1 a rejected or no-op first write left a writer id with no anchors file, a permanent false "anchors were deleted" error (explicit `--store`/`TRACE_STORE` stores have no hook to repair it); a new writer id now always comes with its anchors file | kit/trace/cli.mjs, kit/setup/chainrepo.test.mjs | `pnpm exec vitest run kit/setup/chainrepo.test.mjs -t "rejected first write"` | S06.1 | done | 70eb16c |
 | S06.1 | Post-round TR-eac079ab5043 (qualify; unsandboxed writers): the writer re-created a deleted anchors file without verifying, laundering the loss past `anchors reset`; it now anchors only into an existing file, or a first one with a writer id it just created | kit/trace/cli.mjs, kit/setup/chainrepo.test.mjs | `pnpm exec vitest run kit/setup/chainrepo.test.mjs -t "never re-creates"` | S06 | done | c03a9da |
 | S06.2 | Post-round TR-cc11d9353dc3 (accept): stale-lock takeover could rename away a live lock created in between; the lock now carries a nonce, a takeover checks what it renamed and puts a live lock back (`link`, never overwrite), and a holder releases only its own lock | kit/setup/anchors.mjs, kit/setup/anchors.test.mjs | `pnpm exec vitest run kit/setup/anchors.test.mjs` | S06 | done | c03a9da |
+| S07 | Phase-C closing round (C7) TR-d3aba003bc20 (accept): `sync` held the store lock across the fetch (120 s cap), the push (300 s) and the fetch after it, while a writer waits 10 s, so a write during a slow push failed (reproduced by the skeptic: exit 1 after 10.09 s, record not stored). `pull` is split into `fetchState` (network) and `mergeFetched` (local); `sync` holds the lock for the migration and for lint, commit, merge and lint, and fetches and pushes outside it; `restore` of a workspace already here fetches outside the lock too | kit/setup/workspace.mjs, kit/setup/chainrepo.test.mjs | `pnpm exec vitest run kit/setup/chainrepo.test.mjs -t "store lock\|fetches outside the lock"` | S06.3 | done | (C7) |
 
 RED → GREEN:
 - Before S02: `chain.test.mjs` did not load (no `chain.mjs`); 4 chained-writer tests in `lib.test.mjs`
@@ -255,8 +256,9 @@ Remaining risks:
   deleted within one turn are not anchored.
 - The stale-lock takeover has a window between the rename and the link-back in which two holders can
   overlap (a fork is a lint error).
-- `sync` holds the store lock across fetch and push: a writer waits up to 10 s during a slow push,
-  then fails with a clear message.
+- `sync` holds the store lock for its local steps (the migration, and lint, commit, merge, lint): a
+  writer waits behind those (local git and two lint processes), never behind the remote (S07). Two
+  lock sections, so a write can land between the migration and the commit; the commit takes it.
 - Rotation keeps a writer's order only while its `created_at` grows (a backwards clock across a year
   boundary could reorder its lines across archives).
 - Policy v4 needs every machine sharing a workspace on a v4 kit: an older kit refuses 1.1 lines as a

@@ -291,3 +291,79 @@ describe("anchors: SessionStart checkpoints every stream; a dropped count is cau
     expect(existsSync(anchorsFile(home, id))).toBe(true);
   });
 });
+
+describe("sync and the store lock: the network steps run outside it", () => {
+  let p;
+  let home;
+  let proj;
+  let id;
+
+  beforeAll(() => {
+    p = project("c3");
+    home = mkHome("lock-a");
+    proj = p.clone("c3-a");
+    const init = run(home, proj, ["init"]);
+    ok(init);
+    id = JSON.parse(init.stdout).id;
+    ok(run(home, proj, ["sync"]));
+  });
+
+  it("sync holds the store lock only for its local steps: never during the fetch or the push, so a writer never waits on the remote", () => {
+    // Probes on the network steps record whether this store's lock file exists while each one runs:
+    // the remote's pre-receive hook (the push) and uploadpack.packObjectsHook in the home's global
+    // git config (the fetch; upload-pack honours it only from protected config such as global).
+    const out = join(T, "lock-probe.log");
+    const probe = (tag) => {
+      const f = join(T, `probe-${tag}.sh`);
+      writeFileSync(f, `#!/bin/sh\nif [ -e "${join(anchorsRoot(home), `${id}.lock`)}" ]; then echo "${tag} held"; else echo "${tag} free"; fi >> "${out}"\n${tag === "fetch" ? 'exec "$@"\n' : ""}`, { mode: 0o755 });
+      return f;
+    };
+    const other = mkHome("lock-other");
+    const otherProj = p.clone("c3-b");
+    ok(run(other, otherProj, ["restore"]));
+    ok(run(other, otherProj, ["write", "-"], draft("demo:remote-side")));
+    ok(run(other, otherProj, ["sync"])); // the remote is now ahead, so the next fetch packs objects
+    const hook = join(p.remote, "hooks/pre-receive");
+    writeFileSync(hook, `#!/bin/sh\ncat >/dev/null\nexec "${probe("push")}"\n`, { mode: 0o755 });
+    const globalConfig = join(home, "..", ".gitconfig");
+    writeFileSync(globalConfig, `[uploadpack]\n\tpackObjectsHook = ${probe("fetch")}\n`);
+    try {
+      ok(run(home, proj, ["write", "-"], draft("demo:before-sync")));
+      const s = run(home, proj, ["sync"]);
+      ok(s);
+      expect(JSON.parse(s.stdout)).toMatchObject({ ok: true, pulled: "merged", pushed: true });
+      const seen = readFileSync(out, "utf8").trim().split("\n");
+      expect(seen).toContain("fetch free");
+      expect(seen).toContain("push free");
+      expect(seen.filter((l) => l.endsWith("held"))).toEqual([]);
+      expect(claims(home, id)).toEqual(expect.arrayContaining(["demo:before-sync", "demo:remote-side"]));
+      ok(lint(home, proj));
+    } finally {
+      rmSync(hook, { force: true });
+      rmSync(globalConfig, { force: true });
+    }
+  });
+
+  it("restore of a workspace that is already here (SessionStart's auto-restore) fetches outside the lock and merges inside it", () => {
+    const out = join(T, "lock-probe-restore.log");
+    const probe = join(T, "probe-restore.sh");
+    writeFileSync(probe, `#!/bin/sh\nif [ -e "${join(anchorsRoot(home), `${id}.lock`)}" ]; then echo "fetch held"; else echo "fetch free"; fi >> "${out}"\nexec "$@"\n`, { mode: 0o755 });
+    const other = mkHome("lock-other-2");
+    const otherProj = p.clone("c3-c");
+    ok(run(other, otherProj, ["restore"]));
+    ok(run(other, otherProj, ["write", "-"], draft("demo:remote-side-2")));
+    ok(run(other, otherProj, ["sync"]));
+    const globalConfig = join(home, "..", ".gitconfig");
+    writeFileSync(globalConfig, `[uploadpack]\n\tpackObjectsHook = ${probe}\n`);
+    try {
+      const r = run(home, proj, ["restore"]);
+      ok(r);
+      expect(JSON.parse(r.stdout)).toMatchObject({ restored: false, pulled: "merged" });
+      expect(readFileSync(out, "utf8").trim().split("\n")).toEqual(["fetch free"]);
+      expect(claims(home, id)).toContain("demo:remote-side-2");
+      ok(lint(home, proj));
+    } finally {
+      rmSync(globalConfig, { force: true });
+    }
+  });
+});

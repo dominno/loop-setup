@@ -450,14 +450,28 @@ export function restore({ cwd = process.cwd(), env = process.env } = {}) {
   }
 }
 
-/** pull() under the record store's lock (the merge rewrites the store). */
-const lockedPull = (claudeHome, ws, workspaceId, loc) => withStoreLock(claudeHome, storeKey({ claudeHome, storePath: join(ws, "trace/records.jsonl"), workspace: ws, workspaceId }), () => pull(openRepo(loc)));
+/** The anchor key of a workspace's own record store (its lock, writer id and anchors). */
+const ownStoreKey = (claudeHome, ws, workspaceId) => storeKey({ claudeHome, storePath: join(ws, "trace/records.jsonl"), workspace: ws, workspaceId });
 
-/** Fetch the remote state branch, check its tree, and merge it (union for append-only files). Returns a short status. */
-export function pull(repo) {
+/**
+ * restore's pull of a workspace already here: the fetch runs outside the record store's lock (a network
+ * step that changes no file in the work tree), the merge inside it (the merge rewrites the store).
+ */
+const lockedPull = (claudeHome, ws, workspaceId, loc) => {
+  const repo = openRepo(loc);
+  return fetchState(repo) || withStoreLock(claudeHome, ownStoreKey(claudeHome, ws, workspaceId), () => mergeFetched(repo));
+};
+
+/** Fetch the remote state branch into FETCH_HEAD: null when fetched, else a short status. */
+function fetchState(repo) {
   if (!stateGit(repo, ["remote", "get-url", "origin"], { allowFail: true }).stdout.trim()) return "no remote";
   const fetched = stateGit(repo, ["fetch", "-q", "origin", STATE_BRANCH], { allowFail: true });
   if (fetched.status !== 0) return /couldn't find remote ref|not found/i.test(fetched.stderr) ? "remote branch absent" : "fetch failed";
+  return null;
+}
+
+/** Check FETCH_HEAD's tree and merge it (union for append-only files). It rewrites the record store: callers hold its lock. */
+function mergeFetched(repo) {
   const refused = incomingTreeRefusal(treeAt((args) => stateGit(repo, args, { allowFail: true }), "FETCH_HEAD"));
   if (refused) throw new StateRepoRefused(`the fetched ${STATE_BRANCH}: ${refused.cause}`);
   const merged = stateGit(repo, ["merge", "-q", "--no-edit", "FETCH_HEAD"], { allowFail: true });
@@ -512,35 +526,41 @@ export function boundWorkspace({ cwd = process.cwd(), env = process.env } = {}) 
  * old-layout workspace is migrated out of the workspace first.
  * opts: { cwd, env, message?, force? (push even when the gate fails), push? (default true) }
  */
-export function sync(opts = {}) {
+export function sync({ push = true, ...opts } = {}) {
   const layout = boundWorkspace({ cwd: opts.cwd || process.cwd(), env: opts.env || process.env });
-  const ws = layout.workspace;
-  // The commit and the merge rewrite the record store: hold its lock, as every writer does (policy v4).
-  const key = storeKey({ claudeHome: layout.claudeHome, storePath: join(ws, "trace/records.jsonl"), workspace: ws, workspaceId: layout.workspaceId });
-  return withStoreLock(layout.claudeHome, key, () => syncLocked(layout, opts));
-}
-
-function syncLocked(layout, { message, force = false, push = true, now = new Date().toISOString() } = {}) {
-  const ws = layout.workspace;
-  const loc = localRepo(layout.claudeHome, ws, layout.workspaceId, layout.projectRoot);
+  const { claudeHome, workspaceId, workspace: ws } = layout;
+  // The migration, the commit and the merge rewrite the git dir or the record store: they hold the
+  // store's lock, as every writer does (policy v4). The fetch and the push change neither, so they run
+  // outside it: a writer waits 10 s for the lock, and a slow remote must never be what it waits on.
+  const locked = (fn) => withStoreLock(claudeHome, ownStoreKey(claudeHome, ws, workspaceId), fn);
+  const loc = locked(() => localRepo(claudeHome, ws, workspaceId, layout.projectRoot));
   const repo = openRepo(loc);
   const migrated = loc.migrated ? { migrated: loc.gitDir } : {};
-  const before = lintGate(ws);
-  if (before.length && !force) return { ok: false, stage: "pre-lint", problems: before, workspace: ws, ...migrated };
-  stateGit(repo, ["add", "-A"]);
-  const staged = stateGit(repo, ["diff", "--cached", "--quiet"], { allowFail: true }).status !== 0;
-  if (staged) stateGit(repo, ["commit", "-q", "--no-verify", "-m", message || `loop-state: ${now}`]);
-  const pulled = pull(repo);
-  if (pulled.startsWith("conflict")) return { ok: false, stage: "merge", problems: [pulled], workspace: ws, committed: staged, ...migrated };
-  const after = lintGate(ws);
-  if (after.length && !force) return { ok: false, stage: "post-merge lint", problems: after, workspace: ws, committed: staged, pulled, ...migrated };
+  const fetched = fetchState(repo);
+  const local = locked(() => commitAndMerge(ws, repo, fetched, opts));
+  if (!local.ok) return { ...local, workspace: ws, ...migrated };
+  const { committed, pulled } = local;
   let pushed = false;
   if (push && stateGit(repo, ["remote", "get-url", "origin"], { allowFail: true }).stdout.trim()) {
     const r = stateGit(repo, ["push", "-q", "origin", `HEAD:refs/heads/${STATE_BRANCH}`], { allowFail: true, timeout: 300000 });
-    if (r.status !== 0) return { ok: false, stage: "push", problems: [(r.stderr || "").trim().split("\n").slice(-2).join(" | ")], workspace: ws, committed: staged, pulled, ...migrated };
+    if (r.status !== 0) return { ok: false, stage: "push", problems: [(r.stderr || "").trim().split("\n").slice(-2).join(" | ")], workspace: ws, committed, pulled, ...migrated };
     stateGit(repo, ["fetch", "-q", "origin", STATE_BRANCH], { allowFail: true });
     stateGit(repo, ["update-ref", `refs/remotes/origin/${STATE_BRANCH}`, "HEAD"], { allowFail: true });
     pushed = true;
   }
-  return { ok: true, workspace: ws, committed: staged, pulled, pushed, branch: STATE_BRANCH, ...migrated };
+  return { ok: true, workspace: ws, committed, pulled, pushed, branch: STATE_BRANCH, ...migrated };
+}
+
+/** sync's local steps, under the store's lock: lint, commit, merge what was fetched (unless `fetched` is a status), lint again. */
+function commitAndMerge(ws, repo, fetched, { message, force = false, now = new Date().toISOString() } = {}) {
+  const before = lintGate(ws);
+  if (before.length && !force) return { ok: false, stage: "pre-lint", problems: before };
+  stateGit(repo, ["add", "-A"]);
+  const committed = stateGit(repo, ["diff", "--cached", "--quiet"], { allowFail: true }).status !== 0;
+  if (committed) stateGit(repo, ["commit", "-q", "--no-verify", "-m", message || `loop-state: ${now}`]);
+  const pulled = fetched || mergeFetched(repo);
+  if (pulled.startsWith("conflict")) return { ok: false, stage: "merge", problems: [pulled], committed };
+  const after = lintGate(ws);
+  if (after.length && !force) return { ok: false, stage: "post-merge lint", problems: after, committed, pulled };
+  return { ok: true, committed, pulled };
 }
