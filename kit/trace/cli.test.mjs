@@ -10,6 +10,7 @@ import { DEFAULT_STORE, encodeBench, latestByClaim, loadEntries, loadSchema, opa
 import { appliedFixtures, benchPreconditionStep, benchPreflight, judgeEnv, runBenchJudge, runJudge, SIGNALS } from "./bench-judge.mjs";
 import { DEFAULT_PLAN, parsePlan, readyIds } from "./plan.mjs";
 import { STORY_MAP_PATHS } from "./story-map.mjs";
+import { MODE_PATCHES } from "../test/denylist-modes.mjs";
 
 const CLI = join(ROOT, "kit/trace/cli.mjs");
 let dir;
@@ -1072,6 +1073,63 @@ describe("CLI wiring, end to end in a throwaway repo", () => {
       const p = join(r.d, "x.patch");
       writeFileSync(p, "diff --git a/kit/loop.md b/kit/loop.md\n--- a/kit/loop.md\n+++ b/kit/loop.md\n@@ -1 +1 @@\n-a\n+b\n");
       expect(r.cli(["denylist-check", "--patch", p]).status).toBe(1);
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  // The repository's own configuration files are protected at the root only: a nested one under
+  // src/ or e2e/ stays open, as the workflow gate's HIT/CLEAR lists say (kit/trace/workflows.test.mjs).
+  it("denylist-check escalates the root .gitignore, .gitattributes, .worktreeinclude and .mcp.json, and leaves a nested one open", () => {
+    const r = tempRepo();
+    try {
+      const edit = (f) => `diff --git a/${f} b/${f}\n--- a/${f}\n+++ b/${f}\n@@ -1 +1 @@\n-a\n+b\n`;
+      const check = (f) => {
+        const p = join(r.d, "x.patch");
+        writeFileSync(p, edit(f));
+        const out = r.cli(["denylist-check", "--patch", p]);
+        return [f, out.status, JSON.parse(out.stdout).hits];
+      };
+      const root = [".gitignore", ".gitattributes", ".worktreeinclude", ".mcp.json"];
+      expect(root.map(check)).toEqual(root.map((f) => [f, 1, [f]]));
+      const nested = ["src/.gitignore", "e2e/.gitattributes", "src/app/.mcp.json"];
+      expect(nested.map(check)).toEqual(nested.map((f) => [f, 0, []]));
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  // Parity with the workflow gate: the same corpus (kit/test/denylist-modes.mjs) and the same answer.
+  it("denylist-check escalates every corpus patch that writes a symlink, a gitlink or a mode change (exit 1, listed in hits and modeHits) and passes the rest", () => {
+    const r = tempRepo();
+    try {
+      const p = join(r.d, "x.patch");
+      const got = MODE_PATCHES.map((c) => {
+        writeFileSync(p, c.patch);
+        const out = r.cli(["denylist-check", "--patch", p]);
+        const body = out.stdout ? JSON.parse(out.stdout) : {};
+        return [c.name, out.status, body.hits, body.modeHits];
+      });
+      expect(got).toEqual(MODE_PATCHES.map((c) => [c.name, c.hits.length ? 1 : 0, c.hits, c.hits]));
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  it("denylist-check fails closed (exit 2) when the trusted copy of the denylist block has no mode rule", () => {
+    const r = tempRepo();
+    try {
+      const wf = join(r.d, "kit/workflows/loop-iteration.js");
+      const src = readFileSync(wf, "utf8");
+      const old = src.replace(/\bdiffModeHits\b/g, "olderName");
+      expect(old).not.toBe(src);
+      writeFileSync(wf, old);
+      r.git("commit", "-qam", "a denylist block from before the mode rule");
+      const p = join(r.d, "x.patch");
+      writeFileSync(p, MODE_PATCHES.find((c) => !c.hits.length).patch);
+      const out = r.cli(["denylist-check", "--patch", p]);
+      expect(out.status).toBe(2);
+      expect(JSON.parse(out.stdout).error).toMatch(/could not verify the patch/);
     } finally {
       r.cleanup();
     }

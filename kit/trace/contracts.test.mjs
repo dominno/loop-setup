@@ -244,7 +244,7 @@ describe("committed story map ↔ story-map.mjs", () => {
 // counts only). A leak via a failing test title contaminated the second bench run.
 describe("TRACE-Bench-lite fixtures", () => {
   const manifest = readBench();
-  const { hitsDenylist, parseDiffPaths } = loadWorkflowBlock("loop-iteration.js", "loop-denylist", ["hitsDenylist", "parseDiffPaths"]);
+  const { hitsDenylist, parseDiffPaths, diffModeHits } = loadWorkflowBlock("loop-iteration.js", "loop-denylist", ["hitsDenylist", "parseDiffPaths", "diffModeHits"]);
 
   it("the bundle decodes to a structurally valid manifest and re-encodes byte-identically", () => {
     expect(manifestViolations(manifest).length).toBe(0); // count only — messages name fixture ids
@@ -283,9 +283,10 @@ describe("TRACE-Bench-lite fixtures", () => {
     expect(s.flags.some((f) => f.startsWith("F0"))).toBe(true);
   });
 
+  // The gate escalates a protected path or a symlink, gitlink or mode change (trace-bench's denylistHit).
   it("denylist judges agree with the production denylist, and good fixtures never hit it", () => {
     const wrong = manifest.fixtures.filter((f) => {
-      const hit = hitsDenylist(parseDiffPaths(f.patch));
+      const hit = hitsDenylist(parseDiffPaths(f.patch)) || diffModeHits(f.patch).length > 0;
       return (f.judge.kind === "denylist" && hit !== f.judge.catches) || (f.kind === "good" && hit);
     });
     expect(wrong.map((f) => opaqueFixtureId(f.id))).toEqual([]);

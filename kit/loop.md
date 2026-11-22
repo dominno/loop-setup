@@ -207,7 +207,8 @@ instructions — the self-modification guard below still applies to everything e
       - **`applied`** (accept, or qualify at L2): save the `diff` to a scratch file (name its path in the run-log entry) and,
         **before applying it**, run `loop-setup denylist-check --patch <file> --level <L2|L3>` (the
         production denylist, read from HEAD, over every path git's own parser finds in the
-        patch — catches anything the patch-text parser missed — from a kit that passes
+        patch — catches anything the patch-text parser missed — plus its symlink, gitlink and
+        mode-change rule over the patch text (listed in `hits` and `modeHits`), from a kit that passes
         `verify-kit`); exit 1 (a hit) or 2 (could not verify, the kit included) → do not
         apply, `HOLD`, escalate. Exit 0 → `git apply --check <file>`;
         if it fails (the patch does not apply to the current tree), do not apply: `HOLD`
@@ -269,10 +270,13 @@ the memory wiki's topic pages) and `CLAUDE.md`, plus the TRACE gate code in
 the root `package.json`, and the `vitest.config.*`, `playwright.config.*`,
 `eslint.config.*` and `tsconfig.json` runner configs, since a one-line change to the
 `test` script or to vitest's include could make `pnpm test` skip every `scripts/**`
-gate): a loop never self-modifies its own instructions or gates
+gate), and the repository's own configuration at the root (`.gitignore`, `.gitattributes`,
+`.worktreeinclude`, `.mcp.json`): a loop never self-modifies its own instructions or gates
 autonomously, even at L3 — propose and escalate instead** (this is enforced
 deterministically by the `loop-iteration.js` denylist regex; the sanctioned path to
-change the prompt surface is the manual, confirmation-gated `/improve-skills`). The
+change the prompt surface is the manual, confirmation-gated `/improve-skills`). A diff
+that writes a symlink, a gitlink (submodule) or a file-mode change escalates on any path,
+`src/` and `e2e/` included: a symlink can aim a later read or write at a protected file. The
 loop's state files (`loop-plan.md`, `loop-run-log.md`, the record store via `pnpm
 trace`) are the exception: the Lead writes them as part of every iteration.
 

@@ -357,6 +357,10 @@ debate stage (critic panel + skeptic already is one).
 - `git apply --numstat -z <patch>` names only the destination of a rename/copy; union it
   with `git apply --numstat -z -R <patch>` to see both sides (`loop-setup denylist-check`
   does).
+- `git apply` reads a mode leniently (`new file mode 0120000` or `new file mode  120000` is a
+  symlink), and a patch that retargets an existing symlink says so only on its `index … 120000`
+  line: the denylist's mode rule (`diffModeHits`) counts a mode as regular only when it is exactly
+  `100644` or `100755`, and treats any `old mode`/`new mode` line as a mode change.
 - `git apply` strips any one leading path component and accepts traditional `---`/`+++`
   sections (tab timestamps included) after a `diff --git` section, so an `a/`/`b/` regex
   misses files git will write — check the paths git reports before applying.

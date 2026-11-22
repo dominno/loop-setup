@@ -360,6 +360,7 @@ export async function main(argv = process.argv.slice(2)) {
     const sh = (args) => execFileSync("git", args, { cwd: PROJECT_ROOT, encoding: "utf8", maxBuffer: 1 << 28, stdio: ["ignore", "pipe", "pipe"] });
     let paths;
     let hitsDenylist;
+    let modeHits;
     try {
       // `git apply --numstat` names only the DESTINATION of a rename/copy; the reversed
       // patch names its source — the union covers both sides (renaming a protected file
@@ -370,7 +371,12 @@ export async function main(argv = process.argv.slice(2)) {
       // the installed file verified against the sha256 the installer recorded. Never the working tree.
       const kitRel = relative(PROJECT_ROOT, KIT_ROOT).split(sep).join("/");
       const source = kitInProject() ? sh(["show", `HEAD:${kitRel}/workflows/loop-iteration.js`]) : verifiedKitFile(KIT_ROOT, "workflows/loop-iteration.js");
-      ({ hitsDenylist } = loadWorkflowBlock("loop-iteration.js", "loop-denylist", ["hitsDenylist"], { source }));
+      // A trusted copy without the mode rule (older than it) cannot vouch for the patch: it throws here.
+      let diffModeHits;
+      ({ hitsDenylist, diffModeHits } = loadWorkflowBlock("loop-iteration.js", "loop-denylist", ["hitsDenylist", "diffModeHits"], { source }));
+      // What the patch writes — a symlink, a gitlink, a mode change — escalates on any path: the same
+      // trusted rule the workflow gate runs, over the patch text (it reads every mode line git reads).
+      modeHits = diffModeHits(readFileSync(patch, "utf8"));
     } catch (e) {
       out({ ok: false, error: `could not verify the patch: ${String(e.stderr || e.message || e).trim().split("\n")[0]}` }, true);
       return 2;
@@ -386,8 +392,8 @@ export async function main(argv = process.argv.slice(2)) {
       return 2;
     }
     if (gate.message) process.stderr.write(`${gate.message}\n`);
-    const hits = paths.filter((p) => hitsDenylist([p]));
-    out({ ok: hits.length === 0, checked: paths.length, paths, hits }, true);
+    const hits = [...new Set([...paths.filter((p) => hitsDenylist([p])), ...modeHits])];
+    out({ ok: hits.length === 0, checked: paths.length, paths, hits, modeHits }, true);
     return hits.length ? 1 : 0;
   }
 
