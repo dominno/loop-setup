@@ -3,7 +3,7 @@
 // INSTALLED shim run as a process — verify-kit and the gates run from the installed kit.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { KIT_ROOT } from "./facts.mjs";
@@ -131,6 +131,25 @@ describe("verify-kit passes on an untampered install", () => {
     const r = verify(home);
     expect(r.status, r.stderr + r.stdout).toBe(0);
     expect(r.json).toMatchObject({ ok: true, commit: sha.tag, protectedBy: ["refs/tags/kit-v9.0.0"] });
+  }, SLOW);
+
+  // The installer writes every path with the home's spelling as given (CLAUDE_CONFIG_DIR, or HOME/.claude),
+  // while node runs the installed kit from its realpath: a symlink in the home's path (a symlinked
+  // ~/.claude, a dotfiles setup, a symlinked HOME) must still verify, and the L2 gate must still pass.
+  it("through a symlink in the Claude home's path (one above it, or a symlinked .claude itself): exit 0, and the L2 gate passes", () => {
+    const base = join(T, "symlinked");
+    mkdirSync(join(base, "real", ".claude"), { recursive: true });
+    mkdirSync(join(base, "dot", "real-claude"), { recursive: true });
+    symlinkSync(join(base, "real"), join(base, "link")); // a symlink above the home
+    symlinkSync(join(base, "dot", "real-claude"), join(base, "dot", ".claude")); // the home itself is a symlink
+    for (const home of [join(base, "link", ".claude"), join(base, "dot", ".claude")]) {
+      install({ from: kitSrc, claudeHome: home });
+      expect(realpathSync(home), home).not.toBe(home);
+      const r = verify(home);
+      expect([r.status, r.json?.code, r.problems.slice(0, 3)], home).toEqual([0, "OK", []]);
+      const gate = run(home, ["denylist-check", "--patch", join(T, "ok.patch"), "--level", "L2"], { cwd: proj });
+      expect(gate.status, `${home}: ${gate.stderr}${gate.stdout}`).toBe(0);
+    }
   }, SLOW);
 });
 

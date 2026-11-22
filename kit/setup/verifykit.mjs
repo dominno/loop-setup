@@ -3,9 +3,9 @@
 // settings), asks the remote adapter (kitremote.mjs), and leaves every decision to the pure core
 // (integrity.mjs). It checks the kit it runs from, so the code that renders the expected install is
 // itself part of the tree being verified (no version skew between verifier and verified).
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
-import { KIT_ROOT } from "./facts.mjs";
+import { claudeHomeOf, KIT_ROOT } from "./facts.mjs";
 import { loopHome } from "./layout.mjs";
 import { manifestPathFor } from "./kitfiles.mjs";
 import { compareInstall, expectedInstall, isCommitId, protectedVerdict, redactRemote, settingsEntryCount } from "./integrity.mjs";
@@ -29,6 +29,14 @@ const readFile = (p) => {
 };
 /** A settings file: {} when absent, { error } when it cannot be read or parsed (fail closed). */
 const readSettings = (p) => readSettingsFile(p) ?? {};
+/** Whether two paths name the same directory once every symlink is resolved (false when either is missing). */
+const sameDir = (a, b) => {
+  try {
+    return realpathSync(a) === realpathSync(b);
+  } catch {
+    return false;
+  }
+};
 /** Every entry under dir as { rel → Buffer }, with null for anything that is not a regular file (a symlink, a fifo…). */
 function readTree(dir) {
   const tree = new Map();
@@ -48,12 +56,18 @@ function readTree(dir) {
  * Verify the installed kit at kitRoot (default: the kit this code runs from).
  *   installedShim  where the user's installed shim is (named in the hint when kitRoot is not installed)
  *   projectRoot    the project whose .claude/settings(.local).json also apply (its disableAllHooks counts)
+ *   claudeHome     the Claude home as the caller spells it (default: $CLAUDE_CONFIG_DIR or HOME/.claude)
  * → { ok, code: "OK" | "TAMPERED" | "UNVERIFIABLE", commit, remote, protectedBy, problems, checked? }
  */
-export function verifyKit({ kitRoot = KIT_ROOT, installedShim = null, projectRoot = null, fetchSource = protectedSource, nodePath = process.execPath } = {}) {
+export function verifyKit({ kitRoot = KIT_ROOT, installedShim = null, projectRoot = null, fetchSource = protectedSource, nodePath = process.execPath, claudeHome: spelled = claudeHomeOf() } = {}) {
   const loopDir = dirname(kitRoot);
-  const claudeHome = dirname(loopDir);
-  const manifest = join(loopHome(claudeHome), "kit") === kitRoot ? readJson(manifestPathFor(kitRoot)) : null;
+  const kitHome = dirname(loopDir);
+  // The installer writes every path (the rendered {{KIT}}, the shim, hooks and rules) with the home's
+  // spelling as given, while node runs the kit from its realpath: with a symlink in the home's path
+  // the two differ. Render the expected install with the caller's spelling when it names this kit's
+  // home, else with the kit's own (the files read are the same either way).
+  const claudeHome = sameDir(spelled, kitHome) ? spelled : kitHome;
+  const manifest = join(loopHome(kitHome), "kit") === kitRoot ? readJson(manifestPathFor(kitRoot)) : null;
   const { commit = null, remote = null, prefix = null } = manifest?.source || {};
   const shown = typeof remote === "string" ? redactRemote(remote) : null;
   const cannot = (problem) => ({ ok: false, code: "UNVERIFIABLE", commit, remote: shown, protectedBy: [], problems: [problem] });

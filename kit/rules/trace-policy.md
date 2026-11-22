@@ -357,6 +357,10 @@ debate stage (critic panel + skeptic already is one).
 - `git apply --numstat -z <patch>` names only the destination of a rename/copy; union it
   with `git apply --numstat -z -R <patch>` to see both sides (`loop-setup denylist-check`
   does).
+- Node runs a script from its realpath (`import.meta.url`), so an installed kit's `KIT_ROOT` drops any
+  symlink in the Claude home's path, while the installer writes every path with the home's spelling
+  as given (`$CLAUDE_CONFIG_DIR`, or `HOME/.claude`): `verify-kit` renders the expected install with
+  the caller's spelling when it resolves to the kit's own home.
 - `git apply` reads a mode leniently (`new file mode 0120000` or `new file mode  120000` is a
   symlink), and a patch that retargets an existing symlink says so only on its `index … 120000`
   line: the denylist's mode rule (`diffModeHits`) counts a mode as regular only when it is exactly

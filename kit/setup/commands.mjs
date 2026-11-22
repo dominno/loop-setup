@@ -178,7 +178,7 @@ export async function runLifecycle(cmd, argv) {
       return w.ok ? 0 : 2;
     }
     if (cmd === "verify-kit") {
-      const r = verifyKit({ installedShim: join(loopHome(claudeHomeOf(env)), "bin", "loop-setup"), projectRoot: gitOut(process.cwd(), ["rev-parse", "--show-toplevel"]) });
+      const r = verifyKit({ claudeHome: claudeHomeOf(env), installedShim: join(loopHome(claudeHomeOf(env)), "bin", "loop-setup"), projectRoot: gitOut(process.cwd(), ["rev-parse", "--show-toplevel"]) });
       if (json) print(r, true);
       else if (r.ok) print(`verify-kit: ok — the installed kit (${KIT_ROOT}) matches ${r.commit.slice(0, 12)} (on ${r.protectedBy.join(", ")}) of ${r.remote}: ${r.checked.files} files, ${r.checked.commands} commands, ${r.checked.settings} owned settings entries`);
       else print(`verify-kit: ${r.code === "TAMPERED" ? "TAMPERED" : "cannot verify"} — ${r.problems.length} problem(s)\n${r.problems.map((p) => `  - ${p}`).join("\n")}`);
