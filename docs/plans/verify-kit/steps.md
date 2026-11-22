@@ -16,6 +16,14 @@ failure; settings extras are out of scope), TR-cca8b27e0ce1 (qualify: record the
 other than `kit` or a directory install cannot be verified, exit 2), TR-90c5f02cec46 (qualify, minor:
 a loopback git-proxy URL can go stale — held, listed as a remaining risk).
 
+Post-implementation rounds: round 1 (tree 210210f96daec933) confirmed TR-9fa2ebddf867, fixed in S06.1
+and CLEARed; round 2 (tree e073ac91beba5afc) accept, nothing confirmed, deferred or revised. CLEARed:
+TR-9fa2ebddf867, TR-63dca6bb69d1, TR-cca8b27e0ce1; HOLD: TR-5f8cec37a385 (revise, repair applied),
+TR-90c5f02cec46 (left by design). Nice-to-haves recorded, not acted on: an unencoded `@` inside an
+http(s) credential leaves its tail in the recorded URL; `kitInProject()` decides by path containment
+(also for the cwd fallback) rather than by the project's git; no cli.test case for `--level` on the
+in-project path; the stricter `--level` default is a CLI change worth a release note.
+
 Layers: **core** = `kit/setup/kittree.mjs` (install contract) and `kit/setup/integrity.mjs` (decisions);
 **driven adapters** = `kit/setup/kitremote.mjs` (the remote, in a temporary repository) and
 `kit/setup/verifykit.mjs` (installed files and settings, and the use case); **driving adapters** =
@@ -28,8 +36,8 @@ Layers: **core** = `kit/setup/kittree.mjs` (install contract) and `kit/setup/int
 | S03 | Adapters and the `verify-kit` command: the remote in a fresh temporary bare repo (hardened git env, insteadOf refusal, timeouts), the installed state, exit 0/1/2 | kit/setup/kitremote.mjs, kit/setup/verifykit.mjs, kit/setup/commands.mjs, kit/bin/loop-setup.mjs, kit/setup/verifykit.test.mjs | `pnpm exec vitest run kit/setup/verifykit.test.mjs` | S02 | done | 84f6395 |
 | S04 | Gates: `--level` on `denylist-check` and `plan-items` (L2/L3/undeclared refuse, L1 warns) for an installed kit; the lifecycle fixture gets a bare origin | kit/trace/cli.mjs, kit/setup/verifykit.test.mjs, kit/setup/lifecycle.test.mjs | `pnpm exec vitest run kit/setup` | S03 | done | 84f6395 |
 | S05 | Docs: loop.md step 10 passes `--level`; command help and usage; README and planning guide; remaining risks | kit/loop.md, kit/trace/cli.mjs, kit/setup/commands.mjs, README.md, kit/docs/planning-guide.md, docs/plans/verify-kit/steps.md | `pnpm test` | S04 | done | 84f6395 |
-| S06 | Self-verify chain and the post-implementation critic round | — | `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | S05 | in-progress |  |
-| S06.1 | Post-implementation round TR-9fa2ebddf867 (accept): `redactRemote` kept a token used as the user name of an https origin, so a PAT reached installed.json and verify-kit output — drop all http(s) userinfo, keep an ssh user name, drop any password | kit/setup/integrity.mjs, kit/setup/integrity.test.mjs, kit/setup/verifykit.test.mjs | `pnpm exec vitest run kit/setup/integrity.test.mjs kit/setup/verifykit.test.mjs` | S06 | in-progress |  |
+| S06 | Self-verify chain and the post-implementation critic round | — | `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e` | S05 | done | 49aaf74 |
+| S06.1 | Post-implementation round TR-9fa2ebddf867 (accept): `redactRemote` kept a token used as the user name of an https origin, so a PAT reached installed.json and verify-kit output — drop all http(s) userinfo, keep an ssh user name, drop any password | kit/setup/integrity.mjs, kit/setup/integrity.test.mjs, kit/setup/verifykit.test.mjs | `pnpm exec vitest run kit/setup/integrity.test.mjs kit/setup/verifykit.test.mjs` | S06 | done | 49aaf74 |
 
 ## Remaining risks (by design)
 
