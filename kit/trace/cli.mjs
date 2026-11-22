@@ -12,7 +12,7 @@ import { claudeHomeOf, layoutError } from "../setup/facts.mjs";
 import { postureSummary, sandboxPosture, withSandbox } from "../setup/sandbox.mjs";
 import { settingsSources } from "../setup/settings.mjs";
 import { anchorPaths, evidenceHome } from "../setup/layout.mjs";
-import { anchorAdvanced, anchorReport, storeKey, unwritable, withStoreLock, writerId } from "../setup/anchors.mjs";
+import { anchorAdvanced, anchorReport, ensureAnchors, storeKey, unwritable, withStoreLock, writerId } from "../setup/anchors.mjs";
 import { verifiedKitFile } from "../setup/kitfiles.mjs";
 import { kitGate, parseLevel } from "../setup/integrity.mjs";
 import { verifyKit } from "../setup/verifykit.mjs";
@@ -333,6 +333,7 @@ export async function main(argv = process.argv.slice(2)) {
         if (!w) {
           try {
             w = writerId(claudeHome, key, { create: true });
+            ensureAnchors(claudeHome, key); // a writer id always comes with its anchors file, whatever the write does
           } catch (e) {
             if (!unwritable(e)) throw e;
           }

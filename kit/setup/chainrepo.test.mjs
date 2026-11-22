@@ -261,6 +261,18 @@ describe("anchors: SessionStart checkpoints every stream; a dropped count is cau
     ok(lint(home, proj));
   });
 
+  it("a rejected first write on a fresh home (an explicit --store) leaves a writer id and an anchors file, so lint stays green", () => {
+    const fresh = mkHome("fresh");
+    const store = join(T, "scratch-store.jsonl");
+    const bad = run(fresh, T, ["write", "-", "--store", store], JSON.stringify({ bad: 1 }));
+    expect(bad.status).toBe(1);
+    const l = run(fresh, T, ["lint", "--store", store]);
+    expect(l.status, l.stdout + l.stderr).toBe(0);
+    const withCommit = JSON.stringify({ ...JSON.parse(draft("demo:scratch")), provenance: { workflow: "test", commit: "abc1234def56" } }); // T is no git repo
+    ok(run(fresh, T, ["write", "-", "--store", store], withCommit));
+    ok(run(fresh, T, ["lint", "--store", store]));
+  });
+
   it("two concurrent writes on one machine share the lock: both stored, the chain intact", async () => {
     const [r1, r2] = await Promise.all([runAsync(home, proj, ["write", "-"], draft("demo:par-1")), runAsync(home, proj, ["write", "-"], draft("demo:par-2"))]);
     expect(r1.status, r1.out).toBe(0);
